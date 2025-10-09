@@ -5,6 +5,7 @@ export default function AdminLogin() {
         <div>
             <h2>Admin Login Page</h2>
             {/* Add your login form here */}
+            
         </div>
     )
 }
