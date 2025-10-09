@@ -4,21 +4,23 @@ import AppShell from "./layout/Appshell";
 import AdminAppShell from "./views/Admin/layout/AdminAppShell";
 import AdminLogin from "./views/Admin/AdminAuth/AdminLogin";
 import Login from "./views/Auth/login";
+import AdminDashboard from "./views/Admin/Dashboard";
 
 const router = createHashRouter([
     {
         path: "/",
         element: <AppShell />,
         children: [
-            { path: "", element:<Login /> },
-            { path: "dashboard", element: <div>Dashboard Page</div> }
+            { path: "", element: <Login /> },
+         
         ]
     },
     {
         path: "/admin",
         element: <AdminAppShell />,
         children: [
-            { path: "login", element: <AdminLogin /> }
+            { path: "login", element: <AdminLogin /> },
+            { path: "dashboard", element: <AdminDashboard /> }
         ]
     }
 

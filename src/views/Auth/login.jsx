@@ -29,7 +29,7 @@ export default function Login() {
         });
 
         setTimeout(() => {
-          navigate("/dashboard");
+          navigate("/admin/dashboard");
         }, 1200);
       }, 800);
     },
