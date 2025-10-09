@@ -13,13 +13,13 @@ export default function AdminSidebar() {
 
   const menuItems = [
     { name: "Dashboard", path: "/admin/dashboard" },
-    { name: "Products", path: "/admin/products" },
-    { name: "Stories", path: "/admin/stories" },
+    { name: "Manage School", path: "/admin/ManageSchool" },
+    { name: "Manage Students", path: "/admin/ManageStudents" },
     // { name: "Orders", path: "/admin/orders" },
     // { name: "Users", path: "/admin/users" },
-    { name: "Shops", path: "/admin/shops" },
-    { name: "Product Categories", path: "/admin/categories" },
-    { name: "Story Categories", path: "/admin/story-categories" },
+    { name: "Tables", path: "/admin/Tables" },
+    { name: "Notifications", path: "/admin/Notifications" },
+    { name: "Reports", path: "/admin/Reports" },
     // { name: "Profile", path: "/admin/profile" },
   ];
 
