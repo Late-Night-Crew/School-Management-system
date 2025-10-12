@@ -1,0 +1,21 @@
+enviroment: DEVELOPMENT
+platform: LOCAL
+
+database:
+  host: localhost
+  port: 5432
+  database: "nsms"
+  username: "postgres"
+  password: "parrot1234"
+
+
+storage:
+ type: "s3"
+ localStorage:
+   rootDirectory: ./data
+   enabled: true
+
+logging:
+  log_file: ./data/NSMS.log 
+  log_level: debug
+  
