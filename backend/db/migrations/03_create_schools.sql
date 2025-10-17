@@ -2,6 +2,7 @@
 CREATE TABLE IF NOT EXISTS schools (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
+    school_number VARCHAR(100) NOT NULL,
     district_id INT NOT NULL REFERENCES districts(id) ON DELETE CASCADE,
     UNIQUE(name, district_id)
 );
