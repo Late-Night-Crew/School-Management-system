@@ -2,6 +2,7 @@ import React from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import AdminSidebar from "./AdminSIdebar";
 
+
 export default function AdminAppShell() {
     const location = useLocation();
     const hideSidebar =

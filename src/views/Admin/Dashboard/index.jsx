@@ -21,6 +21,12 @@ export default function AdminDashboard() {
       { form: "Form 3", total: 310, males: 170, females: 140 },
       { form: "Form 4", total: 310, males: 155, females: 155 },
     ],
+
+    totalTeachersCountrywide: 150,
+    totalSchoolsouthernDivision: 250,
+    totalSchoolsCentralDivision: 300,
+    totalSchoolNorthernDivision: 200,
+
     universitySelected: { total: 250, males: 140, females: 110 },
   };
 
@@ -54,14 +60,13 @@ export default function AdminDashboard() {
 
   return (
     <div className="p-4">
-      {/* ✅ Top Section */}
-      <div className="container-fluid bg-primary text-white rounded-3 shadow-sm p-3 mb-4">
-        <h2 className="text-center fw-bold">Admin Dashboard
-        </h2>
-        <p className="text-center mb-0">Overview of Students and School Statistics</p>
+       {/*  Top Section */}
+      <div className="container-fluid bg-primary text-white rounded-3 shadow-sm p-2 mb-3">
+        <h4 className="text-center fw-bold mb-1">Admin Dashboard</h4>
+        <p className="text-center mb-0 small">Overview of Students and School Statistics</p>
       </div>
 
-      {/* ✅ Scrollable Section */}
+      {/*  Scrollable Section */}
       <section className="overflow-auto" style={{ maxHeight: "75vh", paddingBottom: "1rem" }}>
         <div className="container mb-4">
           <div className="row g-3">
@@ -76,6 +81,27 @@ export default function AdminDashboard() {
                 </div>
               </div>
             </div>
+
+              {/*total schoolscountrywide, totalschoolsSouthernDivision, centraldivision and notherndivision*/}
+            <div className="col-md-4">
+              <div className="card shadow-sm border-0">
+                <div className="card-body text-center">
+                  <h5 className="fw-bold text-success ">
+                    <i className="bi bi-building-fill me-2"></i>Total Schools Countrywide
+                  </h5>
+                  <h2 className="fw-bolder m-0" style={{fontSize: "1.5rem"}}>{stats.totalSchoolsouthernDivision + stats.totalSchoolsCentralDivision + stats.totalSchoolNorthernDivision}</h2>
+                   <strong style={{ fontSize: "0.85rem", margin: 0, padding: 0 }}>
+                   <span className=" text-muted d-flex justify-content-center">
+                    
+                     <p className=" text-muted">Southern{stats.totalSchoolsouthernDivision}</p> | <p className=" text-muted">Central {stats.totalSchoolsCentralDivision}</p> | <p className="mb-1 text-muted">Northern {stats.totalSchoolNorthernDivision}</p>
+                     
+                    </span>
+                    </strong>
+                    
+                </div>
+                 </div>
+            </div>
+           
 
             {/* Forms */}
             {stats.forms.map((form, index) => (
