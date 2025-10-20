@@ -28,21 +28,15 @@ export default function Login() {
       setAlert(null);
 
       try {
-        // 🔥 Call the real API
         await AuthService.login(values.email, values.password);
-
-        // ✅ Show success message
         setAlert({
           type: "success",
           message: "Login successful! Redirecting...",
         });
-
-        // Redirect to dashboard after a short delay
         setTimeout(() => {
           navigate("/admin/dashboard");
         }, 1000);
       } catch (error) {
-        // ❌ Show error message
         setAlert({
           type: "danger",
           message: error.message || "Login failed. Please try again.",
