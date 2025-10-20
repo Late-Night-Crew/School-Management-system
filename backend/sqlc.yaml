@@ -1,0 +1,25 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    queries: "query.sql"
+    schema: "db/migrations"
+    gen:
+      go:
+        package: "dbsqlc"
+        out: "database/dbsqlc"
+        overrides:
+          # 1️⃣ Map PostgreSQL UUID type to Go's github.com/google/uuid.UUID
+          - db_type: "uuid"
+            go_type: "github.com/google/uuid.UUID"
+
+          # 2️⃣ Map PostgreSQL numeric type to Go's float64
+          - db_type: "numeric"
+            go_type: "float64"
+
+          # 3️⃣ Map PostgreSQL timestamptz to Go's time.Time
+          - db_type: "timestamptz"
+            go_type: "time.Time"
+
+          # 4️⃣ Map a specific column to a custom Go type
+          - column: "users.email"
+            go_type: "string"
