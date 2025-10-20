@@ -8,15 +8,21 @@ export default function AdminSidebar({ role = "admin" }) {
 
   // Common menu items for all roles
   const commonItems = [
-    { name: "Dashboard", path: "/dashboard", icon: "bi-speedometer2" },
+    { name: "Dashboard", path: "/admin/dashboard", icon: "bi-speedometer2" },
     { name: "Notifications", path: "/notifications", icon: "bi-bell", badge: 6 },
   ];
 
   // Role-specific menu sets
   const roleMenus = {
     admin: [
+      
+      
+      { name: "Manage Division", path: "/admin/managedivision", icon: "bi-building" },
+      { name: "Manage District", path: "/admin/managedistrict", icon: "bi-building" },
+      { name: "Manage Schools", path: "/admin/manageschool", icon: "bi-building" },
       { name: "Manage Users", path: "/admin/users", icon: "bi-people" },
-      { name: "Manage Schools", path: "/admin/manageschools", icon: "bi-building" },
+      {name: "Manage Students", path: "/admin/managestudents", icon: "bi-person-lines-fill" },
+      {name: "Academic Performance", path: "/admin/Accademicperformance", icon: "bi-bar-chart" },
       { name: "Reports", path: "/admin/reports", icon: "bi-file-earmark-text" },
       { name: "Settings", path: "/admin/settings", icon: "bi-gear" },
     ],

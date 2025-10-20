@@ -1,11 +1,5 @@
-//import React, { useState } from "react";
-import "bootstrap/dist/css/bootstrap.min.css";
-import {
-  PencilSquare,
-  TrashFill,
-  PlusCircle,
-  ArrowCounterclockwise,
-} from "react-bootstrap-icons";
+import React, { useState } from "react";
+
 
 export default function Accademicperformance() {
   
