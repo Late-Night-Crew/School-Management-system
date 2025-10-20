@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import * as Yup from "yup";
 import { useFormik } from "formik";
+import AuthService from "../Admin/services/auth";
 import { useNavigate } from "react-router-dom";
 
 export default function Login() {
@@ -8,8 +9,12 @@ export default function Login() {
   const navigate = useNavigate();
 
   const validateSchema = Yup.object({
-    email: Yup.string().email("Invalid email format").required("Email is required"),
-    password: Yup.string().min(6, "Minimum 6 characters").required("Password is required"),
+    email: Yup.string()
+      .email("Invalid email format")
+      .required("Email is required"),
+    password: Yup.string()
+      .min(6, "Minimum 6 characters")
+      .required("Password is required"),
   });
 
   const formik = useFormik({
@@ -20,18 +25,31 @@ export default function Login() {
     validationSchema: validateSchema,
     onSubmit: async (values, { setSubmitting }) => {
       setSubmitting(true);
+      setAlert(null);
 
-      // Fake delay for better UX
-      setTimeout(() => {
+      try {
+        // 🔥 Call the real API
+        await AuthService.login(values.email, values.password);
+
+        // ✅ Show success message
         setAlert({
           type: "success",
-          message: "Login successful! Loading...",
+          message: "Login successful! Redirecting...",
         });
 
+        // Redirect to dashboard after a short delay
         setTimeout(() => {
           navigate("/admin/dashboard");
-        }, 1200);
-      }, 800);
+        }, 1000);
+      } catch (error) {
+        // ❌ Show error message
+        setAlert({
+          type: "danger",
+          message: error.message || "Login failed. Please try again.",
+        });
+      } finally {
+        setSubmitting(false);
+      }
     },
   });
 
@@ -58,7 +76,10 @@ export default function Login() {
         </div>
 
         <h3 className="text-center mb-4 text-primary fw-bold">Login</h3>
-         <p className="text-center muted">Open Day Secondary School Management</p>
+        <p className="text-center text-muted">
+          Open Day Secondary School Management
+        </p>
+
         {alert && (
           <div
             className={`alert alert-${alert.type} text-center py-2`}

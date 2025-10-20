@@ -1,15 +1,15 @@
 import React from "react";
-import { Link, useLocation, } from "react-router-dom";
-// import { AUTH_TOKEN_KEY } from "../constants/storageKeys";
+import { Link, useLocation, useNavigate} from "react-router-dom";
+import { AUTH_TOKEN_KEY } from "../../constants/storageKeys";
 
 export default function AdminSidebar() {
   const location = useLocation();
-//   const navigate = useNavigate();
+  const navigate = useNavigate();
 
-//   const handleLogout = () => {
-//     localStorage.removeItem(AUTH_TOKEN_KEY);
-//     navigate("/admin/login");
-//   };
+  const handleLogout = () => {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    navigate("/");
+  };
 
   const menuItems = [
     { name: "Dashboard", path: "/admin/dashboard" },
@@ -22,6 +22,7 @@ export default function AdminSidebar() {
     { name: "Story Categories", path: "/admin/story-categories" },
     // { name: "Profile", path: "/admin/profile" },
   ];
+
 
   return (
     <aside
@@ -55,7 +56,7 @@ export default function AdminSidebar() {
       {/* Logout Button */}
       <div className="border-top border-secondary mt-auto">
         <button
-        //   onClick={handleLogout}
+          onClick={handleLogout}
           className="btn btn-danger w-100 rounded-0 py-3 fw-semibold"
         >
           Logout
