@@ -6,7 +6,18 @@ package dbsqlc
 
 import (
 	"database/sql"
+	"time"
 )
+
+type AcademicYear struct {
+	ID        int32
+	Year      int32
+	StartDate time.Time
+	EndDate   time.Time
+	Status    sql.NullString
+	CreatedAt sql.NullTime
+	UpdatedAt sql.NullTime
+}
 
 type District struct {
 	ID       int32
@@ -15,11 +26,11 @@ type District struct {
 }
 
 type ExamResult struct {
-	ID           int32
-	SchoolID     int32
-	Year         int32
-	JcePassRate  sql.NullString
-	MscePassRate sql.NullString
+	ID             int32
+	SchoolID       int32
+	AcademicYearID int32
+	JcePassRate    sql.NullString
+	MscePassRate   sql.NullString
 }
 
 type Region struct {
@@ -28,9 +39,10 @@ type Region struct {
 }
 
 type School struct {
-	ID         int32
-	Name       string
-	DistrictID int32
+	ID           int32
+	Name         string
+	SchoolNumber string
+	DistrictID   int32
 }
 
 type Student struct {
@@ -45,6 +57,7 @@ type Student struct {
 	FormLevel      sql.NullInt32
 	Status         sql.NullString
 	SchoolID       int32
+	AcademicYearID sql.NullInt32
 	CreatedAt      sql.NullTime
 }
 
@@ -61,8 +74,8 @@ type Transfer struct {
 type User struct {
 	ID           int32
 	Name         string
-	Email        string
 	DisplayName  string
+	Email        string
 	Password     string
 	Role         string
 	RegionID     sql.NullInt32

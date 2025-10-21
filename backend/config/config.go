@@ -13,6 +13,7 @@ type Config struct {
 	Environment string                  `mapstructure:"environment" default:"DEVELOPMENT"`
 	Server      HTTPServerConfiguration `mapstructure:"server"`
 	Database    DatabaseConfiguration
+	Admin       AdminConfiguration   `mapstructure:"admin"`
 	Logging     LoggingConfiguration `mapstructure:"logging"`
 	Storage     StorageConfiguration `mapstructure:"storage"`
 	Auth        AuthConfiguration    `mapstructure:"auth"`
@@ -33,6 +34,12 @@ type HTTPServerConfiguration struct {
 	FQDN string `mapstructure:"fqdn" envconfig:"KWACHAKONVERTERS_SERVER_FQDN"`
 	Host string `mapstructure:"host" envconfig:"KWACHAKONVERTERS_SERVER_HOST"`
 	Port int    `mapstructure:"port" envconfig:"KWACHAKONVERTERS_SERVER_PORT"`
+}
+type AdminConfiguration struct {
+	Username string `mapstructure:"username" envconfig:"KWACHAKONVERTERS_ADMIN_USERNAME"`
+	Password string `mapstructure:"password" envconfig:"KWACHAKONVERTERS_ADMIN_PASSWORD"`
+	Email    string `mapstructure:"email" envconfig:"KWACHAKONVERTERS_ADMIN_EMAIL"`
+	Enabled  bool   `mapstructure:"enabled" envconfig:"KWACHAKONVERTERS_ADMIN_ENABLED"`
 }
 
 type AuthConfiguration struct {

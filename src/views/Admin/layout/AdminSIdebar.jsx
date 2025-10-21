@@ -1,18 +1,20 @@
 import React, { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { AUTH_TOKEN_KEY } from "../../constants/storageKeys";
 import "bootstrap-icons/font/bootstrap-icons.css";
 
 export default function AdminSidebar({ role = "admin" }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
-  // Common menu items for all roles
+  // Common menu items
   const commonItems = [
     { name: "Dashboard", path: "/dashboard", icon: "bi-speedometer2" },
     { name: "Notifications", path: "/notifications", icon: "bi-bell", badge: 6 },
   ];
 
-  // Role-specific menu sets
+  // Role-specific menus
   const roleMenus = {
     admin: [
       { name: "Manage Users", path: "/admin/users", icon: "bi-people" },
@@ -39,8 +41,13 @@ export default function AdminSidebar({ role = "admin" }) {
   const menuItems = [
     ...commonItems,
     ...(roleMenus[role] || []),
-    { name: "Logout", path: "/logout", icon: "bi-box-arrow-right" },
   ];
+
+  // Logout handler
+  const handleLogout = () => {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    navigate("/", { replace: true });
+  };
 
   return (
     <>
@@ -92,9 +99,7 @@ export default function AdminSidebar({ role = "admin" }) {
                   <Link
                     to={item.path}
                     className={`nav-link d-flex align-items-center justify-content-between px-3 py-2 rounded ${
-                      isActive
-                        ? "bg-primary text-white"
-                        : "text-light hover-effect"
+                      isActive ? "bg-primary text-white" : "text-light hover-effect"
                     }`}
                     style={{
                       transition: "all 0.2s",
@@ -104,10 +109,7 @@ export default function AdminSidebar({ role = "admin" }) {
                     onClick={() => setIsMobileOpen(false)}
                   >
                     <div className="d-flex align-items-center">
-                      <i
-                        className={`bi ${item.icon}`}
-                        style={{ fontSize: "1.1rem" }}
-                      ></i>
+                      <i className={`bi ${item.icon}`} style={{ fontSize: "1.1rem" }}></i>
                       <span className="ms-3">{item.name}</span>
                     </div>
                     {item.badge && (
@@ -119,6 +121,21 @@ export default function AdminSidebar({ role = "admin" }) {
                 </li>
               );
             })}
+
+            {/* Logout button */}
+            <li className="nav-item mb-1">
+              <button
+                onClick={handleLogout}
+                className="nav-link w-100 text-start d-flex align-items-center px-3 py-2 rounded text-light hover-effect border-0 bg-transparent"
+                style={{
+                  transition: "all 0.2s",
+                  fontSize: "0.9rem",
+                }}
+              >
+                <i className="bi bi-box-arrow-right" style={{ fontSize: "1.1rem" }}></i>
+                <span className="ms-3">Logout</span>
+              </button>
+            </li>
           </ul>
         </nav>
 
