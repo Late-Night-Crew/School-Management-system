@@ -8,25 +8,28 @@ export default function AdminSidebar({ role = "admin" }) {
 
   // Common menu items for all roles
   const commonItems = [
-    { name: "Dashboard", path: "/dashboard", icon: "bi-speedometer2" },
-    { name: "Notifications", path: "/notifications", icon: "bi-bell", badge: 6 },
+    { name: "Dashboard", path: "/admin/dashboard", icon: "bi-speedometer2" },
   ];
 
   // Role-specific menu sets
   const roleMenus = {
     admin: [
-      { name: "Manage Users", path: "/admin/users", icon: "bi-people" },
+      
+      {name: "Manage Divisions", path: "/admin/managedivisions", icon: "bi-diagram-3" },
+      {name: "manage Districts", path: "/admin/managedistricts", icon: "bi-geo-alt" },
       { name: "Manage Schools", path: "/admin/manageschools", icon: "bi-building" },
+      { name: "Manage Users", path: "/admin/users", icon: "bi-people" },
+      {name: "Notice", path: "/admin/notices", icon: "bi-info-square" },
       { name: "Reports", path: "/admin/reports", icon: "bi-file-earmark-text" },
       { name: "Settings", path: "/admin/settings", icon: "bi-gear" },
     ],
-    regional: [
+    region_admin: [
       { name: "Schools", path: "/regional/schools", icon: "bi-building" },
       { name: "Transfer Requests", path: "/regional/transfers", icon: "bi-arrow-left-right" },
       { name: "Reports", path: "/regional/reports", icon: "bi-file-earmark-text" },
       { name: "Settings", path: "/regional/settings", icon: "bi-gear" },
     ],
-    school: [
+    school_admin: [
       { name: "Register Learners", path: "/school/register", icon: "bi-person-plus" },
       { name: "Performance", path: "/school/performance", icon: "bi-bar-chart" },
       { name: "Transfers", path: "/school/transfers", icon: "bi-arrow-left-right" },
@@ -39,6 +42,8 @@ export default function AdminSidebar({ role = "admin" }) {
   const menuItems = [
     ...commonItems,
     ...(roleMenus[role] || []),
+    
+    { name: "Notifications", path: "/notifications", icon: "bi-bell", badge: 6 },
     { name: "Logout", path: "/logout", icon: "bi-box-arrow-right" },
   ];
 
