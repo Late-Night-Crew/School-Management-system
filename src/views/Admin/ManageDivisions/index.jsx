@@ -1,77 +1,109 @@
-import React, { useState } from "react";
-import { Modal, Button, Form, Table } from "react-bootstrap";
-import "bootstrap/dist/css/bootstrap.min.css";
-import "bootstrap-icons/font/bootstrap-icons.css";
+import React, { useEffect, useState } from "react";
+import { Modal, Button, Form, Table, Spinner } from "react-bootstrap";
+import {
+  fetchregions,
+  fetchregionDetails,
+  deleteregion,
+  updateregion,
+  createregion
+} from "../services/divisionService";
 
 export default function DivisionManagement() {
   const [searchTerm, setSearchTerm] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [editingDivision, setEditingDivision] = useState(null);
-  const [divisions, setDivisions] = useState([
-    { id: 1, name: "Northern Division", },
-    { id: 2, name: "Central Division", },
-    { id: 3, name: "Southern Division" },
-  ]);
+  const [regions, setRegions] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const [formData, setFormData] = useState({
     name: "",
   });
 
-  // Open modal (Add/Edit)
-  const handleShowModal = (division = null) => {
+  useEffect(() => {
+    loadRegions();
+  }, []);
+
+  const loadRegions = async () => {
+    try {
+      setLoading(true);
+      const data = await fetchregions();
+      setRegions(data || []);
+    } catch (error) {
+      console.error("Error fetching regions:", error);
+      alert("Failed to load divisions.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleShowModal = async (division = null) => {
     if (division) {
-      setEditingDivision(division);
-      setFormData({
-        name: division.name,
-      });
+      try {
+        const details = await fetchregionDetails(division.id);
+        setEditingDivision(division);
+        setFormData({ name: details?.name || division.name });
+      } catch (err) {
+        console.error("Failed to fetch details:", err);
+        alert("Could not fetch division details.");
+      }
     } else {
       setEditingDivision(null);
-      setFormData({
-        name: "",
-      });
+      setFormData({ name: "" });
     }
     setShowModal(true);
   };
 
-  // Close modal
   const handleCloseModal = () => {
     setShowModal(false);
     setEditingDivision(null);
   };
 
-  // Save Division
-  const handleSaveDivision = () => {
-    if (!formData.name) {
-      alert("Please fill the name fields.");
+  const handleSaveDivision = async () => {
+    if (!formData.name.trim()) {
+      alert("Please fill in the name field.");
       return;
     }
 
-    if (editingDivision) {
-      setDivisions(
-        divisions.map((div) =>
-          div.id === editingDivision.id ? { ...div, ...formData } : div
-        )
-      );
-    } else {
-      const newDivision = {
-        id: Date.now(),
-        ...formData,
-      };
-      setDivisions([...divisions, newDivision]);
+    try {
+      setSaving(true);
+
+      if (editingDivision) {
+        await updateregion(editingDivision.id, formData);
+        setRegions((prev) =>
+          prev.map((r) =>
+            r.id === editingDivision.id ? { ...r, ...formData } : r
+          )
+        );
+      } else {
+        const newRegion = await createregion(formData);
+        setRegions((prev) => [...prev, newRegion]);
+      }
+
+      handleCloseModal();
+    } catch (error) {
+      console.error("Error saving division:", error);
+      alert("Failed to save division.");
+    } finally {
+      setSaving(false);
     }
-    handleCloseModal();
   };
 
-  // Delete Division
-  const handleDeleteDivision = (id) => {
-    if (window.confirm("Are you sure you want to delete this division?")) {
-      setDivisions(divisions.filter((div) => div.id !== id));
+  const handleDeleteDivision = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this division?"))
+      return;
+
+    try {
+      await deleteregion(id);
+      setRegions((prev) => prev.filter((r) => r.id !== id));
+    } catch (error) {
+      console.error("Error deleting division:", error);
+      alert("Failed to delete division.");
     }
   };
 
-  // Filter Divisions
-  const filteredDivisions = divisions.filter((division) =>
-    division.name.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredRegions = regions.filter((r) =>
+    r.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
@@ -99,48 +131,55 @@ export default function DivisionManagement() {
       </div>
 
       {/* Division Table */}
-      <Table hover responsive bordered className="shadow-sm">
-        <thead className="table-light">
-          <tr>
-            <th>#</th>
-            <th>Division Name</th>
-            <th className="text-center">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {filteredDivisions.length > 0 ? (
-            filteredDivisions.map((division, index) => (
-              <tr key={division.id}>
-                <td>{index + 1}</td>
-                <td>{division.name}</td>
-                <td className="text-center">
-                  <Button
-                    variant="outline-primary"
-                    size="sm"
-                    className="me-2"
-                    onClick={() => handleShowModal(division)}
-                  >
-                    <i className="bi bi-pencil-square"></i>
-                  </Button>
-                  <Button
-                    variant="outline-danger"
-                    size="sm"
-                    onClick={() => handleDeleteDivision(division.id)}
-                  >
-                    <i className="bi bi-trash"></i>
-                  </Button>
+      {loading ? (
+        <div className="text-center my-4">
+          <Spinner animation="border" />
+          <p className="mt-2 text-muted">Loading divisions...</p>
+        </div>
+      ) : (
+        <Table hover responsive bordered className="shadow-sm">
+          <thead className="table-light">
+            <tr>
+              <th>#</th>
+              <th>Division Name</th>
+              <th className="text-center">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredRegions.length > 0 ? (
+              filteredRegions.map((region, index) => (
+                <tr key={region.id}>
+                  <td>{index + 1}</td>
+                  <td>{region.name}</td>
+                  <td className="text-center">
+                    <Button
+                      variant="outline-primary"
+                      size="sm"
+                      className="me-2"
+                      onClick={() => handleShowModal(region)}
+                    >
+                      <i className="bi bi-pencil-square"></i>
+                    </Button>
+                    <Button
+                      variant="outline-danger"
+                      size="sm"
+                      onClick={() => handleDeleteDivision(region.id)}
+                    >
+                      <i className="bi bi-trash"></i>
+                    </Button>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan="4" className="text-center text-muted">
+                  No regions found.
                 </td>
               </tr>
-            ))
-          ) : (
-            <tr>
-              <td colSpan="4" className="text-center text-muted">
-                No divisions found.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </Table>
+            )}
+          </tbody>
+        </Table>
+      )}
 
       {/* Add/Edit Modal */}
       <Modal show={showModal} onHide={handleCloseModal} centered>
@@ -162,16 +201,22 @@ export default function DivisionManagement() {
                 }
               />
             </Form.Group>
-
-            
           </Form>
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={handleCloseModal}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={handleSaveDivision}>
-            {editingDivision ? "Update" : "Save"}
+          <Button variant="primary" onClick={handleSaveDivision} disabled={saving}>
+            {saving ? (
+              <>
+                <Spinner animation="border" size="sm" className="me-2" /> Saving...
+              </>
+            ) : editingDivision ? (
+              "Update"
+            ) : (
+              "Save"
+            )}
           </Button>
         </Modal.Footer>
       </Modal>
