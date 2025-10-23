@@ -10,6 +10,37 @@ import (
 	"database/sql"
 )
 
+const createRegion = `-- name: CreateRegion :one
+INSERT INTO regions (name) VALUES ($1) RETURNING id, name
+`
+
+func (q *Queries) CreateRegion(ctx context.Context, name string) (Region, error) {
+	row := q.db.QueryRowContext(ctx, createRegion, name)
+	var i Region
+	err := row.Scan(&i.ID, &i.Name)
+	return i, err
+}
+
+const deleteRegion = `-- name: DeleteRegion :exec
+DELETE FROM regions WHERE id = $1
+`
+
+func (q *Queries) DeleteRegion(ctx context.Context, id int32) error {
+	_, err := q.db.ExecContext(ctx, deleteRegion, id)
+	return err
+}
+
+const findRegionById = `-- name: FindRegionById :one
+SELECT id, name FROM regions WHERE id = $1
+`
+
+func (q *Queries) FindRegionById(ctx context.Context, id int32) (Region, error) {
+	row := q.db.QueryRowContext(ctx, findRegionById, id)
+	var i Region
+	err := row.Scan(&i.ID, &i.Name)
+	return i, err
+}
+
 const findUserLoginByEmail = `-- name: FindUserLoginByEmail :one
 SELECT id, display_name, email, password, last_login_at FROM users WHERE email = $1 AND is_activated AND deleted_at IS NULL
 `
@@ -32,5 +63,48 @@ func (q *Queries) FindUserLoginByEmail(ctx context.Context, email string) (FindU
 		&i.Password,
 		&i.LastLoginAt,
 	)
+	return i, err
+}
+
+const listRegions = `-- name: ListRegions :many
+SELECT id, name FROM regions ORDER BY name
+`
+
+func (q *Queries) ListRegions(ctx context.Context) ([]Region, error) {
+	rows, err := q.db.QueryContext(ctx, listRegions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Region
+	for rows.Next() {
+		var i Region
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateRegion = `-- name: UpdateRegion :one
+UPDATE regions SET name = $2 WHERE id = $1 RETURNING id, name
+`
+
+type UpdateRegionParams struct {
+	ID   int32
+	Name string
+}
+
+func (q *Queries) UpdateRegion(ctx context.Context, arg UpdateRegionParams) (Region, error) {
+	row := q.db.QueryRowContext(ctx, updateRegion, arg.ID, arg.Name)
+	var i Region
+	err := row.Scan(&i.ID, &i.Name)
 	return i, err
 }
