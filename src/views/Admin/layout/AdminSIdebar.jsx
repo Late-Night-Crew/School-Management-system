@@ -1,34 +1,35 @@
 import React, { useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import { AUTH_TOKEN_KEY } from "../../constants/storageKeys";
+import { Link, useLocation } from "react-router-dom";
 import "bootstrap-icons/font/bootstrap-icons.css";
 
 export default function AdminSidebar({ role = "admin" }) {
   const location = useLocation();
-  const navigate = useNavigate();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
-  // Common menu items
+  // Common menu items for all roles
   const commonItems = [
-    { name: "Dashboard", path: "/dashboard", icon: "bi-speedometer2" },
-    { name: "Notifications", path: "/notifications", icon: "bi-bell", badge: 6 },
+    { name: "Dashboard", path: "/admin/dashboard", icon: "bi-speedometer2" },
   ];
 
-  // Role-specific menus
+  // Role-specific menu sets
   const roleMenus = {
     admin: [
-      { name: "Manage Users", path: "/admin/users", icon: "bi-people" },
+      
+      {name: "Manage Divisions", path: "/admin/managedivisions", icon: "bi-diagram-3" },
+      {name: "manage Districts", path: "/admin/managedistricts", icon: "bi-geo-alt" },
       { name: "Manage Schools", path: "/admin/manageschools", icon: "bi-building" },
+      { name: "Manage Users", path: "/admin/users", icon: "bi-people" },
+      {name: "Notice", path: "/admin/notices", icon: "bi-info-square" },
       { name: "Reports", path: "/admin/reports", icon: "bi-file-earmark-text" },
       { name: "Settings", path: "/admin/settings", icon: "bi-gear" },
     ],
-    regional: [
+    region_admin: [
       { name: "Schools", path: "/regional/schools", icon: "bi-building" },
       { name: "Transfer Requests", path: "/regional/transfers", icon: "bi-arrow-left-right" },
       { name: "Reports", path: "/regional/reports", icon: "bi-file-earmark-text" },
       { name: "Settings", path: "/regional/settings", icon: "bi-gear" },
     ],
-    school: [
+    school_admin: [
       { name: "Register Learners", path: "/school/register", icon: "bi-person-plus" },
       { name: "Performance", path: "/school/performance", icon: "bi-bar-chart" },
       { name: "Transfers", path: "/school/transfers", icon: "bi-arrow-left-right" },
@@ -41,13 +42,10 @@ export default function AdminSidebar({ role = "admin" }) {
   const menuItems = [
     ...commonItems,
     ...(roleMenus[role] || []),
+    
+    { name: "Notifications", path: "/notifications", icon: "bi-bell", badge: 6 },
+    { name: "Logout", path: "/logout", icon: "bi-box-arrow-right" },
   ];
-
-  // Logout handler
-  const handleLogout = () => {
-    localStorage.removeItem(AUTH_TOKEN_KEY);
-    navigate("/", { replace: true });
-  };
 
   return (
     <>
@@ -99,7 +97,9 @@ export default function AdminSidebar({ role = "admin" }) {
                   <Link
                     to={item.path}
                     className={`nav-link d-flex align-items-center justify-content-between px-3 py-2 rounded ${
-                      isActive ? "bg-primary text-white" : "text-light hover-effect"
+                      isActive
+                        ? "bg-primary text-white"
+                        : "text-light hover-effect"
                     }`}
                     style={{
                       transition: "all 0.2s",
@@ -109,7 +109,10 @@ export default function AdminSidebar({ role = "admin" }) {
                     onClick={() => setIsMobileOpen(false)}
                   >
                     <div className="d-flex align-items-center">
-                      <i className={`bi ${item.icon}`} style={{ fontSize: "1.1rem" }}></i>
+                      <i
+                        className={`bi ${item.icon}`}
+                        style={{ fontSize: "1.1rem" }}
+                      ></i>
                       <span className="ms-3">{item.name}</span>
                     </div>
                     {item.badge && (
@@ -121,21 +124,6 @@ export default function AdminSidebar({ role = "admin" }) {
                 </li>
               );
             })}
-
-            {/* Logout button */}
-            <li className="nav-item mb-1">
-              <button
-                onClick={handleLogout}
-                className="nav-link w-100 text-start d-flex align-items-center px-3 py-2 rounded text-light hover-effect border-0 bg-transparent"
-                style={{
-                  transition: "all 0.2s",
-                  fontSize: "0.9rem",
-                }}
-              >
-                <i className="bi bi-box-arrow-right" style={{ fontSize: "1.1rem" }}></i>
-                <span className="ms-3">Logout</span>
-              </button>
-            </li>
           </ul>
         </nav>
 
