@@ -5,6 +5,8 @@
 *.dll
 *.so
 *.dylib
+config.yaml
+
 
 # Build folders
 /backend/bin/

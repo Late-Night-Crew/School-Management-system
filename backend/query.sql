@@ -16,3 +16,280 @@ SELECT id, name FROM regions WHERE id = $1;
 
 -- name: UpdateRegion :one
 UPDATE regions SET name = $2 WHERE id = $1 RETURNING id, name;
+
+-- name: CreateDistrict :one
+INSERT INTO districts (name, region_id) VALUES ($1, $2) RETURNING id, name, region_id;
+
+-- name: ListDistricts :many
+SELECT id, name, region_id FROM districts ORDER BY name;
+
+-- name: DeleteDistrict :exec
+DELETE FROM districts WHERE id = $1;
+
+-- name: FindDistrictById :one
+SELECT id, name, region_id FROM districts WHERE id = $1;
+
+-- name: UpdateDistrict :one
+UPDATE districts SET name = $2, region_id = $3 WHERE id = $1 RETURNING id, name, region_id;
+
+-- name: ListDistrictsByRegionId :many
+SELECT id, name, region_id FROM districts WHERE region_id = $1 ORDER BY name;
+
+-- name: CreateSchool :one
+INSERT INTO schools (school_number, name, district_id)
+VALUES ($1, $2, $3)
+RETURNING id, school_number, name, district_id;
+
+-- name: ListSchools :many
+SELECT id, school_number, name, district_id
+FROM schools
+ORDER BY name;
+
+-- name: DeleteSchool :exec
+DELETE FROM schools
+WHERE id = $1;
+
+-- name: FindSchoolById :one
+SELECT id, school_number, name, district_id
+FROM schools
+WHERE id = $1;
+
+-- name: UpdateSchool :one
+UPDATE schools
+SET school_number = $2, name = $3, district_id = $4
+WHERE id = $1
+RETURNING id, school_number, name, district_id;
+
+-- name: ListSchoolsByDistrictId :many
+SELECT id, school_number, name, district_id
+FROM schools
+WHERE district_id = $1
+ORDER BY name;
+
+
+-- name: CreateUser :one
+INSERT INTO
+    users (
+        display_name,
+        email,
+        password,
+        role,
+        region_id,
+        district_id,
+        school_id,
+        is_super_admin
+    )
+VALUES
+    ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id,
+    display_name,
+    email,
+    role,
+    region_id,
+    district_id,
+    school_id,
+    is_super_admin,
+    last_login_at;
+
+-- name: ListUsers :many
+SELECT
+    id,
+    display_name,
+    email,
+    role,
+    region_id,
+    district_id,
+    school_id,
+    is_super_admin,
+    last_login_at
+FROM
+    users
+WHERE
+    deleted_at IS NULL
+ORDER BY
+    role;
+
+-- name: DeleteUser :exec
+UPDATE
+    users
+SET
+    deleted_at = NOW()
+WHERE
+    id = $1;
+
+-- name: FindUserById :one
+SELECT
+    id,
+    display_name,
+    email,
+    role,
+    region_id,
+    district_id,
+    school_id,
+    is_super_admin,
+    last_login_at
+FROM
+    users
+WHERE
+    id = $1
+    AND deleted_at IS NULL;
+
+-- name: UpdateUser :one
+UPDATE
+    users
+SET
+    display_name = $2,
+    email = $3,
+    role = $4,
+    region_id = $5,
+    district_id = $6,
+    school_id = $7,
+    is_super_admin = $8
+WHERE
+    id = $1
+    AND deleted_at IS NULL RETURNING id,
+    display_name,
+    email,
+    role,
+    region_id,
+    district_id,
+    school_id,
+    is_super_admin,
+    last_login_at;
+
+-- name: UpdateUserPassword :exec
+UPDATE
+    users
+SET
+    password = $2
+WHERE
+    id = $1
+    AND deleted_at IS NULL;
+
+-- name: CreateStudent :one
+INSERT INTO students (
+  student_number,
+  first_name,
+  last_name,
+  date_of_birth,
+  gender,
+  form_level,
+  guardian_name,
+  previous_school,
+  school_id,
+  academic_year_id,
+  status
+)
+VALUES (
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+)
+RETURNING
+  id,
+  student_number,
+  first_name,
+  last_name,
+  date_of_birth,
+  gender,
+  form_level,
+  guardian_name,
+  previous_school,
+  school_id,
+  academic_year_id,
+  status,
+  created_at,
+  updated_at;
+
+-- name: GetStudentByID :one
+SELECT
+  id,
+  student_number,
+  first_name,
+  last_name,
+  date_of_birth,
+  gender,
+  form_level,
+  guardian_name,
+  previous_school,
+  school_id,
+  academic_year_id,
+  status,
+  created_at,
+  updated_at
+FROM students
+WHERE id = $1;
+
+-- name: ListStudents :many
+SELECT
+  id,
+  student_number,
+  first_name,
+  last_name,
+  date_of_birth,
+  gender,
+  form_level,
+  guardian_name,
+  previous_school,
+  school_id,
+  academic_year_id,
+  status,
+  created_at,
+  updated_at
+FROM students
+ORDER BY id DESC
+LIMIT $1 OFFSET $2;
+
+-- name: UpdateStudent :one
+UPDATE students
+SET
+  student_number = $2,
+  first_name = $3,
+  last_name = $4,
+  date_of_birth = $5,
+  gender = $6,
+  form_level = $7,
+  guardian_name = $8,
+  previous_school = $9,
+  school_id = $10,
+  academic_year_id = $11,
+  status = $12,
+  updated_at = NOW()
+WHERE id = $1
+RETURNING
+  id,
+  student_number,
+  first_name,
+  last_name,
+  date_of_birth,
+  gender,
+  form_level,
+  guardian_name,
+  previous_school,
+  school_id,
+  academic_year_id,
+  status,
+  created_at,
+  updated_at;
+
+-- name: DeleteStudent :exec
+DELETE FROM students WHERE id = $1;
+
+
+
+-- name: GetStudentsBySchoolID :many
+SELECT
+  id,
+  student_number,
+  first_name,
+  last_name,
+  date_of_birth,
+  gender,
+  form_level,
+  guardian_name,
+  previous_school,
+  school_id,
+  academic_year_id,
+  status,
+  created_at,
+  updated_at
+FROM students
+WHERE school_id = $1
+ORDER BY last_name ASC, first_name ASC;

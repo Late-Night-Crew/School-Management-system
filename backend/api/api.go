@@ -14,6 +14,9 @@ type API struct {
 	Config        *config.Config
 	AuthService   services.AuthService
 	RegionService services.RegionService
+	DistrictService services.DistrictService
+	SchoolService services.SchoolService
+	StudentService services.StudentService
 }
 
 func NewAPI(config *config.Config) *API {
@@ -26,6 +29,9 @@ func NewAPI(config *config.Config) *API {
 		Config:      config,
 		AuthService: services.NewAuthService(&config.Auth, dbConn, logger),
 		RegionService: services.NewRegionService(dbConn, logger),
+		DistrictService: services.NewDistrictService(dbConn, logger),
+		SchoolService: services.NewSchoolService(dbConn, logger),
+		StudentService: services.NewStudentService(dbConn, logger),
 	}
 }
 

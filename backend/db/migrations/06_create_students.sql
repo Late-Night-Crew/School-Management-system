@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS students (
     status VARCHAR(50) DEFAULT 'Active',
     school_id INT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
     academic_year_id INT REFERENCES academic_years(id) ON DELETE SET NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_students_school_id ON students(school_id);

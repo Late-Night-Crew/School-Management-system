@@ -59,6 +59,7 @@ type Student struct {
 	SchoolID       int32
 	AcademicYearID sql.NullInt32
 	CreatedAt      sql.NullTime
+	UpdatedAt      sql.NullTime
 }
 
 type Transfer struct {
