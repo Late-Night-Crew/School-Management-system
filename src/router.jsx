@@ -11,7 +11,6 @@ import ManageDivisions from "./views/Admin/ManageDivisions";
 import ManageStudents from "./views/Admin/Managestudents";
 import Reports from "./views/Admin/Reports"; 
 import Notifications from "./views/Admin/Notifications";
-import ManageUser from "./views/Admin/Manageuser";
 import Accademicperformance from "./views/Admin/AcademicPerformance";
  
 
@@ -31,7 +30,6 @@ const router = createHashRouter([
             /*adminauth - admin login*/
             {path: "login", element: <AdminLogin /> },
             { path: "dashboard", element: <AdminDashboard /> },
-            {path: "users", element: <ManageUser /> },
             { path: "manageschools", element: <ManageSchool /> },
             {path: "managedistricts", element: <Districts /> },
             {path: "managedivisions", element: <ManageDivisions /> },
