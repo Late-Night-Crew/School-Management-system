@@ -28,10 +28,10 @@ export default function ManageStudents() {
     date_of_birth: "",
     previous_school: "",
     guardian_name: "",
-    form_level: 1,
+    form_level: " ",
     status: "active",
     school_id: "",
-    academic_year_id: 1,
+    academic_year_id: 2,
     region_id: "",
   });
 
@@ -77,12 +77,18 @@ export default function ManageStudents() {
   };
 
   // ✅ Load schools for a selected region (for modal dropdown)
-  const handleRegionChange = async (regionId) => {
-    setFormData((prev) => ({ ...prev, region_id: regionId, school_id: "" }));
+  const handleRegionChange = async (regionId, resetSchool = true) => {
+    setFormData((prev) => ({
+      ...prev,
+      region_id: regionId,
+      school_id: resetSchool ? "" : prev.school_id, // ✅ don’t reset when editing
+    }));
+  
     if (!regionId) {
       setSchools([]);
       return;
     }
+  
     try {
       const data = await fetchSchools(regionId);
       setSchools(data);
@@ -91,18 +97,28 @@ export default function ManageStudents() {
       alert("Failed to load schools for selected region");
     }
   };
-
+  
   // ✅ Open modal for add/edit
-  const handleShowModal = (student = null) => {
+  const handleShowModal = async (student = null) => {
     if (student) {
       setEditingStudent(student);
-      setFormData({
+  
+      // Convert numeric fields
+      const updatedData = {
         ...student,
-        region_id: student.region_id || "",
-        form_level: parseInt(student.form_level, 10),
-      });
-      handleRegionChange(student.region_id);
+        form_level: student.form_level ? parseInt(student.form_level, 10) : "",
+        region_id: student.region_id ? parseInt(student.region_id, 10) : "",
+        school_id: student.school_id ? parseInt(student.school_id, 10) : "",
+        academic_year_id: student.academic_year_id ? parseInt(student.academic_year_id, 10) : "",
+      };
+  
+      // 1️⃣ Load schools for the student's region FIRST
+      await handleRegionChange(student.region_id, false);
+  
+      // 2️⃣ Then set the form data (this ensures school_id isn't wiped)
+      setFormData(updatedData);
     } else {
+      // Add mode
       setEditingStudent(null);
       setFormData({
         student_number: "",
@@ -112,24 +128,39 @@ export default function ManageStudents() {
         date_of_birth: "",
         previous_school: "",
         guardian_name: "",
-        form_level: 1,
+        form_level: "",
         status: "active",
         school_id: "",
-        academic_year_id: 1,
+        academic_year_id: 2,
         region_id: "",
       });
       setSchools([]);
     }
     setShowModal(true);
   };
-
+  
   const handleCloseModal = () => setShowModal(false);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    if (name === "region_id") handleRegionChange(value);
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    let newValue = value;
+  
+    const numericFields = ["form_level", "region_id", "school_id", "academic_year_id"];
+    if (numericFields.includes(name)) {
+      newValue = value ? parseInt(value, 10) : "";
+    }
+  
+    if (name === "region_id") {
+      handleRegionChange(newValue);
+    }
+  
+    setFormData((prev) => ({
+      ...prev,
+      [name]: newValue,
+    }));
   };
+  
+  
 
   // ✅ Save student
   const handleSave = async () => {
