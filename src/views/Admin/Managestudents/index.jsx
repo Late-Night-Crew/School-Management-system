@@ -1,7 +1,6 @@
 // src/views/Admin/components/ManageStudents.jsx
 import React, { useEffect, useState } from "react";
 import { Modal, Button, Form, Table, Spinner, Row, Col } from "react-bootstrap";
-import "bootstrap/dist/css/bootstrap.min.css";
 import {
   fetchStudents,
   createStudent,
@@ -36,10 +35,11 @@ export default function ManageStudents() {
     region_id: "",
   });
 
-  // ✅ Load students and regions
+  // ✅ Load students, regions, and all schools initially
   useEffect(() => {
     loadStudents();
     loadRegions();
+    loadAllSchools();
   }, []);
 
   const loadStudents = async () => {
@@ -65,7 +65,18 @@ export default function ManageStudents() {
     }
   };
 
-  // ✅ Load schools when region changes
+  // ✅ Fetch all schools (for table mapping)
+  const loadAllSchools = async () => {
+    try {
+      const data = await fetchSchools(); // Fetch all schools, no region filter
+      setSchools(data);
+    } catch (error) {
+      console.error(error);
+      alert("Failed to load schools");
+    }
+  };
+
+  // ✅ Load schools for a selected region (for modal dropdown)
   const handleRegionChange = async (regionId) => {
     setFormData((prev) => ({ ...prev, region_id: regionId, school_id: "" }));
     if (!regionId) {
@@ -191,31 +202,50 @@ export default function ManageStudents() {
                 <td colSpan="10">No students found</td>
               </tr>
             ) : (
-              students.map((student, index) => (
-                <tr key={student.id}>
-                  <td>{index + 1}</td>
-                  <td>{student.student_number}</td>
-                  <td>{`${student.first_name} ${student.last_name}`}</td>
-                  <td>{student.gender}</td>
-                  <td>{student.form_level}</td>
-                  <td>{student.school_name || "—"}</td>
-                  <td>
-                    <span className={`badge ${student.status === "active" ? "bg-success" : "bg-secondary"}`}>
-                      {student.status}
-                    </span>
-                  </td>
-                  <td>{student.date_of_birth}</td>
-                  <td>{student.guardian_name || "—"}</td>
-                  <td>
-                    <Button size="sm" variant="warning" className="me-2" onClick={() => handleShowModal(student)}>
-                      Edit
-                    </Button>
-                    <Button size="sm" variant="danger" onClick={() => handleDelete(student.id)}>
-                      Delete
-                    </Button>
-                  </td>
-                </tr>
-              ))
+              students.map((student, index) => {
+                const schoolName =
+                  schools.find((s) => s.id === student.school_id)?.name || "—";
+                return (
+                  <tr key={student.id}>
+                    <td>{index + 1}</td>
+                    <td>{student.student_number}</td>
+                    <td>{`${student.first_name} ${student.last_name}`}</td>
+                    <td>{student.gender}</td>
+                    <td>{student.form_level}</td>
+                    <td>{schoolName}</td>
+                    <td>
+                      <span
+                        className={`badge ${
+                          student.status === "active"
+                            ? "bg-success"
+                            : "bg-secondary"
+                        }`}
+                      >
+                        {student.status}
+                      </span>
+                    </td>
+                    <td>{student.date_of_birth}</td>
+                    <td>{student.guardian_name || "—"}</td>
+                    <td>
+                      <Button
+                        size="sm"
+                        variant="warning"
+                        className="me-2"
+                        onClick={() => handleShowModal(student)}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() => handleDelete(student.id)}
+                      >
+                        Delete
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </Table>
@@ -224,7 +254,9 @@ export default function ManageStudents() {
       {/* Add/Edit Modal */}
       <Modal show={showModal} onHide={handleCloseModal} centered>
         <Modal.Header closeButton>
-          <Modal.Title>{editingStudent ? "Edit Student" : "Add Student"}</Modal.Title>
+          <Modal.Title>
+            {editingStudent ? "Edit Student" : "Add Student"}
+          </Modal.Title>
         </Modal.Header>
         <Modal.Body>
           <Form>
@@ -232,13 +264,22 @@ export default function ManageStudents() {
               <Col md={6}>
                 <Form.Group className="mb-3">
                   <Form.Label>Student Number</Form.Label>
-                  <Form.Control type="text" name="student_number" value={formData.student_number} onChange={handleChange} />
+                  <Form.Control
+                    type="text"
+                    name="student_number"
+                    value={formData.student_number}
+                    onChange={handleChange}
+                  />
                 </Form.Group>
               </Col>
               <Col md={6}>
                 <Form.Group className="mb-3">
                   <Form.Label>Form Level</Form.Label>
-                  <Form.Select name="form_level" value={formData.form_level} onChange={handleChange}>
+                  <Form.Select
+                    name="form_level"
+                    value={formData.form_level}
+                    onChange={handleChange}
+                  >
                     <option value={1}>Form 1</option>
                     <option value={2}>Form 2</option>
                     <option value={3}>Form 3</option>
@@ -252,20 +293,34 @@ export default function ManageStudents() {
               <Col md={6}>
                 <Form.Group className="mb-3">
                   <Form.Label>First Name</Form.Label>
-                  <Form.Control type="text" name="first_name" value={formData.first_name} onChange={handleChange} />
+                  <Form.Control
+                    type="text"
+                    name="first_name"
+                    value={formData.first_name}
+                    onChange={handleChange}
+                  />
                 </Form.Group>
               </Col>
               <Col md={6}>
                 <Form.Group className="mb-3">
                   <Form.Label>Last Name</Form.Label>
-                  <Form.Control type="text" name="last_name" value={formData.last_name} onChange={handleChange} />
+                  <Form.Control
+                    type="text"
+                    name="last_name"
+                    value={formData.last_name}
+                    onChange={handleChange}
+                  />
                 </Form.Group>
               </Col>
             </Row>
 
             <Form.Group className="mb-3">
               <Form.Label>Gender</Form.Label>
-              <Form.Select name="gender" value={formData.gender} onChange={handleChange}>
+              <Form.Select
+                name="gender"
+                value={formData.gender}
+                onChange={handleChange}
+              >
                 <option value="">Select gender</option>
                 <option value="Male">Male</option>
                 <option value="Female">Female</option>
@@ -274,37 +329,63 @@ export default function ManageStudents() {
 
             <Form.Group className="mb-3">
               <Form.Label>Date of Birth</Form.Label>
-              <Form.Control type="date" name="date_of_birth" value={formData.date_of_birth} onChange={handleChange} />
+              <Form.Control
+                type="date"
+                name="date_of_birth"
+                value={formData.date_of_birth}
+                onChange={handleChange}
+              />
             </Form.Group>
 
             <Form.Group className="mb-3">
               <Form.Label>Region</Form.Label>
-              <Form.Select name="region_id" value={formData.region_id} onChange={handleChange}>
+              <Form.Select
+                name="region_id"
+                value={formData.region_id}
+                onChange={handleChange}
+              >
                 <option value="">Select Region</option>
                 {regions.map((r) => (
-                  <option key={r.id} value={r.id}>{r.name}</option>
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
                 ))}
               </Form.Select>
             </Form.Group>
 
             <Form.Group className="mb-3">
-              <Form.Label>Previous School</Form.Label>
-              <Form.Select name="school_id" value={formData.school_id} onChange={handleChange}>
+              <Form.Label>School</Form.Label>
+              <Form.Select
+                name="school_id"
+                value={formData.school_id}
+                onChange={handleChange}
+              >
                 <option value="">Select School</option>
                 {schools.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
                 ))}
               </Form.Select>
             </Form.Group>
 
             <Form.Group className="mb-3">
               <Form.Label>Guardian Name</Form.Label>
-              <Form.Control type="text" name="guardian_name" value={formData.guardian_name} onChange={handleChange} />
+              <Form.Control
+                type="text"
+                name="guardian_name"
+                value={formData.guardian_name}
+                onChange={handleChange}
+              />
             </Form.Group>
 
             <Form.Group className="mb-3">
               <Form.Label>Status</Form.Label>
-              <Form.Select name="status" value={formData.status} onChange={handleChange}>
+              <Form.Select
+                name="status"
+                value={formData.status}
+                onChange={handleChange}
+              >
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
               </Form.Select>
@@ -312,7 +393,9 @@ export default function ManageStudents() {
           </Form>
         </Modal.Body>
         <Modal.Footer>
-          <Button variant="secondary" onClick={handleCloseModal}>Cancel</Button>
+          <Button variant="secondary" onClick={handleCloseModal}>
+            Cancel
+          </Button>
           <Button variant="success" onClick={handleSave}>
             {loading ? <Spinner size="sm" /> : "Save"}
           </Button>
