@@ -1,437 +1,258 @@
-// src/views/Admin/components/ManageStudents.jsx
-import React, { useEffect, useState } from "react";
-import { Modal, Button, Form, Table, Spinner, Row, Col } from "react-bootstrap";
-import {
-  fetchStudents,
-  createStudent,
-  updateStudent,
-  deleteStudent,
-} from "../services/studentService";
+import React, { useState, useEffect } from "react";
+import "bootstrap/dist/css/bootstrap.min.css";
+import "bootstrap-icons/font/bootstrap-icons.css";
 import { fetchregions } from "../services/divisionService";
 import { fetchSchools } from "../services/schoolService";
+import { fetchDistricts } from "../services/districtService";
+import { fetchStudents } from "../services/studentService";
+import * as XLSX from "xlsx";
+import { saveAs } from "file-saver";
+import { Button, Form } from "react-bootstrap";
 
-export default function ManageStudents() {
+const Managestudents = () => {
   const [students, setStudents] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [filteredStudents, setFilteredStudents] = useState([]);
 
-  const [regions, setRegions] = useState([]);
+  const [divisions, setDivisions] = useState([]);
+  const [districts, setDistricts] = useState([]);
   const [schools, setSchools] = useState([]);
 
-  const [showModal, setShowModal] = useState(false);
-  const [editingStudent, setEditingStudent] = useState(null);
+  const [selectedDivision, setSelectedDivision] = useState("");
+  const [selectedDistrict, setSelectedDistrict] = useState("");
+  const [selectedSchool, setSelectedSchool] = useState("");
 
-  const [formData, setFormData] = useState({
-    student_number: "",
-    first_name: "",
-    last_name: "",
-    gender: "",
-    date_of_birth: "",
-    previous_school: "",
-    guardian_name: "",
-    form_level: " ",
-    status: "active",
-    school_id: "",
-    academic_year_id: 2,
-    region_id: "",
-  });
+  const [searchTerm, setSearchTerm] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const studentsPerPage = 5;
 
-  // ✅ Load students, regions, and all schools initially
+  // Load all data
   useEffect(() => {
-    loadStudents();
-    loadRegions();
-    loadAllSchools();
+    const loadData = async () => {
+      try {
+        const [divData, schoolData, districtData, studentData] = await Promise.all([
+          fetchregions(),
+          fetchSchools(),
+          fetchDistricts(),
+          fetchStudents(),
+        ]);
+
+        setDivisions(divData || []);
+        setSchools(schoolData || []);
+        setDistricts(districtData || []);
+
+        const mappedStudents = (studentData || []).map((s) => {
+          const school = schoolData.find(sc => Number(sc.id) === Number(s.school_id));
+          const district = districtData.find(d => Number(d.id) === Number(school?.district_id));
+          const division = divData.find(div => Number(div.id) === Number(district?.region_id));
+
+          return {
+            ...s,
+            studentNumber: s.student_number,
+            firstName: s.first_name,
+            lastName: s.last_name,
+            formLevel: s.form_level,
+            schoolName: school?.name || "",
+            districtName: district?.name || "",
+            divisionName: division?.name || "",
+            status: s.status || "Active",
+          };
+        });
+
+        setStudents(mappedStudents);
+        setFilteredStudents(mappedStudents);
+      } catch (err) {
+        console.error("Error loading data:", err);
+      }
+    };
+
+    loadData();
   }, []);
 
-  const loadStudents = async () => {
-    setLoading(true);
-    try {
-      const data = await fetchStudents();
-      setStudents(data);
-    } catch (error) {
-      console.error(error);
-      alert("Failed to load students");
-    } finally {
-      setLoading(false);
-    }
+  // Dynamic filtered districts & schools
+  const filteredDistricts = selectedDivision
+    ? districts.filter(d => d.region_id === Number(selectedDivision))
+    : districts;
+
+  const filteredSchools = selectedDistrict
+    ? schools.filter(s => s.district_id === Number(selectedDistrict))
+    : schools;
+
+  // Filters & search
+  useEffect(() => {
+    const lowerSearch = searchTerm.trim().toLowerCase();
+
+    const filtered = students.filter((s) => {
+      const matchSearch =
+        !lowerSearch ||
+        s.firstName.toLowerCase().includes(lowerSearch) ||
+        s.lastName.toLowerCase().includes(lowerSearch) ||
+        s.studentNumber.toLowerCase().includes(lowerSearch);
+
+      const matchDivision = !selectedDivision || s.divisionName === divisions.find(d => d.id === Number(selectedDivision))?.name;
+      const matchDistrict = !selectedDistrict || s.districtName === districts.find(d => d.id === Number(selectedDistrict))?.name;
+      const matchSchool = !selectedSchool || s.schoolName === schools.find(sch => sch.id === Number(selectedSchool))?.name;
+
+      return matchSearch && matchDivision && matchDistrict && matchSchool;
+    });
+
+    setFilteredStudents(filtered);
+    setCurrentPage(1);
+  }, [searchTerm, selectedDivision, selectedDistrict, selectedSchool, students, divisions, districts, schools]);
+
+  // Pagination
+  const indexOfLastStudent = currentPage * studentsPerPage;
+  const indexOfFirstStudent = indexOfLastStudent - studentsPerPage;
+  const currentStudents = filteredStudents.slice(indexOfFirstStudent, indexOfLastStudent);
+  const totalPages = Math.ceil(filteredStudents.length / studentsPerPage);
+
+  const getStatusBadgeClass = (status) => {
+    const classes = { Active: "bg-success", Inactive: "bg-secondary", Graduated: "bg-primary", Transferred: "bg-warning" };
+    return classes[status] || "bg-secondary";
   };
 
-  const loadRegions = async () => {
-    try {
-      const data = await fetchregions();
-      setRegions(data);
-    } catch (error) {
-      console.error(error);
-      alert("Failed to load regions");
-    }
-  };
-
-  // ✅ Fetch all schools (for table mapping)
-  const loadAllSchools = async () => {
-    try {
-      const data = await fetchSchools(); // Fetch all schools, no region filter
-      setSchools(data);
-    } catch (error) {
-      console.error(error);
-      alert("Failed to load schools");
-    }
-  };
-
-  // ✅ Load schools for a selected region (for modal dropdown)
-  const handleRegionChange = async (regionId, resetSchool = true) => {
-    setFormData((prev) => ({
-      ...prev,
-      region_id: regionId,
-      school_id: resetSchool ? "" : prev.school_id, // ✅ don’t reset when editing
+  const exportToExcel = () => {
+    if (filteredStudents.length === 0) return alert("No students to export!");
+    const data = filteredStudents.map((s) => ({
+      "Student #": s.studentNumber,
+      "First Name": s.firstName,
+      "Last Name": s.lastName,
+      "Form Level": s.formLevel,
+      "Gender": s.gender,
+      "School": s.schoolName,
+      "District": s.districtName,
+      "Division": s.divisionName,
+      "Status": s.status,
     }));
-  
-    if (!regionId) {
-      setSchools([]);
-      return;
-    }
-  
-    try {
-      const data = await fetchSchools(regionId);
-      setSchools(data);
-    } catch (error) {
-      console.error(error);
-      alert("Failed to load schools for selected region");
-    }
-  };
-  
-  // ✅ Open modal for add/edit
-  const handleShowModal = async (student = null) => {
-    if (student) {
-      setEditingStudent(student);
-  
-      // Convert numeric fields
-      const updatedData = {
-        ...student,
-        form_level: student.form_level ? parseInt(student.form_level, 10) : "",
-        region_id: student.region_id ? parseInt(student.region_id, 10) : "",
-        school_id: student.school_id ? parseInt(student.school_id, 10) : "",
-        academic_year_id: student.academic_year_id ? parseInt(student.academic_year_id, 10) : "",
-      };
-  
-      // 1️⃣ Load schools for the student's region FIRST
-      await handleRegionChange(student.region_id, false);
-  
-      // 2️⃣ Then set the form data (this ensures school_id isn't wiped)
-      setFormData(updatedData);
-    } else {
-      // Add mode
-      setEditingStudent(null);
-      setFormData({
-        student_number: "",
-        first_name: "",
-        last_name: "",
-        gender: "",
-        date_of_birth: "",
-        previous_school: "",
-        guardian_name: "",
-        form_level: "",
-        status: "active",
-        school_id: "",
-        academic_year_id: 2,
-        region_id: "",
-      });
-      setSchools([]);
-    }
-    setShowModal(true);
-  };
-  
-  const handleCloseModal = () => setShowModal(false);
-
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    let newValue = value;
-  
-    const numericFields = ["form_level", "region_id", "school_id", "academic_year_id"];
-    if (numericFields.includes(name)) {
-      newValue = value ? parseInt(value, 10) : "";
-    }
-  
-    if (name === "region_id") {
-      handleRegionChange(newValue);
-    }
-  
-    setFormData((prev) => ({
-      ...prev,
-      [name]: newValue,
-    }));
-  };
-  
-  
-
-  // ✅ Save student
-  const handleSave = async () => {
-    if (!formData.first_name || !formData.last_name || !formData.student_number) {
-      alert("Please fill required fields");
-      return;
-    }
-
-    try {
-      setLoading(true);
-      if (editingStudent) {
-        await updateStudent(editingStudent.id, formData);
-      } else {
-        await createStudent(formData);
-      }
-      await loadStudents();
-      handleCloseModal();
-    } catch (error) {
-      console.error(error);
-      alert("Failed to save student");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDelete = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this student?")) return;
-    try {
-      await deleteStudent(id);
-      setStudents(students.filter((s) => s.id !== id));
-    } catch (error) {
-      console.error(error);
-      alert("Failed to delete student");
-    }
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Students");
+    const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+    saveAs(new Blob([excelBuffer], { type: "application/octet-stream" }), `Students_${new Date().toISOString().slice(0,10)}.xlsx`);
   };
 
   return (
-    <div className="container mt-5">
-      <div className="d-flex justify-content-between align-items-center mb-3">
-        <h3 className="fw-bold">Manage Students</h3>
-        <Button variant="primary" onClick={() => handleShowModal()}>
-          Add Student
-        </Button>
-      </div>
-
-      {loading ? (
-        <div className="text-center mt-5">
-          <Spinner animation="border" />
-          <p>Loading students...</p>
+    <div className="min-vh-100 bg-light py-4">
+      <div className="container">
+        <div className="mb-4 d-flex justify-content-between align-items-center">
+          <h1 className="display-6 fw-bold text-dark">
+            <i className="bi bi-mortarboard-fill me-2" style={{ color: "#667eea", fontSize: "2.5rem" }}></i>
+            Student Management
+          </h1>
         </div>
-      ) : (
-        <Table striped bordered hover responsive>
-          <thead className="table-dark text-center">
-            <tr>
-              <th>#</th>
-              <th>Student No</th>
-              <th>Full Name</th>
-              <th>Gender</th>
-              <th>Form</th>
-              <th>School</th>
-              <th>Status</th>
-              <th>Date of Birth</th>
-              <th>Guardian</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody className="text-center">
-            {students.length === 0 ? (
-              <tr>
-                <td colSpan="10">No students found</td>
-              </tr>
-            ) : (
-              students.map((student, index) => {
-                const schoolName =
-                  schools.find((s) => s.id === student.school_id)?.name || "—";
-                return (
-                  <tr key={student.id}>
-                    <td>{index + 1}</td>
-                    <td>{student.student_number}</td>
-                    <td>{`${student.first_name} ${student.last_name}`}</td>
-                    <td>{student.gender}</td>
-                    <td>{student.form_level}</td>
-                    <td>{schoolName}</td>
-                    <td>
-                      <span
-                        className={`badge ${
-                          student.status === "active"
-                            ? "bg-success"
-                            : "bg-secondary"
-                        }`}
-                      >
-                        {student.status}
-                      </span>
-                    </td>
-                    <td>{student.date_of_birth}</td>
-                    <td>{student.guardian_name || "—"}</td>
-                    <td>
-                      <Button
-                        size="sm"
-                        variant="warning"
-                        className="me-2"
-                        onClick={() => handleShowModal(student)}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        onClick={() => handleDelete(student.id)}
-                      >
-                        Delete
-                      </Button>
-                    </td>
+
+        {/* Filters */}
+        <div className="card shadow-sm border-0 mb-4">
+          <div className="card-header text-white" style={{ background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)" }}>
+            <h5 className="mb-0"><i className="bi bi-funnel me-2"></i> Filters</h5>
+          </div>
+          <div className="card-body">
+            <div className="row g-3">
+              <div className="col-md-4">
+                <Form.Label className="fw-semibold">Division</Form.Label>
+                <Form.Select value={selectedDivision} onChange={(e) => { setSelectedDivision(e.target.value); setSelectedDistrict(""); setSelectedSchool(""); }}>
+                  <option value="">All Divisions</option>
+                  {divisions.map((d) => (<option key={d.id} value={d.id}>{d.name}</option>))}
+                </Form.Select>
+              </div>
+              <div className="col-md-4">
+                <Form.Label className="fw-semibold">District</Form.Label>
+                <Form.Select value={selectedDistrict} onChange={(e) => { setSelectedDistrict(e.target.value); setSelectedSchool(""); }} disabled={!selectedDivision}>
+                  <option value="">All Districts</option>
+                  {filteredDistricts.map((d) => (<option key={d.id} value={d.id}>{d.name}</option>))}
+                </Form.Select>
+              </div>
+              <div className="col-md-4">
+                <Form.Label className="fw-semibold">School</Form.Label>
+                <Form.Select value={selectedSchool} onChange={(e) => setSelectedSchool(e.target.value)} disabled={!selectedDistrict}>
+                  <option value="">All Schools</option>
+                  {filteredSchools.map((s) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+                </Form.Select>
+              </div>
+              <div className="col-12 text-end mt-2">
+                <Button variant="success" onClick={exportToExcel}><i className="bi bi-file-earmark-excel me-1"></i> Export Excel</Button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Table */}
+        <div className="card shadow-sm border-0">
+          <div className="card-header text-white" style={{ background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)" }}>
+            <h5 className="mb-0"><i className="bi bi-people-fill me-2"></i> All Students</h5>
+          </div>
+          <div className="card-body">
+            <div className="row mb-3">
+              <div className="col-md-6 position-relative">
+                <i className="bi bi-search position-absolute" style={{ left: "12px", top: "50%", transform: "translateY(-50%)", color: "#999" }}></i>
+                <Form.Control
+                  type="text"
+                  placeholder="Search by name or student number..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  style={{ paddingLeft: "2rem", borderRadius: "25px" }}
+                />
+              </div>
+              <div className="col-md-6 text-end">
+                <span className="badge bg-primary fs-6">Total Students: {filteredStudents.length}</span>
+              </div>
+            </div>
+
+            <div className="table-responsive">
+              <table className="table table-hover align-middle">
+                <thead className="bg-light">
+                  <tr>
+                    <th>Student #</th>
+                    <th>Name</th>
+                    <th>Form</th>
+                    <th>Gender</th>
+                    <th>School</th>
+                    <th>District</th>
+                    <th>Division</th>
+                    <th>Status</th>
                   </tr>
-                );
-              })
+                </thead>
+                <tbody>
+                  {currentStudents.length > 0 ? currentStudents.map((s) => (
+                    <tr key={s.id}>
+                      <td>{s.studentNumber}</td>
+                      <td>{s.firstName} {s.lastName}</td>
+                      <td>Form {s.formLevel}</td>
+                      <td>{s.gender}</td>
+                      <td>{s.schoolName}</td>
+                      <td>{s.districtName}</td>
+                      <td>{s.divisionName}</td>
+                      <td><span className={`badge ${getStatusBadgeClass(s.status)} rounded-pill`}>{s.status}</span></td>
+                    </tr>
+                  )) : (
+                    <tr><td colSpan="8" className="text-center py-4 text-muted">No students found</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {totalPages > 1 && (
+              <nav>
+                <ul className="pagination justify-content-center mb-0">
+                  <li className={`page-item ${currentPage === 1 ? "disabled" : ""}`}>
+                    <button className="page-link" onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}>Previous</button>
+                  </li>
+                  {[...Array(totalPages)].map((_, index) => (
+                    <li key={index} className={`page-item ${currentPage === index + 1 ? "active" : ""}`}>
+                      <button className="page-link" onClick={() => setCurrentPage(index + 1)}>{index + 1}</button>
+                    </li>
+                  ))}
+                  <li className={`page-item ${currentPage === totalPages ? "disabled" : ""}`}>
+                    <button className="page-link" onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}>Next</button>
+                  </li>
+                </ul>
+              </nav>
             )}
-          </tbody>
-        </Table>
-      )}
 
-      {/* Add/Edit Modal */}
-      <Modal show={showModal} onHide={handleCloseModal} centered>
-        <Modal.Header closeButton>
-          <Modal.Title>
-            {editingStudent ? "Edit Student" : "Add Student"}
-          </Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          <Form>
-            <Row>
-              <Col md={6}>
-                <Form.Group className="mb-3">
-                  <Form.Label>Student Number</Form.Label>
-                  <Form.Control
-                    type="text"
-                    name="student_number"
-                    value={formData.student_number}
-                    onChange={handleChange}
-                  />
-                </Form.Group>
-              </Col>
-              <Col md={6}>
-                <Form.Group className="mb-3">
-                  <Form.Label>Form Level</Form.Label>
-                  <Form.Select
-                    name="form_level"
-                    value={formData.form_level}
-                    onChange={handleChange}
-                  >
-                    <option value={1}>Form 1</option>
-                    <option value={2}>Form 2</option>
-                    <option value={3}>Form 3</option>
-                    <option value={4}>Form 4</option>
-                  </Form.Select>
-                </Form.Group>
-              </Col>
-            </Row>
-
-            <Row>
-              <Col md={6}>
-                <Form.Group className="mb-3">
-                  <Form.Label>First Name</Form.Label>
-                  <Form.Control
-                    type="text"
-                    name="first_name"
-                    value={formData.first_name}
-                    onChange={handleChange}
-                  />
-                </Form.Group>
-              </Col>
-              <Col md={6}>
-                <Form.Group className="mb-3">
-                  <Form.Label>Last Name</Form.Label>
-                  <Form.Control
-                    type="text"
-                    name="last_name"
-                    value={formData.last_name}
-                    onChange={handleChange}
-                  />
-                </Form.Group>
-              </Col>
-            </Row>
-
-            <Form.Group className="mb-3">
-              <Form.Label>Gender</Form.Label>
-              <Form.Select
-                name="gender"
-                value={formData.gender}
-                onChange={handleChange}
-              >
-                <option value="">Select gender</option>
-                <option value="Male">Male</option>
-                <option value="Female">Female</option>
-              </Form.Select>
-            </Form.Group>
-
-            <Form.Group className="mb-3">
-              <Form.Label>Date of Birth</Form.Label>
-              <Form.Control
-                type="date"
-                name="date_of_birth"
-                value={formData.date_of_birth}
-                onChange={handleChange}
-              />
-            </Form.Group>
-
-            <Form.Group className="mb-3">
-              <Form.Label>Region</Form.Label>
-              <Form.Select
-                name="region_id"
-                value={formData.region_id}
-                onChange={handleChange}
-              >
-                <option value="">Select Region</option>
-                {regions.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name}
-                  </option>
-                ))}
-              </Form.Select>
-            </Form.Group>
-
-            <Form.Group className="mb-3">
-              <Form.Label>School</Form.Label>
-              <Form.Select
-                name="school_id"
-                value={formData.school_id}
-                onChange={handleChange}
-              >
-                <option value="">Select School</option>
-                {schools.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </Form.Select>
-            </Form.Group>
-
-            <Form.Group className="mb-3">
-              <Form.Label>Guardian Name</Form.Label>
-              <Form.Control
-                type="text"
-                name="guardian_name"
-                value={formData.guardian_name}
-                onChange={handleChange}
-              />
-            </Form.Group>
-
-            <Form.Group className="mb-3">
-              <Form.Label>Status</Form.Label>
-              <Form.Select
-                name="status"
-                value={formData.status}
-                onChange={handleChange}
-              >
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </Form.Select>
-            </Form.Group>
-          </Form>
-        </Modal.Body>
-        <Modal.Footer>
-          <Button variant="secondary" onClick={handleCloseModal}>
-            Cancel
-          </Button>
-          <Button variant="success" onClick={handleSave}>
-            {loading ? <Spinner size="sm" /> : "Save"}
-          </Button>
-        </Modal.Footer>
-      </Modal>
+          </div>
+        </div>
+      </div>
     </div>
   );
-}
+};
+
+export default Managestudents;

@@ -6,7 +6,7 @@ database:
   port: 5432
   database: "nsms"
   username: "postgres"
-  password: "parrot1234"
+  password: "mzura"
 
 
 storage:

@@ -19,7 +19,7 @@ export default function AdminSidebar({ role = "admin" }) {
       {name: "manage Districts", path: "/admin/managedistricts", icon: "bi-geo-alt" },
       { name: "Manage Schools", path: "/admin/manageschools", icon: "bi-building" },
       { name: "Manage Users", path: "/admin/users", icon: "bi-people" },
-      {name: "Academic year", path: "/admin/academicyear", icon: "bi-calendar4-week" },
+      {name: "Academic Year", path: "/admin/manageacademicyear", icon: "bi-calendar4-week" },
       {name: "Manage Students", path: "/admin/managestudents", icon: "bi-journal-bookmark" },
       {name: "Transfers", path: "/admin/transfers", icon: "bi-arrow-left-right" },
       {name: "Notice", path: "/admin/notices", icon: "bi-info-square" },
