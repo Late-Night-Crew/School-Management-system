@@ -44,4 +44,11 @@ func (api *API) adminRoutes() {
 	adminApi.Post("/students", authenticationMiddleware, admin.CreateStudent(api.StudentService, api.logger))
 	adminApi.Put("/students/:id", authenticationMiddleware, admin.UpdateStudent(api.StudentService, api.logger))
 	adminApi.Delete("/students/:id", authenticationMiddleware, admin.DeleteStudent(api.StudentService, api.logger))
+
+	adminApi.Get("/academic_years", authenticationMiddleware, admin.GetAcademicYearList(api.AcademicYearService, api.logger))
+	adminApi.Get("/academic_years/:id", authenticationMiddleware, admin.GetAcademicYearByID(api.AcademicYearService, api.logger))
+	adminApi.Post("/academic_years", authenticationMiddleware, admin.CreateAcademicYear(api.AcademicYearService, api.logger))
+	adminApi.Put("/academic_years/:id", authenticationMiddleware, admin.UpdateAcademicYear(api.AcademicYearService, api.logger))
+	adminApi.Delete("/academic_years/:id", authenticationMiddleware, admin.DeleteAcademicYear(api.AcademicYearService, api.logger))
+	
 }

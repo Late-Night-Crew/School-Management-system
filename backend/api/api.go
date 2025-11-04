@@ -17,6 +17,7 @@ type API struct {
 	DistrictService services.DistrictService
 	SchoolService services.SchoolService
 	StudentService services.StudentService
+	AcademicYearService services.AcademicYearService
 }
 
 func NewAPI(config *config.Config) *API {
@@ -32,6 +33,7 @@ func NewAPI(config *config.Config) *API {
 		DistrictService: services.NewDistrictService(dbConn, logger),
 		SchoolService: services.NewSchoolService(dbConn, logger),
 		StudentService: services.NewStudentService(dbConn, logger),
+		AcademicYearService: services.NewAcademicYearService(dbConn, logger),
 	}
 }
 

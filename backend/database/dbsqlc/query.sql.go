@@ -8,10 +8,58 @@ package dbsqlc
 import (
 	"context"
 	"database/sql"
+	"time"
 )
 
+const createAcademicYear = `-- name: CreateAcademicYear :one
+INSERT INTO 
+    academic_years (year, start_date, end_date, status, created_at, updated_at)
+VALUES 
+    ($1, $2, $3, $4, NOW(), NOW()) RETURNING id,
+    year,
+    created_at,
+    updated_at
+`
+
+type CreateAcademicYearParams struct {
+	Year      int32
+	StartDate time.Time
+	EndDate   time.Time
+	Status    sql.NullString
+}
+
+type CreateAcademicYearRow struct {
+	ID        int32
+	Year      int32
+	
+	CreatedAt sql.NullTime
+	UpdatedAt sql.NullTime
+}
+
+func (q *Queries) CreateAcademicYear(ctx context.Context, arg CreateAcademicYearParams) (CreateAcademicYearRow, error) {
+	row := q.db.QueryRowContext(ctx, createAcademicYear,
+		arg.Year,
+		arg.StartDate,
+		arg.EndDate,
+		arg.Status,
+	)
+	var i CreateAcademicYearRow
+	err := row.Scan(
+		&i.ID,
+		&i.Year,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createDistrict = `-- name: CreateDistrict :one
-INSERT INTO districts (name, region_id) VALUES ($1, $2) RETURNING id, name, region_id
+INSERT INTO
+    districts (name, region_id)
+VALUES
+    ($1, $2) RETURNING id,
+    name,
+    region_id
 `
 
 type CreateDistrictParams struct {
@@ -27,7 +75,11 @@ func (q *Queries) CreateDistrict(ctx context.Context, arg CreateDistrictParams) 
 }
 
 const createRegion = `-- name: CreateRegion :one
-INSERT INTO regions (name) VALUES ($1) RETURNING id, name
+INSERT INTO
+    regions (name)
+VALUES
+    ($1) RETURNING id,
+    name
 `
 
 func (q *Queries) CreateRegion(ctx context.Context, name string) (Region, error) {
@@ -38,9 +90,13 @@ func (q *Queries) CreateRegion(ctx context.Context, name string) (Region, error)
 }
 
 const createSchool = `-- name: CreateSchool :one
-INSERT INTO schools (school_number, name, district_id)
-VALUES ($1, $2, $3)
-RETURNING id, school_number, name, district_id
+INSERT INTO
+    schools (school_number, name, district_id)
+VALUES
+    ($1, $2, $3) RETURNING id,
+    school_number,
+    name,
+    district_id
 `
 
 type CreateSchoolParams struct {
@@ -69,37 +125,35 @@ func (q *Queries) CreateSchool(ctx context.Context, arg CreateSchoolParams) (Cre
 }
 
 const createStudent = `-- name: CreateStudent :one
-INSERT INTO students (
-  student_number,
-  first_name,
-  last_name,
-  date_of_birth,
-  gender,
-  form_level,
-  guardian_name,
-  previous_school,
-  school_id,
-  academic_year_id,
-  status
-)
-VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
-)
-RETURNING
-  id,
-  student_number,
-  first_name,
-  last_name,
-  date_of_birth,
-  gender,
-  form_level,
-  guardian_name,
-  previous_school,
-  school_id,
-  academic_year_id,
-  status,
-  created_at,
-  updated_at
+INSERT INTO
+    students (
+        student_number,
+        first_name,
+        last_name,
+        date_of_birth,
+        gender,
+        form_level,
+        guardian_name,
+        previous_school,
+        school_id,
+        academic_year_id,
+        status
+    )
+VALUES
+    ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id,
+    student_number,
+    first_name,
+    last_name,
+    date_of_birth,
+    gender,
+    form_level,
+    guardian_name,
+    previous_school,
+    school_id,
+    academic_year_id,
+    status,
+    created_at,
+    updated_at
 `
 
 type CreateStudentParams struct {
@@ -240,8 +294,23 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateU
 	return i, err
 }
 
+const deleteAcademicYear = `-- name: DeleteAcademicYear :exec
+DELETE FROM
+    academic_years
+WHERE
+    id = $1
+`
+
+func (q *Queries) DeleteAcademicYear(ctx context.Context, id int32) error {
+	_, err := q.db.ExecContext(ctx, deleteAcademicYear, id)
+	return err
+}
+
 const deleteDistrict = `-- name: DeleteDistrict :exec
-DELETE FROM districts WHERE id = $1
+DELETE FROM
+    districts
+WHERE
+    id = $1
 `
 
 func (q *Queries) DeleteDistrict(ctx context.Context, id int32) error {
@@ -250,7 +319,10 @@ func (q *Queries) DeleteDistrict(ctx context.Context, id int32) error {
 }
 
 const deleteRegion = `-- name: DeleteRegion :exec
-DELETE FROM regions WHERE id = $1
+DELETE FROM
+    regions
+WHERE
+    id = $1
 `
 
 func (q *Queries) DeleteRegion(ctx context.Context, id int32) error {
@@ -259,8 +331,10 @@ func (q *Queries) DeleteRegion(ctx context.Context, id int32) error {
 }
 
 const deleteSchool = `-- name: DeleteSchool :exec
-DELETE FROM schools
-WHERE id = $1
+DELETE FROM
+    schools
+WHERE
+    id = $1
 `
 
 func (q *Queries) DeleteSchool(ctx context.Context, id int32) error {
@@ -269,7 +343,10 @@ func (q *Queries) DeleteSchool(ctx context.Context, id int32) error {
 }
 
 const deleteStudent = `-- name: DeleteStudent :exec
-DELETE FROM students WHERE id = $1
+DELETE FROM
+    students
+WHERE
+    id = $1
 `
 
 func (q *Queries) DeleteStudent(ctx context.Context, id int32) error {
@@ -292,7 +369,14 @@ func (q *Queries) DeleteUser(ctx context.Context, id int32) error {
 }
 
 const findDistrictById = `-- name: FindDistrictById :one
-SELECT id, name, region_id FROM districts WHERE id = $1
+SELECT
+    id,
+    name,
+    region_id
+FROM
+    districts
+WHERE
+    id = $1
 `
 
 func (q *Queries) FindDistrictById(ctx context.Context, id int32) (District, error) {
@@ -303,7 +387,13 @@ func (q *Queries) FindDistrictById(ctx context.Context, id int32) (District, err
 }
 
 const findRegionById = `-- name: FindRegionById :one
-SELECT id, name FROM regions WHERE id = $1
+SELECT
+    id,
+    name
+FROM
+    regions
+WHERE
+    id = $1
 `
 
 func (q *Queries) FindRegionById(ctx context.Context, id int32) (Region, error) {
@@ -314,9 +404,15 @@ func (q *Queries) FindRegionById(ctx context.Context, id int32) (Region, error) 
 }
 
 const findSchoolById = `-- name: FindSchoolById :one
-SELECT id, school_number, name, district_id
-FROM schools
-WHERE id = $1
+SELECT
+    id,
+    school_number,
+    name,
+    district_id
+FROM
+    schools
+WHERE
+    id = $1
 `
 
 type FindSchoolByIdRow struct {
@@ -386,7 +482,18 @@ func (q *Queries) FindUserById(ctx context.Context, id int32) (FindUserByIdRow, 
 }
 
 const findUserLoginByEmail = `-- name: FindUserLoginByEmail :one
-SELECT id, display_name, email, password, last_login_at FROM users WHERE email = $1 AND is_activated AND deleted_at IS NULL
+SELECT
+    id,
+    display_name,
+    email,
+    password,
+    last_login_at
+FROM
+    users
+WHERE
+    email = $1
+    AND is_activated
+    AND deleted_at IS NULL
 `
 
 type FindUserLoginByEmailRow struct {
@@ -410,24 +517,56 @@ func (q *Queries) FindUserLoginByEmail(ctx context.Context, email string) (FindU
 	return i, err
 }
 
+const getAcademicYearByID = `-- name: GetAcademicYearByID :one
+SELECT
+    id,
+    year,
+    start_date,
+    end_date,
+    status,
+    created_at,
+    updated_at
+FROM
+    academic_years
+WHERE
+    id = $1
+`
+
+func (q *Queries) GetAcademicYearByID(ctx context.Context, id int32) (AcademicYear, error) {
+	row := q.db.QueryRowContext(ctx, getAcademicYearByID, id)
+	var i AcademicYear
+	err := row.Scan(
+		&i.ID,
+		&i.Year,
+		&i.StartDate,
+		&i.EndDate,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getStudentByID = `-- name: GetStudentByID :one
 SELECT
-  id,
-  student_number,
-  first_name,
-  last_name,
-  date_of_birth,
-  gender,
-  form_level,
-  guardian_name,
-  previous_school,
-  school_id,
-  academic_year_id,
-  status,
-  created_at,
-  updated_at
-FROM students
-WHERE id = $1
+    id,
+    student_number,
+    first_name,
+    last_name,
+    date_of_birth,
+    gender,
+    form_level,
+    guardian_name,
+    previous_school,
+    school_id,
+    academic_year_id,
+    status,
+    created_at,
+    updated_at
+FROM
+    students
+WHERE
+    id = $1
 `
 
 type GetStudentByIDRow struct {
@@ -471,23 +610,27 @@ func (q *Queries) GetStudentByID(ctx context.Context, id int32) (GetStudentByIDR
 
 const getStudentsBySchoolID = `-- name: GetStudentsBySchoolID :many
 SELECT
-  id,
-  student_number,
-  first_name,
-  last_name,
-  date_of_birth,
-  gender,
-  form_level,
-  guardian_name,
-  previous_school,
-  school_id,
-  academic_year_id,
-  status,
-  created_at,
-  updated_at
-FROM students
-WHERE school_id = $1
-ORDER BY last_name ASC, first_name ASC
+    id,
+    student_number,
+    first_name,
+    last_name,
+    date_of_birth,
+    gender,
+    form_level,
+    guardian_name,
+    previous_school,
+    school_id,
+    academic_year_id,
+    status,
+    created_at,
+    updated_at
+FROM
+    students
+WHERE
+    school_id = $1
+ORDER BY
+    last_name ASC,
+    first_name ASC
 `
 
 type GetStudentsBySchoolIDRow struct {
@@ -545,8 +688,61 @@ func (q *Queries) GetStudentsBySchoolID(ctx context.Context, schoolID int32) ([]
 	return items, nil
 }
 
+const listAcademicYears = `-- name: ListAcademicYears :many
+SELECT
+    id,
+    year,
+    start_date,
+    end_date,
+    status,
+    created_at,
+    updated_at
+FROM
+    academic_years
+ORDER BY
+    year DESC
+`
+
+func (q *Queries) ListAcademicYears(ctx context.Context) ([]AcademicYear, error) {
+	rows, err := q.db.QueryContext(ctx, listAcademicYears)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AcademicYear
+	for rows.Next() {
+		var i AcademicYear
+		if err := rows.Scan(
+			&i.ID,
+			&i.Year,
+			&i.StartDate,
+			&i.EndDate,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDistricts = `-- name: ListDistricts :many
-SELECT id, name, region_id FROM districts ORDER BY name
+SELECT
+    id,
+    name,
+    region_id
+FROM
+    districts
+ORDER BY
+    name
 `
 
 func (q *Queries) ListDistricts(ctx context.Context) ([]District, error) {
@@ -573,7 +769,16 @@ func (q *Queries) ListDistricts(ctx context.Context) ([]District, error) {
 }
 
 const listDistrictsByRegionId = `-- name: ListDistrictsByRegionId :many
-SELECT id, name, region_id FROM districts WHERE region_id = $1 ORDER BY name
+SELECT
+    id,
+    name,
+    region_id
+FROM
+    districts
+WHERE
+    region_id = $1
+ORDER BY
+    name
 `
 
 func (q *Queries) ListDistrictsByRegionId(ctx context.Context, regionID int32) ([]District, error) {
@@ -600,7 +805,13 @@ func (q *Queries) ListDistrictsByRegionId(ctx context.Context, regionID int32) (
 }
 
 const listRegions = `-- name: ListRegions :many
-SELECT id, name FROM regions ORDER BY name
+SELECT
+    id,
+    name
+FROM
+    regions
+ORDER BY
+    name
 `
 
 func (q *Queries) ListRegions(ctx context.Context) ([]Region, error) {
@@ -627,9 +838,15 @@ func (q *Queries) ListRegions(ctx context.Context) ([]Region, error) {
 }
 
 const listSchools = `-- name: ListSchools :many
-SELECT id, school_number, name, district_id
-FROM schools
-ORDER BY name
+SELECT
+    id,
+    school_number,
+    name,
+    district_id
+FROM
+    schools
+ORDER BY
+    name
 `
 
 type ListSchoolsRow struct {
@@ -668,10 +885,17 @@ func (q *Queries) ListSchools(ctx context.Context) ([]ListSchoolsRow, error) {
 }
 
 const listSchoolsByDistrictId = `-- name: ListSchoolsByDistrictId :many
-SELECT id, school_number, name, district_id
-FROM schools
-WHERE district_id = $1
-ORDER BY name
+SELECT
+    id,
+    school_number,
+    name,
+    district_id
+FROM
+    schools
+WHERE
+    district_id = $1
+ORDER BY
+    name
 `
 
 type ListSchoolsByDistrictIdRow struct {
@@ -711,23 +935,26 @@ func (q *Queries) ListSchoolsByDistrictId(ctx context.Context, districtID int32)
 
 const listStudents = `-- name: ListStudents :many
 SELECT
-  id,
-  student_number,
-  first_name,
-  last_name,
-  date_of_birth,
-  gender,
-  form_level,
-  guardian_name,
-  previous_school,
-  school_id,
-  academic_year_id,
-  status,
-  created_at,
-  updated_at
-FROM students
-ORDER BY id DESC
-LIMIT $1 OFFSET $2
+    id,
+    student_number,
+    first_name,
+    last_name,
+    date_of_birth,
+    gender,
+    form_level,
+    guardian_name,
+    previous_school,
+    school_id,
+    academic_year_id,
+    status,
+    created_at,
+    updated_at
+FROM
+    students
+ORDER BY
+    id DESC
+LIMIT
+    $1 OFFSET $2
 `
 
 type ListStudentsParams struct {
@@ -854,8 +1081,64 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 	return items, nil
 }
 
+const updateAcademicYear = `-- name: UpdateAcademicYear :one
+UPDATE
+    academic_years
+SET
+    year = $2,
+    start_date = $3,
+    end_date = $4,
+    status = $5,
+    updated_at = NOW()
+WHERE
+    id = $1 RETURNING id,
+    year,
+    start_date,
+    end_date,
+    status,
+    created_at,
+    updated_at
+`
+
+type UpdateAcademicYearParams struct {
+	ID        int32
+	Year      int32
+	StartDate time.Time
+	EndDate   time.Time
+	Status    sql.NullString
+}
+
+func (q *Queries) UpdateAcademicYear(ctx context.Context, arg UpdateAcademicYearParams) (AcademicYear, error) {
+	row := q.db.QueryRowContext(ctx, updateAcademicYear,
+		arg.ID,
+		arg.Year,
+		arg.StartDate,
+		arg.EndDate,
+		arg.Status,
+	)
+	var i AcademicYear
+	err := row.Scan(
+		&i.ID,
+		&i.Year,
+		&i.StartDate,
+		&i.EndDate,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateDistrict = `-- name: UpdateDistrict :one
-UPDATE districts SET name = $2, region_id = $3 WHERE id = $1 RETURNING id, name, region_id
+UPDATE
+    districts
+SET
+    name = $2,
+    region_id = $3
+WHERE
+    id = $1 RETURNING id,
+    name,
+    region_id
 `
 
 type UpdateDistrictParams struct {
@@ -872,7 +1155,13 @@ func (q *Queries) UpdateDistrict(ctx context.Context, arg UpdateDistrictParams) 
 }
 
 const updateRegion = `-- name: UpdateRegion :one
-UPDATE regions SET name = $2 WHERE id = $1 RETURNING id, name
+UPDATE
+    regions
+SET
+    name = $2
+WHERE
+    id = $1 RETURNING id,
+    name
 `
 
 type UpdateRegionParams struct {
@@ -888,10 +1177,17 @@ func (q *Queries) UpdateRegion(ctx context.Context, arg UpdateRegionParams) (Reg
 }
 
 const updateSchool = `-- name: UpdateSchool :one
-UPDATE schools
-SET school_number = $2, name = $3, district_id = $4
-WHERE id = $1
-RETURNING id, school_number, name, district_id
+UPDATE
+    schools
+SET
+    school_number = $2,
+    name = $3,
+    district_id = $4
+WHERE
+    id = $1 RETURNING id,
+    school_number,
+    name,
+    district_id
 `
 
 type UpdateSchoolParams struct {
@@ -926,36 +1222,36 @@ func (q *Queries) UpdateSchool(ctx context.Context, arg UpdateSchoolParams) (Upd
 }
 
 const updateStudent = `-- name: UpdateStudent :one
-UPDATE students
+UPDATE
+    students
 SET
-  student_number = $2,
-  first_name = $3,
-  last_name = $4,
-  date_of_birth = $5,
-  gender = $6,
-  form_level = $7,
-  guardian_name = $8,
-  previous_school = $9,
-  school_id = $10,
-  academic_year_id = $11,
-  status = $12,
-  updated_at = NOW()
-WHERE id = $1
-RETURNING
-  id,
-  student_number,
-  first_name,
-  last_name,
-  date_of_birth,
-  gender,
-  form_level,
-  guardian_name,
-  previous_school,
-  school_id,
-  academic_year_id,
-  status,
-  created_at,
-  updated_at
+    student_number = $2,
+    first_name = $3,
+    last_name = $4,
+    date_of_birth = $5,
+    gender = $6,
+    form_level = $7,
+    guardian_name = $8,
+    previous_school = $9,
+    school_id = $10,
+    academic_year_id = $11,
+    status = $12,
+    updated_at = NOW()
+WHERE
+    id = $1 RETURNING id,
+    student_number,
+    first_name,
+    last_name,
+    date_of_birth,
+    gender,
+    form_level,
+    guardian_name,
+    previous_school,
+    school_id,
+    academic_year_id,
+    status,
+    created_at,
+    updated_at
 `
 
 type UpdateStudentParams struct {

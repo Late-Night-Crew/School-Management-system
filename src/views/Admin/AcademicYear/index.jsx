@@ -1,17 +1,28 @@
 import React, { useEffect, useState } from "react";
-
+import { 
+  fetchacademics, 
+  createacademic, 
+  updateacademic, 
+  deleteacademic 
+} from "../services/academicService"; 
 
 const AcademicManager = () => {
   const [academics, setAcademics] = useState([]);
-  const [editingItem, setEditingItem] = useState(null); // Item being edited
+  const [editingItem, setEditingItem] = useState(null);
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState({ type: "", message: "" });
   const [formData, setFormData] = useState({
     year: "",
     start_date: "",
     end_date: "",
-    status: "Upcoming",
+    status: "pending", // default to match backend
   });
+
+  // Map services to local function names for clarity
+  const getAcademics = fetchacademics;
+  const createAcademic = createacademic;
+  const updateAcademic = updateacademic;
+  const deleteAcademic = deleteacademic;
 
   const showAlert = (type, message) => {
     setAlert({ type, message });
@@ -44,8 +55,8 @@ const AcademicManager = () => {
     setEditingItem(item);
     setFormData({
       year: item.year,
-      start_date: item.start_date, // Ensure API returns YYYY-MM-DD
-      end_date: item.end_date,     // Ensure API returns YYYY-MM-DD
+      start_date: item.start_date,
+      end_date: item.end_date,
       status: item.status,
     });
   };
@@ -56,36 +67,38 @@ const AcademicManager = () => {
       year: "",
       start_date: "",
       end_date: "",
-      status: "Upcoming",
+      status: "pending",
     });
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-
-    // Basic date validation
+  
     if (new Date(formData.end_date) <= new Date(formData.start_date)) {
       showAlert("danger", "End date must be after the start date.");
       return;
     }
-
+  
     try {
+      // Ensure 'year' is sent as an integer
+      const payload = { ...formData, year: parseInt(formData.year, 10) };
+  
       if (editingItem) {
-        await updateAcademic(editingItem.id, formData);
-        showAlert("success", `Academic Year ${formData.year} updated successfully.`);
+        await updateAcademic(editingItem.id, payload);
+        showAlert("success", `Academic Year ${payload.year} updated successfully.`);
       } else {
-        await createAcademic(formData);
-        showAlert("success", `Academic Year ${formData.year} created successfully.`);
+        await createAcademic(payload);
+        showAlert("success", `Academic Year ${payload.year} created successfully.`);
       }
-      
+  
       fetchAcademics();
       handleClear();
-
     } catch (err) {
       showAlert("danger", err.message || "Error saving record.");
     }
   };
   
+
   const handleDelete = async (id) => {
     if (!window.confirm("Are you sure you want to delete this academic year?")) return;
     try {
@@ -97,12 +110,12 @@ const AcademicManager = () => {
     }
   };
 
-  // Helper for status badge styling
+  // --- Status Badge Helper ---
   const getStatusBadgeClass = (status) => {
     switch (status.toLowerCase()) {
       case "active": return "badge bg-success";
-      case "completed": return "badge bg-secondary";
-      case "upcoming": return "badge bg-info text-dark";
+      case "inactive": return "badge bg-secondary";
+      case "pending": return "badge bg-info text-dark";
       default: return "badge bg-light text-dark";
     }
   };
@@ -171,9 +184,9 @@ const AcademicManager = () => {
               onChange={handleChange} 
               required
             >
-              <option value="Upcoming">Upcoming</option>
-              <option value="Active">Active</option>
-              <option value="Completed">Completed</option>
+              <option value="pending">Pending</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
             </select>
           </div>
         </div>

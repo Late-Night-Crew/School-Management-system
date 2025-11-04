@@ -9,6 +9,7 @@ import ManageSchool from "./views/Admin/Manageschools";
 import Districts from "./views/Admin/ManageDistricts";
 import ManageDivisions from "./views/Admin/ManageDivisions";
 import ManageStudents from "./views/Admin/Managestudents";
+import AcademicManager from "./views/Admin/AcademicYear";
 
 const router = createHashRouter([
     {
@@ -16,7 +17,7 @@ const router = createHashRouter([
         element: <AppShell />,
         children: [
             { path: "", element: <Login /> },
-         
+
         ]
     },
     {
@@ -24,16 +25,18 @@ const router = createHashRouter([
         element: <AdminAppShell />,
         children: [
             /*adminauth - admin login*/
-            {path: "login", element: <AdminLogin /> },
+            { path: "login", element: <AdminLogin /> },
             { path: "dashboard", element: <AdminDashboard /> },
             { path: "manageschools", element: <ManageSchool /> },
-            {path: "managedistricts", element: <Districts /> },
-            {path: "managedivisions", element: <ManageDivisions /> },
-            {path: "managestudents", element: <ManageStudents /> },
-            ]
+            { path: "managedistricts", element: <Districts /> },
+            { path: "managedivisions", element: <ManageDivisions /> },
+            { path: "managestudents", element: <ManageStudents /> },
+            { path: "manageacademicyear", element: <AcademicManager /> },
+
+        ]
     },
 
-      
+
 
 ]);
 
