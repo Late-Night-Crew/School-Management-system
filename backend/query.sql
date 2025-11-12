@@ -4,6 +4,9 @@ SELECT
     display_name,
     email,
     role,
+    region_id,
+    district_id,
+    school_id,
     password,
     last_login_at
 FROM

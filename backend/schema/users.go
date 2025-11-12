@@ -31,6 +31,9 @@ type NewUserRequest struct {
 	Email        string `json:"email" validate:"required"`
 	Password     string `json:"password" validate:"required"`
 	Role         string `json:"role"`
+	RegionID     *int64 `json:"region_id"`
+	DistrictID   *int64 `json:"district_id"`
+	SchoolID     *int64 `json:"school_id"`
 	Status       string `json:"status"`
 	IsSuperAdmin bool   `json:"is_super_admin"`
 }
@@ -47,9 +50,9 @@ type LoginResponse struct {
 	DisplayName string `json:"display_name"`
 	Email       string `json:"email"`
 	Role        string `json:"role"`
-	RegionID    *int64 `json:"region_id,omitempty"`
-	DistrictID  *int64 `json:"district_id,omitempty"`
-	SchoolID    *int64 `json:"school_id,omitempty"`
+	RegionID    *int64 `json:"region_id"`
+	DistrictID  *int64 `json:"district_id"`
+	SchoolID    *int64 `json:"school_id"`
 	IsSuperAdmin bool   `json:"is_super_admin"`
 	Token       string `json:"token"`
 	ExpiresAt   int64  `json:"expires_at"`

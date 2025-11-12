@@ -71,11 +71,29 @@ func (a authServiceImpl) SignIn(request *schema.LoginRequest) (*schema.LoginResp
 		return nil, ErrInvalidCredentials
 	}
 
+	var regionID, districtID, schoolID *int64
+
+	if user.RegionID.Valid {
+		val := int64(user.RegionID.Int32)
+		regionID = &val
+	}
+	if user.DistrictID.Valid {
+		val := int64(user.DistrictID.Int32)
+		districtID = &val
+	}
+	if user.SchoolID.Valid {
+		val := int64(user.SchoolID.Int32)
+		schoolID = &val
+	}
+
 	res := &schema.LoginResponse{
 		UserID:      int64(user.ID),
 		DisplayName: user.DisplayName,
 		Email:       user.Email,
 		Role:        user.Role,
+		RegionID:    regionID,
+		DistrictID:  districtID,
+		SchoolID:    schoolID,
 		ExpiresAt:   0,
 	}
 

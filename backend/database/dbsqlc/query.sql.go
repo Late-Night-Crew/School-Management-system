@@ -486,6 +486,9 @@ SELECT
     display_name,
     email,
     role,
+    region_id,
+    district_id,
+    school_id,
     password,
     last_login_at
 FROM
@@ -501,6 +504,9 @@ type FindUserLoginByEmailRow struct {
 	DisplayName string
 	Email       string
 	Role        string
+	RegionID    sql.NullInt32
+	DistrictID  sql.NullInt32
+	SchoolID    sql.NullInt32
 	Password    string
 	LastLoginAt sql.NullTime
 }
@@ -513,6 +519,9 @@ func (q *Queries) FindUserLoginByEmail(ctx context.Context, email string) (FindU
 		&i.DisplayName,
 		&i.Email,
 		&i.Role,
+		&i.RegionID,
+		&i.DistrictID,
+		&i.SchoolID,
 		&i.Password,
 		&i.LastLoginAt,
 	)
