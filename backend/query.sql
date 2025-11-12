@@ -3,6 +3,7 @@ SELECT
     id,
     display_name,
     email,
+    role,
     password,
     last_login_at
 FROM

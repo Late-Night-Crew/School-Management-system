@@ -1,10 +1,10 @@
 package services
 
-import(
+import (
 	"context"
 	"database/sql"
-	"fmt"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -51,10 +51,8 @@ func generateJWTToken(res *schema.LoginResponse, expireAfter int64) *jwt.Token {
 	claims["school_id"] = res.SchoolID
 	claims["iat"] = time.Now().Unix()
 	claims["exp"] = expireAfter
-
 	return token
 }
-
 
 func (a authServiceImpl) SignIn(request *schema.LoginRequest) (*schema.LoginResponse, error) {
 	user, err := a.queries.FindUserLoginByEmail(context.Background(), request.Email)
@@ -77,6 +75,7 @@ func (a authServiceImpl) SignIn(request *schema.LoginRequest) (*schema.LoginResp
 		UserID:      int64(user.ID),
 		DisplayName: user.DisplayName,
 		Email:       user.Email,
+		Role:        user.Role,
 		ExpiresAt:   0,
 	}
 

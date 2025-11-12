@@ -31,7 +31,6 @@ type CreateAcademicYearParams struct {
 type CreateAcademicYearRow struct {
 	ID        int32
 	Year      int32
-	
 	CreatedAt sql.NullTime
 	UpdatedAt sql.NullTime
 }
@@ -486,6 +485,7 @@ SELECT
     id,
     display_name,
     email,
+    role,
     password,
     last_login_at
 FROM
@@ -500,6 +500,7 @@ type FindUserLoginByEmailRow struct {
 	ID          int32
 	DisplayName string
 	Email       string
+	Role        string
 	Password    string
 	LastLoginAt sql.NullTime
 }
@@ -511,6 +512,7 @@ func (q *Queries) FindUserLoginByEmail(ctx context.Context, email string) (FindU
 		&i.ID,
 		&i.DisplayName,
 		&i.Email,
+		&i.Role,
 		&i.Password,
 		&i.LastLoginAt,
 	)
