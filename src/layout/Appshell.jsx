@@ -1,17 +1,17 @@
 import React from "react";
-// import Navbar from "./Navbar";
-// import Footer from "./Footer";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
+import Sidebar from "./Sidebar";
 
-function AppShell() {
-    return (
-        <div>
-            {/* <Navbar /> */}
-            <main className="p-1">
-                <Outlet />
-            </main>
-            {/* <Footer /> */}
-        </div>
-    );
+export default function AppShell() {
+  const location = useLocation();
+  const hideSidebar = location.pathname === "/";
+
+  return (
+    <div className="d-flex">
+      {!hideSidebar && <Sidebar />}
+      <main className="flex-grow-1 bg-light min-vh-100">
+        <Outlet />
+      </main>
+    </div>
+  );
 }
-export default AppShell;

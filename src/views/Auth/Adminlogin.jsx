@@ -4,7 +4,7 @@ import { useFormik } from "formik";
 import AuthService from "../Admin/services/auth";
 import { useNavigate } from "react-router-dom";
 
-export default function Login() {
+export default function AdminLogin() {
   const [alert, setAlert] = useState(null);
   const navigate = useNavigate();
 
@@ -69,7 +69,7 @@ export default function Login() {
           </div>
         </div>
 
-        <h3 className="text-center mb-4 text-primary fw-bold">Login</h3>
+        <h3 className="text-center mb-4 text-primary fw-bold">Admin Login</h3>
         <p className="text-center text-muted">
           Open Day Secondary School Management
         </p>

@@ -10,6 +10,17 @@ func NullString(value string) sql.NullString {
 	return sql.NullString{String: value, Valid: value != ""}
 }
 
+func StringToNullTime(value string) sql.NullTime {
+	if value == "" {
+		return sql.NullTime{Valid: false}
+	}
+	t, err := time.Parse("2006-01-02", value)
+	if err != nil {
+		return sql.NullTime{Valid: false}
+	}
+	return sql.NullTime{Time: t, Valid: true}
+}
+
 func TrueNullBool() sql.NullBool {
 	return sql.NullBool{Bool: true, Valid: true}
 }
