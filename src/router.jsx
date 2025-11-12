@@ -26,7 +26,7 @@ const router = createHashRouter([
         path: "/admin",
         element: <AdminAppShell />,
         children: [
-            /*adminauth - admin login*/
+            { path: "", element: <AdminLogin /> },
             { path: "login", element: <AdminLogin /> },
             { path: "dashboard", element: <AdminDashboard /> },
             { path: "manageschools", element: <ManageSchool /> },

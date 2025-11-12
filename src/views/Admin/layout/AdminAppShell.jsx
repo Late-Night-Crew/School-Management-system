@@ -6,8 +6,9 @@ import AdminSidebar from "./AdminSIdebar";
 export default function AdminAppShell() {
     const location = useLocation();
     const hideSidebar =
-        location.pathname === "/admin/login" ||
-        location.pathname === "/admin/create-user";
+        location.pathname === "/admin/" ||
+        location.pathname === "/admin" ||
+        location.pathname === "/admin/login";
 
     return (
         <div className="d-flex">

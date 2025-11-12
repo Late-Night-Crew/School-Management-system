@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import "bootstrap-icons/font/bootstrap-icons.css";
+import { AUTH_TOKEN_KEY } from "../views/constants/storageKeys";
 import { USER_ROLE_KEY } from "../views/constants/storageKeys";
 
 export default function Sidebar() {
@@ -10,9 +11,14 @@ export default function Sidebar() {
 
     useEffect(() => {
         const storedRole = localStorage.getItem(USER_ROLE_KEY);
-        console.log("🔍 Sidebar: fetched role from localStorage =", storedRole);
         if (storedRole) setRole(storedRole);
     }, []);
+
+    const logout = () => {
+        localStorage.removeItem(AUTH_TOKEN_KEY);
+        localStorage.removeItem(USER_ROLE_KEY);
+        window.location.href = "/"
+    };
 
     const commonItems = [
         { name: "Dashboard", path: "/admin/dashboard", icon: "bi-speedometer2" },
@@ -38,12 +44,12 @@ export default function Sidebar() {
         ...commonItems,
         ...(roleMenus[role] || []),
         { name: "Notifications", path: "/notifications", icon: "bi-bell", badge: 6 },
-        { name: "Logout", path: "/logout", icon: "bi-box-arrow-right" },
+        { name: "Logout", icon: "bi-box-arrow-right", action: logout }, // use action
     ];
 
-    // ✅ RETURN JSX HERE
     return (
         <>
+            {/* Overlay for mobile */}
             {isMobileOpen && (
                 <div
                     className="position-fixed top-0 start-0 w-100 h-100 bg-dark bg-opacity-50 d-md-none"
@@ -63,6 +69,7 @@ export default function Sidebar() {
                     transition: "all 0.3s ease",
                 }}
             >
+                {/* Header */}
                 <div className="px-3 py-3 border-bottom border-secondary d-flex align-items-center justify-content-between">
                     <h5 className="m-0 fw-bold text-uppercase">
                         {role === "superadmin"
@@ -79,39 +86,48 @@ export default function Sidebar() {
                     </button>
                 </div>
 
+                {/* Navigation */}
                 <nav className="flex-grow-1 overflow-auto mt-2">
                     <ul className="nav flex-column px-2">
                         {menuItems.map((item) => {
                             const isActive = location.pathname === item.path;
                             return (
                                 <li className="nav-item mb-1" key={item.name}>
-                                    <Link
-                                        to={item.path}
-                                        className={`nav-link d-flex align-items-center justify-content-between px-3 py-2 rounded ${
-                                            isActive
-                                                ? "bg-primary text-white"
-                                                : "text-light hover-effect"
-                                        }`}
-                                        style={{
-                                            transition: "all 0.2s",
-                                            textDecoration: "none",
-                                            fontSize: "0.9rem",
-                                        }}
-                                        onClick={() => setIsMobileOpen(false)}
-                                    >
-                                        <div className="d-flex align-items-center">
-                                            <i
-                                                className={`bi ${item.icon}`}
-                                                style={{ fontSize: "1.1rem" }}
-                                            ></i>
-                                            <span className="ms-3">{item.name}</span>
-                                        </div>
-                                        {item.badge && (
-                                            <span className="badge bg-danger rounded-pill">
-                                                {item.badge}
-                                            </span>
-                                        )}
-                                    </Link>
+                                    {item.action ? (
+                                        <button
+                                            className="nav-link d-flex align-items-center justify-content-between px-3 py-2 rounded text-light hover-effect"
+                                            style={{ transition: "all 0.2s", fontSize: "0.9rem", background: 'none', border: 'none', width: '100%', textAlign: 'left' }}
+                                            onClick={() => {
+                                                item.action();
+                                                setIsMobileOpen(false);
+                                            }}
+                                        >
+                                            <div className="d-flex align-items-center">
+                                                <i className={`bi ${item.icon}`} style={{ fontSize: "1.1rem" }}></i>
+                                                <span className="ms-3">{item.name}</span>
+                                            </div>
+                                            {item.badge && (
+                                                <span className="badge bg-danger rounded-pill">{item.badge}</span>
+                                            )}
+                                        </button>
+                                    ) : (
+                                        <Link
+                                            to={item.path}
+                                            className={`nav-link d-flex align-items-center justify-content-between px-3 py-2 rounded ${
+                                                isActive ? "bg-primary text-white" : "text-light hover-effect"
+                                            }`}
+                                            style={{ transition: "all 0.2s", textDecoration: "none", fontSize: "0.9rem" }}
+                                            onClick={() => setIsMobileOpen(false)}
+                                        >
+                                            <div className="d-flex align-items-center">
+                                                <i className={`bi ${item.icon}`} style={{ fontSize: "1.1rem" }}></i>
+                                                <span className="ms-3">{item.name}</span>
+                                            </div>
+                                            {item.badge && (
+                                                <span className="badge bg-danger rounded-pill">{item.badge}</span>
+                                            )}
+                                        </Link>
+                                    )}
                                 </li>
                             );
                         })}
@@ -129,13 +145,10 @@ export default function Sidebar() {
                 `}</style>
             </aside>
 
+            {/* Mobile toggle button */}
             <button
                 className="btn btn-dark d-md-none position-fixed shadow-sm"
-                style={{
-                    zIndex: 1050,
-                    top: "1rem",
-                    left: "1rem",
-                }}
+                style={{ zIndex: 1050, top: "1rem", left: "1rem" }}
                 onClick={() => setIsMobileOpen(true)}
             >
                 <i className="bi bi-list fs-4"></i>

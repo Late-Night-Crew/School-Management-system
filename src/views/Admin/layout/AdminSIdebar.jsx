@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import "bootstrap-icons/font/bootstrap-icons.css";
-
+import { AUTH_TOKEN_KEY,USER_ROLE_KEY } from "../../constants/storageKeys";
 export default function AdminSidebar({ role = "admin" }) {
   const location = useLocation();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
@@ -10,6 +10,11 @@ export default function AdminSidebar({ role = "admin" }) {
   const commonItems = [
     { name: "Dashboard", path: "/admin/dashboard", icon: "bi-speedometer2" },
   ];
+const logout = () => {
+        localStorage.removeItem(AUTH_TOKEN_KEY);
+        localStorage.removeItem(USER_ROLE_KEY);
+        window.location.href = "/admin/login";
+    };
 
   // Role-specific menu sets
   const roleMenus = {
@@ -26,29 +31,16 @@ export default function AdminSidebar({ role = "admin" }) {
       { name: "Reports", path: "/admin/reports", icon: "bi-file-earmark-text" },
       { name: "Settings", path: "/admin/settings", icon: "bi-gear" },
     ],
-    region_admin: [
-      { name: "Schools", path: "/regional/schools", icon: "bi-building" },
-      { name: "Transfer Requests", path: "/regional/transfers", icon: "bi-arrow-left-right" },
-      { name: "Reports", path: "/regional/reports", icon: "bi-file-earmark-text" },
-      { name: "Settings", path: "/regional/settings", icon: "bi-gear" },
-    ],
-    school_admin: [
-      { name: "Register Learners", path: "/school/register", icon: "bi-person-plus" },
-      { name: "Performance", path: "/school/performance", icon: "bi-bar-chart" },
-      { name: "Transfers", path: "/school/transfers", icon: "bi-arrow-left-right" },
-      { name: "Reports", path: "/school/reports", icon: "bi-file-earmark-text" },
-      { name: "Settings", path: "/school/settings", icon: "bi-gear" },
-    ],
   };
 
   // Combine menus
   const menuItems = [
     ...commonItems,
     ...(roleMenus[role] || []),
-    
     { name: "Notifications", path: "/notifications", icon: "bi-bell", badge: 6 },
-    { name: "Logout", path: "/logout", icon: "bi-box-arrow-right" },
-  ];
+    { name: "Logout", icon: "bi-box-arrow-right", action: logout }, // use action
+];
+
 
   return (
     <>
