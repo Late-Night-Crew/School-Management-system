@@ -11,6 +11,41 @@ import (
 	"time"
 )
 
+const approveTransfer = `-- name: ApproveTransfer :one
+WITH updated_student AS (
+    UPDATE students
+    SET school_id = $2
+    WHERE students.id = $3
+    RETURNING students.id
+)
+UPDATE transfers
+SET
+    status = 'Accepted',
+    date_accepted = CURRENT_TIMESTAMP
+WHERE
+    transfers.id = $1
+RETURNING transfers.id, status, date_accepted
+`
+
+type ApproveTransferParams struct {
+	TransferID  int32
+	NewSchoolID int32
+	StudentID   int32
+}
+
+type ApproveTransferRow struct {
+	ID           int32
+	Status       sql.NullString
+	DateAccepted sql.NullTime
+}
+
+func (q *Queries) ApproveTransfer(ctx context.Context, arg ApproveTransferParams) (ApproveTransferRow, error) {
+	row := q.db.QueryRowContext(ctx, approveTransfer, arg.TransferID, arg.NewSchoolID, arg.StudentID)
+	var i ApproveTransferRow
+	err := row.Scan(&i.ID, &i.Status, &i.DateAccepted)
+	return i, err
+}
+
 const createAcademicYear = `-- name: CreateAcademicYear :one
 INSERT INTO 
     academic_years (year, start_date, end_date, status, created_at, updated_at)
@@ -220,6 +255,59 @@ func (q *Queries) CreateStudent(ctx context.Context, arg CreateStudentParams) (C
 	return i, err
 }
 
+const createTransferRequest = `-- name: CreateTransferRequest :one
+INSERT INTO transfers (
+    student_id,
+    from_school,
+    to_school,
+    status,
+    date_initiated,
+    reason
+)
+VALUES
+    ($1, $2, $3, 'Pending', $4, $5)
+RETURNING id, student_id, from_school, to_school, status, date_initiated, reason
+`
+
+type CreateTransferRequestParams struct {
+	StudentID     int32
+	FromSchool    int32
+	ToSchool      int32
+	DateInitiated sql.NullTime
+	Reason        sql.NullString
+}
+
+type CreateTransferRequestRow struct {
+	ID            int32
+	StudentID     int32
+	FromSchool    int32
+	ToSchool      int32
+	Status        sql.NullString
+	DateInitiated sql.NullTime
+	Reason        sql.NullString
+}
+
+func (q *Queries) CreateTransferRequest(ctx context.Context, arg CreateTransferRequestParams) (CreateTransferRequestRow, error) {
+	row := q.db.QueryRowContext(ctx, createTransferRequest,
+		arg.StudentID,
+		arg.FromSchool,
+		arg.ToSchool,
+		arg.DateInitiated,
+		arg.Reason,
+	)
+	var i CreateTransferRequestRow
+	err := row.Scan(
+		&i.ID,
+		&i.StudentID,
+		&i.FromSchool,
+		&i.ToSchool,
+		&i.Status,
+		&i.DateInitiated,
+		&i.Reason,
+	)
+	return i, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO
     users (
@@ -365,6 +453,27 @@ WHERE
 func (q *Queries) DeleteUser(ctx context.Context, id int32) error {
 	_, err := q.db.ExecContext(ctx, deleteUser, id)
 	return err
+}
+
+const finalizeTransfer = `-- name: FinalizeTransfer :one
+UPDATE transfers
+SET
+    status = 'Completed'
+WHERE
+    transfers.id = $1
+RETURNING transfers.id, status
+`
+
+type FinalizeTransferRow struct {
+	ID     int32
+	Status sql.NullString
+}
+
+func (q *Queries) FinalizeTransfer(ctx context.Context, id int32) (FinalizeTransferRow, error) {
+	row := q.db.QueryRowContext(ctx, finalizeTransfer, id)
+	var i FinalizeTransferRow
+	err := row.Scan(&i.ID, &i.Status)
+	return i, err
 }
 
 const findDistrictById = `-- name: FindDistrictById :one
@@ -685,6 +794,86 @@ func (q *Queries) GetStudentsBySchoolID(ctx context.Context, schoolID int32) ([]
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getTransferByID = `-- name: GetTransferByID :one
+SELECT
+    id,
+    student_id,
+    from_school,
+    to_school,
+    status,
+    date_initiated,
+    date_accepted,
+    reason
+FROM
+    transfers
+WHERE
+    id = $1
+`
+
+func (q *Queries) GetTransferByID(ctx context.Context, id int32) (Transfer, error) {
+	row := q.db.QueryRowContext(ctx, getTransferByID, id)
+	var i Transfer
+	err := row.Scan(
+		&i.ID,
+		&i.StudentID,
+		&i.FromSchool,
+		&i.ToSchool,
+		&i.Status,
+		&i.DateInitiated,
+		&i.DateAccepted,
+		&i.Reason,
+	)
+	return i, err
+}
+
+const getTransfersByToSchoolID = `-- name: GetTransfersByToSchoolID :many
+SELECT
+    id,
+    student_id,
+    from_school,
+    to_school,
+    status,
+    date_initiated,
+    date_accepted,
+    reason
+FROM
+    transfers
+WHERE
+    to_school = $1
+`
+
+func (q *Queries) GetTransfersByToSchoolID(ctx context.Context, toSchool int32) ([]Transfer, error) {
+	rows, err := q.db.QueryContext(ctx, getTransfersByToSchoolID, toSchool)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Transfer
+	for rows.Next() {
+		var i Transfer
+		if err := rows.Scan(
+			&i.ID,
+			&i.StudentID,
+			&i.FromSchool,
+			&i.ToSchool,
+			&i.Status,
+			&i.DateInitiated,
+			&i.DateAccepted,
+			&i.Reason,
 		); err != nil {
 			return nil, err
 		}

@@ -469,3 +469,71 @@ DELETE FROM
     academic_years
 WHERE
     id = $1;
+
+
+-- name: CreateTransferRequest :one
+INSERT INTO transfers (
+    student_id,
+    from_school,
+    to_school,
+    status,
+    date_initiated,
+    reason
+)
+VALUES
+    ($1, $2, $3, 'Pending', $4, $5)
+RETURNING id, student_id, from_school, to_school, status, date_initiated, reason;
+
+-- name: GetTransfersByToSchoolID :many
+SELECT
+    id,
+    student_id,
+    from_school,
+    to_school,
+    status,
+    date_initiated,
+    date_accepted,
+    reason
+FROM
+    transfers
+WHERE
+    to_school = $1;
+
+-- name: GetTransferByID :one
+SELECT
+    id,
+    student_id,
+    from_school,
+    to_school,
+    status,
+    date_initiated,
+    date_accepted,
+    reason
+FROM
+    transfers
+WHERE
+    id = $1;
+
+-- name: ApproveTransfer :one
+WITH updated_student AS (
+    UPDATE students
+    SET school_id = sqlc.arg(new_school_id)
+    WHERE students.id = sqlc.arg(student_id)
+    RETURNING students.id
+)
+UPDATE transfers
+SET
+    status = 'Accepted',
+    date_accepted = CURRENT_TIMESTAMP
+WHERE
+    transfers.id = sqlc.arg(transfer_id)
+RETURNING transfers.id, status, date_accepted;
+
+
+-- name: FinalizeTransfer :one
+UPDATE transfers
+SET
+    status = 'Completed'
+WHERE
+    transfers.id = $1
+RETURNING transfers.id, status;

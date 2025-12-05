@@ -70,6 +70,7 @@ type Transfer struct {
 	Status        sql.NullString
 	DateInitiated sql.NullTime
 	DateAccepted  sql.NullTime
+	Reason        sql.NullString
 }
 
 type User struct {

@@ -6,7 +6,8 @@ CREATE TABLE IF NOT EXISTS transfers (
     to_school INT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
     status VARCHAR(50) DEFAULT 'Pending' CHECK (status IN ('Pending', 'Accepted', 'Rejected')),
     date_initiated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    date_accepted TIMESTAMP
+    date_accepted TIMESTAMP,
+    reason TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_transfers_student_id ON transfers(student_id);
