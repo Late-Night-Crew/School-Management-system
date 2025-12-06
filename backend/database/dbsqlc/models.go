@@ -63,14 +63,15 @@ type Student struct {
 }
 
 type Transfer struct {
-	ID            int32
-	StudentID     int32
-	FromSchool    int32
-	ToSchool      int32
-	Status        sql.NullString
-	DateInitiated sql.NullTime
-	DateAccepted  sql.NullTime
-	Reason        sql.NullString
+	ID              int32
+	StudentID       int32
+	FromSchool      int32
+	ToSchool        int32
+	Status          sql.NullString
+	DateInitiated   sql.NullTime
+	DateAccepted    sql.NullTime
+	Reason          sql.NullString
+	RejectionReason sql.NullString
 }
 
 type User struct {

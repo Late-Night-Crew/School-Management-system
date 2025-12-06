@@ -667,6 +667,65 @@ func (q *Queries) GetAcademicYearByID(ctx context.Context, id int32) (AcademicYe
 	return i, err
 }
 
+const getOutgoingTransfers = `-- name: GetOutgoingTransfers :many
+SELECT
+    id,
+    student_id,
+    from_school,
+    to_school,
+    status,
+    date_initiated,
+    date_accepted,
+    reason
+FROM
+    transfers
+WHERE
+    from_school = $1
+`
+
+type GetOutgoingTransfersRow struct {
+	ID            int32
+	StudentID     int32
+	FromSchool    int32
+	ToSchool      int32
+	Status        sql.NullString
+	DateInitiated sql.NullTime
+	DateAccepted  sql.NullTime
+	Reason        sql.NullString
+}
+
+func (q *Queries) GetOutgoingTransfers(ctx context.Context, fromSchool int32) ([]GetOutgoingTransfersRow, error) {
+	rows, err := q.db.QueryContext(ctx, getOutgoingTransfers, fromSchool)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetOutgoingTransfersRow
+	for rows.Next() {
+		var i GetOutgoingTransfersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.StudentID,
+			&i.FromSchool,
+			&i.ToSchool,
+			&i.Status,
+			&i.DateInitiated,
+			&i.DateAccepted,
+			&i.Reason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getStudentByID = `-- name: GetStudentByID :one
 SELECT
     id,
@@ -824,9 +883,20 @@ WHERE
     id = $1
 `
 
-func (q *Queries) GetTransferByID(ctx context.Context, id int32) (Transfer, error) {
+type GetTransferByIDRow struct {
+	ID            int32
+	StudentID     int32
+	FromSchool    int32
+	ToSchool      int32
+	Status        sql.NullString
+	DateInitiated sql.NullTime
+	DateAccepted  sql.NullTime
+	Reason        sql.NullString
+}
+
+func (q *Queries) GetTransferByID(ctx context.Context, id int32) (GetTransferByIDRow, error) {
 	row := q.db.QueryRowContext(ctx, getTransferByID, id)
-	var i Transfer
+	var i GetTransferByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.StudentID,
@@ -856,15 +926,26 @@ WHERE
     to_school = $1
 `
 
-func (q *Queries) GetTransfersByToSchoolID(ctx context.Context, toSchool int32) ([]Transfer, error) {
+type GetTransfersByToSchoolIDRow struct {
+	ID            int32
+	StudentID     int32
+	FromSchool    int32
+	ToSchool      int32
+	Status        sql.NullString
+	DateInitiated sql.NullTime
+	DateAccepted  sql.NullTime
+	Reason        sql.NullString
+}
+
+func (q *Queries) GetTransfersByToSchoolID(ctx context.Context, toSchool int32) ([]GetTransfersByToSchoolIDRow, error) {
 	rows, err := q.db.QueryContext(ctx, getTransfersByToSchoolID, toSchool)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Transfer
+	var items []GetTransfersByToSchoolIDRow
 	for rows.Next() {
-		var i Transfer
+		var i GetTransfersByToSchoolIDRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.StudentID,
@@ -1279,6 +1360,35 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const rejectTransfer = `-- name: RejectTransfer :one
+UPDATE transfers
+SET
+    status = 'Rejected',
+    rejection_reason = $2,
+    date_accepted = NULL 
+WHERE
+    id = $1
+RETURNING id, status, rejection_reason
+`
+
+type RejectTransferParams struct {
+	ID              int32
+	RejectionReason sql.NullString
+}
+
+type RejectTransferRow struct {
+	ID              int32
+	Status          sql.NullString
+	RejectionReason sql.NullString
+}
+
+func (q *Queries) RejectTransfer(ctx context.Context, arg RejectTransferParams) (RejectTransferRow, error) {
+	row := q.db.QueryRowContext(ctx, rejectTransfer, arg.ID, arg.RejectionReason)
+	var i RejectTransferRow
+	err := row.Scan(&i.ID, &i.Status, &i.RejectionReason)
+	return i, err
 }
 
 const updateAcademicYear = `-- name: UpdateAcademicYear :one

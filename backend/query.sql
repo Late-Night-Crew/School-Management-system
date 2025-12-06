@@ -537,3 +537,28 @@ SET
 WHERE
     transfers.id = $1
 RETURNING transfers.id, status;
+
+-- name: GetOutgoingTransfers :many
+SELECT
+    id,
+    student_id,
+    from_school,
+    to_school,
+    status,
+    date_initiated,
+    date_accepted,
+    reason
+FROM
+    transfers
+WHERE
+    from_school = $1;
+
+-- name: RejectTransfer :one
+UPDATE transfers
+SET
+    status = 'Rejected',
+    rejection_reason = $2,
+    date_accepted = NULL 
+WHERE
+    id = $1
+RETURNING id, status, rejection_reason;

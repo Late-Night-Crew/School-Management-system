@@ -12,9 +12,11 @@ import (
 type TransferService interface {
 	CreateTransferRequest(ctx context.Context, req *schema.CreateTransferRequest) (*schema.Transfer, error)
 	GetIncomingTransfersRequest(ctx context.Context, req *schema.GetIncomingTransfersRequest) ([]*schema.Transfer, error)
+	GetOutgoingTransfers(ctx context.Context, schoolID int64) ([]*schema.Transfer, error)
 	GetTransferByID(ctx context.Context, transferID int64) (*schema.Transfer, error)
 	ApproveTransfer(ctx context.Context, transferID int64) (*schema.Transfer, error)
     FinalizeTransfer(ctx context.Context, transferID int64) (*schema.Transfer, error)
+	RejectTransfer(ctx context.Context, transferID int64, reason string) (*schema.Transfer, error)
 }
 
 type transferService struct {
@@ -81,6 +83,34 @@ func (s *transferService) GetIncomingTransfersRequest(ctx context.Context, req *
 	}
 
 	return res, nil
+}
+
+func (s *transferService) GetOutgoingTransfers(ctx context.Context, schoolID int64) ([]*schema.Transfer, error) {
+    dbTransfers, err := s.queries.GetOutgoingTransfers(ctx, int32(schoolID))
+    if err != nil {
+        return nil, fmt.Errorf("failed to retrieve outgoing transfers: %w", err)
+    }
+    transfers := make([]*schema.Transfer, 0, len(dbTransfers))
+    for _, dbTransfer := range dbTransfers {
+        transfer := &schema.Transfer{
+            ID:            int64(dbTransfer.ID),
+            StudentID:     int64(dbTransfer.StudentID),
+            FromSchoolID:  int64(dbTransfer.FromSchool),
+            ToSchoolID:    int64(dbTransfer.ToSchool),
+            Status:        dbTransfer.Status.String,
+            DateInitiated: dbTransfer.DateInitiated.Time.Format("2006-01-02T15:04:05Z"),
+            Reason:        dbTransfer.Reason.String,
+            DateAccepted:  func() string { 
+                if dbTransfer.DateAccepted.Valid { 
+                    return dbTransfer.DateAccepted.Time.Format("2006-01-02T15:04:05Z") 
+                } 
+                return "" 
+            }(),
+        }
+        transfers = append(transfers, transfer)
+    }
+
+    return transfers, nil
 }
 
 func (s *transferService) GetTransferByID(ctx context.Context, transferID int64) (*schema.Transfer, error) {
@@ -161,4 +191,29 @@ func (s *transferService) FinalizeTransfer(ctx context.Context, transferID int64
         }, nil
     }
     return updatedTransfer, nil
+}
+
+func (s *transferService) RejectTransfer(ctx context.Context, transferID int64, reason string) (*schema.Transfer, error) {
+    // 1. Prepare parameters for sqlc
+    params := dbsqlc.RejectTransferParams{
+        ID: int32(transferID),
+        RejectionReason: sql.NullString{String: reason, Valid: true},
+    }
+
+    // 2. Execute the update
+    _, err := s.queries.RejectTransfer(ctx, params)
+    if err != nil {
+        return nil, fmt.Errorf("failed to execute transfer rejection: %w", err)
+    }
+
+    // 3. Fetch the full transfer record for a complete response
+    // (This ensures the response contains student_id, schools, etc.)
+    rejectedTransfer, err := s.GetTransferByID(ctx, transferID)
+    if err != nil {
+        // Log error but return status success if possible
+        s.logger.Error("Rejected transfer, but failed to fetch complete record", "transferID", transferID, "error", err)
+        return nil, fmt.Errorf("transfer rejected, but failed to fetch full response: %w", err)
+    }
+
+    return rejectedTransfer, nil
 }

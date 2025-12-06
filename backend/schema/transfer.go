@@ -24,3 +24,11 @@ type CreateTransferRequest struct {
 type GetIncomingTransfersRequest struct {
 	ToSchoolID int64 `json:"to_school_id" validate:"required"`
 }
+
+type GetOutgoingTransfersRequest struct {
+	FromSchoolID int64 `json:"from_school_id" validate:"required"`
+}
+
+type RejectRequest struct {
+    Reason string `json:"reason" validate:"required"`
+}

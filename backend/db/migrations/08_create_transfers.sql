@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS transfers (
     status VARCHAR(50) DEFAULT 'Pending' CHECK (status IN ('Pending', 'Accepted', 'Rejected')),
     date_initiated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     date_accepted TIMESTAMP,
-    reason TEXT
+    reason TEXT,
+    rejection_reason TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_transfers_student_id ON transfers(student_id);

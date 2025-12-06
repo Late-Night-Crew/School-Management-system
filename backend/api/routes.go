@@ -72,13 +72,16 @@ func (api *API) SchoolRoutes() {
     // 3. GET LIST of Transfers by CONTEXT (Fixed Path Segment)
     // This handles requests like /school/transfers/incoming
     schoolAPi.Get("/transfers/incoming/:id", authenticationMiddleware, school.GetIncomingTransfers(api.TransferService, api.logger))
+	
 
     // 4. GET LIST of Transfers by CONTEXT (Fixed Path Segment)
     // This handles requests like /school/transfers/outgoing
-    // schoolAPi.Get("/transfers/outgoing", authenticationMiddleware, school.GetOutgoingTransfers(api.TransferService, api.logger))
+   schoolAPi.Get("/transfers/outgoing/:id", authenticationMiddleware, school.GetOutgoingTransfers(api.TransferService, api.logger))
     
     // 5. UPDATE Status (Approve)
     schoolAPi.Put("/transfers/:id/approve", authenticationMiddleware, school.ApproveTransfer(api.TransferService, api.logger))
 	schoolAPi.Patch("/transfers/:id/finalize", authenticationMiddleware, school.FinalizeTransfer(api.TransferService, api.logger))
 
+	// 6 reject transfer
+	schoolAPi.Patch("/transfers/:id/reject", authenticationMiddleware, school.RejectTransfer(api.TransferService, api.logger))
 }
