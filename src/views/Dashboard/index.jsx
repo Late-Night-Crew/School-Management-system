@@ -20,29 +20,6 @@ export default function Dashboard() {
 
   return (
     <div className="dashboard-wrapper">
-      <Navbar bg="dark" variant="dark" expand="lg" className="shadow-sm">
-        <Container fluid>
-          <Button
-            variant="outline-light"
-            size="sm"
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-          >
-            ☰
-          </Button>
-          <Navbar.Brand className="ms-3 fw-bold text-light">
-            Dashboard
-          </Navbar.Brand>
-          <Nav className="ms-auto">
-            <Nav.Link className="text-light" href="#">
-              🔔
-            </Nav.Link>
-            <Nav.Link className="text-light" href="#">
-              👤 {user?.display_name || "Admin"}
-            </Nav.Link>
-          </Nav>
-        </Container>
-      </Navbar>
-
       <Container fluid className="p-4">
         <Row>
           <Col md={4}>

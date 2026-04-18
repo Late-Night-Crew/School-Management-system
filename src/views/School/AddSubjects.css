@@ -1,0 +1,69 @@
+/* AddSubjects Component Styling */
+
+.add-subjects-container {
+    padding: 20px;
+}
+
+.subject-form-section {
+    background: white;
+    border-radius: 12px;
+    padding: 25px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    margin-bottom: 20px;
+}
+
+.subject-form-section h5 {
+    border-bottom: 3px solid #006a3d;
+    padding-bottom: 15px;
+    margin-bottom: 20px;
+}
+
+.form-control,
+.form-select {
+    border: 1.5px solid #e0e0e0;
+    transition: all 0.3s ease;
+}
+
+.form-control:focus,
+.form-select:focus {
+    border-color: #006a3d;
+    box-shadow: 0 0 0 0.2rem rgba(0, 106, 61, 0.25);
+}
+
+.subject-table {
+    margin-top: 20px;
+}
+
+.subject-table thead {
+    background: linear-gradient(135deg, #006a3d 0%, #004d2a 100%);
+    color: white;
+}
+
+.subject-table tbody tr {
+    transition: all 0.2s ease;
+}
+
+.subject-table tbody tr:hover {
+    background-color: #f0f7f3;
+    transform: translateX(2px);
+}
+
+.badge-optional {
+    background-color: #ffc107;
+    color: #222;
+}
+
+.badge-required {
+    background-color: #006a3d;
+}
+
+@media (max-width: 768px) {
+    .subject-form-section {
+        padding: 15px;
+    }
+
+    .form-control,
+    .form-select {
+        font-size: 14px;
+    }
+}

@@ -1,151 +1,192 @@
-import React, { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import React, { useCallback } from "react";
+import { NavLink } from "react-router-dom";
 import "bootstrap-icons/font/bootstrap-icons.css";
-import { AUTH_TOKEN_KEY,USER_ROLE_KEY } from "../../constants/storageKeys";
-export default function AdminSidebar({ role = "admin" }) {
-  const location = useLocation();
-  const [isMobileOpen, setIsMobileOpen] = useState(false);
+import { AUTH_TOKEN_KEY, USER_ROLE_KEY, DISPLAY_NAME_KEY, USER_EMAIL_KEY } from "../../constants/storageKeys";
 
-  // Common menu items for all roles
-  const commonItems = [
-    { name: "Dashboard", path: "/admin/dashboard", icon: "bi-speedometer2" },
-  ];
-const logout = () => {
-        localStorage.removeItem(AUTH_TOKEN_KEY);
-        localStorage.removeItem(USER_ROLE_KEY);
-        window.location.href = "/admin/login";
-    };
+const styles = {
+  sidebar: {
+    width: "280px",
+    background: "#006a3d",
+    color: "#ffffff",
+    padding: "18px 16px",
+    overflowY: "auto",
+    maxHeight: "100vh",
+    minHeight: "100vh",
+    display: "flex",
+    flexDirection: "column",
+    boxShadow: "12px 0 28px rgba(0, 0, 0, 0.18)",
+    scrollbarWidth: "thin",
+    scrollbarColor: "rgba(255,255,255,0.35) rgba(0,106,61,0.12)",
+  },
+  brand: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    marginBottom: "18px",
+  },
+  logo: {
+    width: "42px",
+    height: "42px",
+    borderRadius: "14px",
+    background: "#ffffff",
+    color: "#006a3d",
+    display: "grid",
+    placeItems: "center",
+    fontWeight: "700",
+    fontSize: "16px",
+  },
+  systemName: {
+    margin: 0,
+    fontSize: "16px",
+    fontWeight: "700",
+    lineHeight: 1.2,
+    color: "#ffffff",
+  },
+  systemSub: {
+    fontSize: "11px",
+    color: "rgba(255,255,255,0.8)",
+    display: "block",
+    marginTop: "3px",
+  },
+  divider: {
+    height: "1px",
+    background: "rgba(255,255,255,0.18)",
+    marginBottom: "18px",
+  },
+  icon: (isActive) => ({
+    width: "32px",
+    height: "32px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: "12px",
+    background: "rgba(255,255,255,0.18)",
+    marginRight: "12px",
+    color: isActive ? "#006a3d" : "#ffffff",
+    fontSize: "16px",
+  }),
+  logoutButton: {
+    marginTop: "auto",
+    width: "100%",
+    border: "none",
+    borderRadius: "14px",
+    padding: "12px",
+    background: "#ffffff",
+    color: "#006a3d",
+    cursor: "pointer",
+    fontWeight: 700,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "10px",
+  },
+  link: ({ isActive }) => ({
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+    padding: "12px 14px",
+    borderRadius: "14px",
+    color: isActive ? "#006a3d" : "#ffffff",
+    backgroundColor: isActive ? "#ffffff" : "transparent",
+    textDecoration: "none",
+    fontWeight: isActive ? 700 : 500,
+    marginBottom: "10px",
+    transition: "all 0.18s ease",
+  }),
+  userCard: {
+    padding: "16px",
+    borderRadius: "18px",
+    background: "rgba(255,255,255,0.12)",
+    border: "1px solid rgba(255,255,255,0.16)",
+    marginBottom: "20px",
+  },
+  userAvatar: {
+    width: "40px",
+    height: "40px",
+    borderRadius: "50%",
+    background: "#ffffff",
+    display: "grid",
+    placeItems: "center",
+    color: "#006a3d",
+    fontWeight: 700,
+    fontSize: "16px",
+  },
+};
 
-  // Role-specific menu sets
-  const roleMenus = {
-    admin: [
-      
-      {name: "Manage Divisions", path: "/admin/managedivisions", icon: "bi-diagram-3" },
-      {name: "manage Districts", path: "/admin/managedistricts", icon: "bi-geo-alt" },
-      { name: "Manage Schools", path: "/admin/manageschools", icon: "bi-building" },
-      { name: "Manage Users", path: "/admin/users", icon: "bi-people" },
-      {name: "Academic Year", path: "/admin/manageacademicyear", icon: "bi-calendar4-week" },
-      {name: "Manage Students", path: "/admin/managestudents", icon: "bi-journal-bookmark" },
-      {name: "Transfers", path: "/admin/transfers", icon: "bi-arrow-left-right" },
-      {name: "Notice", path: "/admin/notices", icon: "bi-info-square" },
-      { name: "Reports", path: "/admin/reports", icon: "bi-file-earmark-text" },
-      { name: "Settings", path: "/admin/settings", icon: "bi-gear" },
-    ],
-  };
-
-  // Combine menus
-  const menuItems = [
-    ...commonItems,
-    ...(roleMenus[role] || []),
-    { name: "Notifications", path: "/notifications", icon: "bi-bell", badge: 6 },
-    { name: "Logout", icon: "bi-box-arrow-right", action: logout }, // use action
+const menuItems = [
+  { name: "Dashboard", path: "/admin/dashboard", icon: "bi-grid-3x3-gap-fill" },
+  { name: "Manage Divisions", path: "/admin/managedivisions", icon: "bi-diagram-3-fill" },
+  { name: "Manage Districts", path: "/admin/managedistricts", icon: "bi-geo-alt-fill" },
+  { name: "Manage Schools", path: "/admin/manageschools", icon: "bi-building-fill" },
+  { name: "Manage Users", path: "/admin/users", icon: "bi-people-fill" },
+  { name: "Academic Year", path: "/admin/manageacademicyear", icon: "bi-calendar-check-fill" },
+  { name: "Manage Students", path: "/admin/managestudents", icon: "bi-person-lines-fill" },
+  { name: "Transfers", path: "/admin/transfers", icon: "bi-arrow-left-right-circle-fill" },
+  { name: "Notice", path: "/admin/notices", icon: "bi-info-circle-fill" },
+  { name: "Reports", path: "/admin/reports", icon: "bi-file-earmark-bar-graph-fill" },
+  { name: "Settings", path: "/admin/settings", icon: "bi-sliders2-vertical" },
+  { name: "Notifications", path: "/notifications", icon: "bi-bell-fill" },
 ];
 
+export default function AdminSidebar({ role = "admin" }) {
+  const roleLabel =
+    role === "superadmin"
+      ? "Super Admin"
+      : role === "regional"
+        ? "Regional Admin"
+        : "School Manager";
+
+  const logout = useCallback(() => {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    localStorage.removeItem(USER_ROLE_KEY);
+    window.location.href = "/admin/login";
+  }, []);
+
+  const displayName = localStorage.getItem(DISPLAY_NAME_KEY) || "Admin";
+  const email = localStorage.getItem(USER_EMAIL_KEY) || "admin@example.com";
 
   return (
-    <>
-      {/* Mobile Overlay */}
-      {isMobileOpen && (
-        <div
-          className="position-fixed top-0 start-0 w-100 h-100 bg-dark bg-opacity-50 d-md-none"
-          style={{ zIndex: 1040 }}
-          onClick={() => setIsMobileOpen(false)}
-        />
-      )}
-
-      {/* Sidebar */}
-      <aside
-        className={`d-flex flex-column vh-100 bg-dark text-light shadow-lg ${
-          isMobileOpen ? "d-flex" : "d-none d-md-flex"
-        }`}
-        style={{
-          width: "260px",
-          position: isMobileOpen ? "fixed" : "relative",
-          zIndex: 1045,
-          transition: "all 0.3s ease",
-        }}
-      >
-        {/* Header */}
-        <div className="px-3 py-3 border-bottom border-secondary d-flex align-items-center justify-content-between">
-          <h5 className="m-0 fw-bold text-uppercase">
-            {role === "superadmin"
-              ? "Super Admin"
-              : role === "regional"
-              ? "Regional Admin"
-              : "School Manager"}
-          </h5>
-          <button
-            className="btn btn-sm btn-dark d-md-none border-0"
-            onClick={() => setIsMobileOpen(false)}
-          >
-            <i className="bi bi-x fs-4"></i>
-          </button>
+    <aside className="admin-sidebar" style={styles.sidebar}>
+      <div style={styles.brand}>
+        <div style={styles.logo}>NS</div>
+        <div>
+          <h2 style={styles.systemName}>NSMS</h2>
+          <span style={styles.systemSub}>National School Management</span>
         </div>
+      </div>
 
-        {/* Menu */}
-        <nav className="flex-grow-1 overflow-auto mt-2">
-          <ul className="nav flex-column px-2">
-            {menuItems.map((item) => {
-              const isActive = location.pathname === item.path;
-              return (
-                <li className="nav-item mb-1" key={item.name}>
-                  <Link
-                    to={item.path}
-                    className={`nav-link d-flex align-items-center justify-content-between px-3 py-2 rounded ${
-                      isActive
-                        ? "bg-primary text-white"
-                        : "text-light hover-effect"
-                    }`}
-                    style={{
-                      transition: "all 0.2s",
-                      textDecoration: "none",
-                      fontSize: "0.9rem",
-                    }}
-                    onClick={() => setIsMobileOpen(false)}
-                  >
-                    <div className="d-flex align-items-center">
-                      <i
-                        className={`bi ${item.icon}`}
-                        style={{ fontSize: "1.1rem" }}
-                      ></i>
-                      <span className="ms-3">{item.name}</span>
-                    </div>
-                    {item.badge && (
-                      <span className="badge bg-danger rounded-pill">
-                        {item.badge}
-                      </span>
-                    )}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </nav>
+      <div style={styles.divider} />
 
-        {/* Footer */}
-        <div className="text-center py-2 border-top border-secondary small text-muted">
-          © 2025 NSMS
+      <div style={styles.userCard}>
+        <div className="d-flex align-items-center gap-3">
+          <div style={styles.userAvatar}>A</div>
+          <div>
+            <div className="fw-semibold text-white">{displayName}</div>
+            <div className="small text-white-75">{email}</div>
+          </div>
         </div>
+        <div className="mt-3 d-flex flex-wrap gap-2 align-items-center small">
+          <span className="badge bg-white text-success rounded-pill px-2 py-1">{roleLabel}</span>
+          <span className="text-white-75">Ready to manage</span>
+        </div>
+      </div>
 
-        <style>{`
-          .hover-effect:hover {
-            background-color: rgba(255, 255, 255, 0.1) !important;
-          }
-        `}</style>
-      </aside>
+      {menuItems.map((item) => (
+        <NavLink key={item.name} to={item.path} style={({ isActive }) => styles.link({ isActive })}>
+          {({ isActive }) => (
+            <>
+              <i className={item.icon} style={styles.icon(isActive)} />
+              {item.name}
+            </>
+          )}
+        </NavLink>
+      ))}
 
-      {/* Mobile Button */}
-      <button
-        className="btn btn-dark d-md-none position-fixed shadow-sm"
-        style={{
-          zIndex: 1050,
-          top: "1rem",
-          left: "1rem",
-        }}
-        onClick={() => setIsMobileOpen(true)}
-      >
-        <i className="bi bi-list fs-4"></i>
+      <button style={styles.logoutButton} onClick={logout}>
+        <i className="bi bi-box-arrow-right" style={styles.icon(false)} />
+        Logout
       </button>
-    </>
+    </aside>
   );
 }
