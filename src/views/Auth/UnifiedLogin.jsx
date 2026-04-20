@@ -3,7 +3,6 @@ import * as Yup from "yup";
 import { useFormik } from "formik";
 import AuthService from "../Admin/services/auth";
 import { useNavigate } from "react-router-dom";
-import { USER_ROLE_KEY } from "../constants/storageKeys";
 import "../../App.css";
 
 export default function UnifiedLogin() {
@@ -29,6 +28,8 @@ export default function UnifiedLogin() {
       try {
         const response = await AuthService.login(values.email, values.password);
         const role = response.role?.toLowerCase();
+        const regionId = response.region_id;
+        const schoolId = response.school_id;
 
         setAlert({
           type: "success",
@@ -37,12 +38,14 @@ export default function UnifiedLogin() {
 
         // Redirect based on role
         setTimeout(() => {
-          if (role === "super_admin" || role === "superadmin") {
-            navigate("/dashboard");
-          } else if (role === "region_admin" || role === "regional_admin") {
-            navigate("/dashboard");
-          } else if (role === "school_manager" || role === "school_admin") {
-            navigate("/dashboard");
+          if (role?.includes("super")) {
+            navigate("/admin/dashboard");
+          } else if (role?.includes("regional") || role?.includes("region")) {
+            navigate(regionId ? `/regional/${regionId}/dashboard` : "/dashboard");
+          } else if (role?.includes("school")) {
+            navigate(schoolId ? `/school/${schoolId}/dashboard` : "/dashboard");
+          } else if (role?.includes("admin")) {
+            navigate("/admin/dashboard");
           } else {
             navigate("/dashboard");
           }
@@ -69,9 +72,8 @@ export default function UnifiedLogin() {
               type="text"
               name="email"
               placeholder="Email Address"
-              className={`form-control harbor-input ${
-                formik.touched.email && formik.errors.email ? "is-invalid" : ""
-              }`}
+              className={`form-control harbor-input ${formik.touched.email && formik.errors.email ? "is-invalid" : ""
+                }`}
               value={formik.values.email}
               onChange={formik.handleChange}
               onBlur={formik.handleBlur}
@@ -86,11 +88,10 @@ export default function UnifiedLogin() {
               type="password"
               name="password"
               placeholder="Password"
-              className={`form-control harbor-input ${
-                formik.touched.password && formik.errors.password
-                  ? "is-invalid"
-                  : ""
-              }`}
+              className={`form-control harbor-input ${formik.touched.password && formik.errors.password
+                ? "is-invalid"
+                : ""
+                }`}
               value={formik.values.password}
               onChange={formik.handleChange}
               onBlur={formik.handleBlur}

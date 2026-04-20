@@ -1,70 +1,108 @@
 /* Full-screen dark background with Harbor-style geometric pattern */
 .harbor-container {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100vh;
-    background: linear-gradient(
-        135deg,
-        #0c1f2e 50%,
-        #244c63 50%
-      ),
-      linear-gradient(45deg, #173042 50%, #2b5266 50%);
-    background-size: 100% 100%;
-    background-repeat: no-repeat;
-    color: #fff;
-  }
-  
-  /* Card (left-aligned like Harbor) */
-  .harbor-login-card {
-    background: transparent;
-    width: 540px;
-    padding: 20px;
-    border: none;
-  }
-  
-  /* Title */
-  .harbor-title {
-    font-size: 28px;
-    font-weight: 600;
-    margin-bottom: 40px;
-    color: #fff;
-  }
-  
-  /* Inputs */
-  .harbor-input {
-    background-color: transparent;
-    border: none;
-    border-bottom: 1px solid #3a4f5f;
-    color: #fff;
-    border-radius: 0;
-    padding: 10px 0;
-  }
-  
-  .harbor-input:focus {
-    background-color: transparent;
-    box-shadow: none;
-    border-bottom: 1px solid #5aa3d0;
-    color: #fff;
-  }
-  
-  /* Button */
-  .harbor-btn {
-    background-color: #3aa3e3;
-    border: none;
-    padding: 10px;
-    font-weight: 600;
-    letter-spacing: 1px;
-  }
-  
-  .harbor-btn:hover {
-    background-color: #2c8ac7;
-  }
-  
-  /* Footer text */
-  .harbor-footer {
-    color: #9daab4;
-    font-size: 14px;
-    text-align: left;
-  }
-  
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  background: linear-gradient(135deg,
+      #0c1f2e 50%,
+      #244c63 50%),
+    linear-gradient(45deg, #173042 50%, #2b5266 50%);
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  color: #fff;
+}
+
+/* Card (left-aligned like Harbor) */
+.harbor-login-card {
+  background: transparent;
+  width: 540px;
+  padding: 20px;
+  border: none;
+}
+
+/* Title */
+.harbor-title {
+  font-size: 28px;
+  font-weight: 600;
+  margin-bottom: 40px;
+  color: #fff;
+}
+
+/* Inputs */
+.harbor-input {
+  background-color: transparent;
+  border: none;
+  border-bottom: 1px solid #3a4f5f;
+  color: #fff;
+  border-radius: 0;
+  padding: 10px 0;
+}
+
+.harbor-input:focus {
+  background-color: transparent;
+  box-shadow: none;
+  border-bottom: 1px solid #5aa3d0;
+  color: #fff;
+}
+
+/* Button */
+.harbor-btn {
+  background-color: #3aa3e3;
+  border: none;
+  padding: 10px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.harbor-btn:hover {
+  background-color: #2c8ac7;
+}
+
+/* Footer text */
+.harbor-footer {
+  color: #9daab4;
+  font-size: 14px;
+  text-align: left;
+}
+
+/* Sidebar scrollbars */
+.admin-sidebar,
+.role-sidebar,
+.unified-sidebar,
+.sidebar {
+  max-height: 100vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.45) rgba(0, 106, 61, 0.12);
+}
+
+.admin-sidebar::-webkit-scrollbar,
+.role-sidebar::-webkit-scrollbar,
+.unified-sidebar::-webkit-scrollbar,
+.sidebar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.admin-sidebar::-webkit-scrollbar-track,
+.role-sidebar::-webkit-scrollbar-track,
+.unified-sidebar::-webkit-scrollbar-track,
+.sidebar::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+}
+
+.admin-sidebar::-webkit-scrollbar-thumb,
+.role-sidebar::-webkit-scrollbar-thumb,
+.unified-sidebar::-webkit-scrollbar-thumb,
+.sidebar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.4);
+  border-radius: 999px;
+}
+
+.admin-sidebar::-webkit-scrollbar-thumb:hover,
+.role-sidebar::-webkit-scrollbar-thumb:hover,
+.unified-sidebar::-webkit-scrollbar-thumb:hover,
+.sidebar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.6);
+}
