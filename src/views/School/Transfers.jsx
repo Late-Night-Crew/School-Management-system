@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from "react";
-import { AUTH_TOKEN_KEY } from "../constants/storageKeys";
+import { useParams } from "react-router-dom";
+import TransferService from "./services/transferService";
 import "./Transfers.css";
 
 export default function SchoolTransfers() {
+    const { schoolId } = useParams();
     const [activeTab, setActiveTab] = useState("initiate");
     const [transfers, setTransfers] = useState([]);
     const [incomingRequests, setIncomingRequests] = useState([]);
+    const [outgoingTransfers, setOutgoingTransfers] = useState([]);
     const [schools, setSchools] = useState([]);
     const [districts, setDistricts] = useState([]);
     const [filteredSchools, setFilteredSchools] = useState([]);
@@ -18,6 +21,7 @@ export default function SchoolTransfers() {
     const [selectedStudent, setSelectedStudent] = useState(null);
     const [studentSearchResults, setStudentSearchResults] = useState([]);
     const [isSearching, setIsSearching] = useState(false);
+    const [availableStudents, setAvailableStudents] = useState([]);
 
     // Initiate Transfer Form State
     const [initiateForm, setInitiateForm] = useState({
@@ -29,11 +33,14 @@ export default function SchoolTransfers() {
     });
 
     useEffect(() => {
-        fetchTransfers();
-        fetchIncomingRequests();
-        fetchSchools();
-        fetchDistricts();
-    }, []);
+        if (schoolId) {
+            fetchSchoolStudents();
+            fetchOutgoingTransfers();
+            fetchIncomingRequests();
+            fetchDistricts();
+            fetchAllSchools();
+        }
+    }, [schoolId]);
 
     // Filter schools when district changes
     useEffect(() => {
@@ -45,116 +52,82 @@ export default function SchoolTransfers() {
         }
     }, [initiateForm.districtId, schools]);
 
-    const fetchTransfers = async () => {
+    const fetchSchoolStudents = async () => {
         try {
-            const token = localStorage.getItem(AUTH_TOKEN_KEY);
-            const response = await fetch("/api/school/transfers", {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            const data = await response.json();
-            setTransfers(data || []);
-        } catch (error) {
-            console.error("Error fetching transfers:", error);
-        }
-    };
-
-    const fetchIncomingRequests = async () => {
-        try {
-            const token = localStorage.getItem(AUTH_TOKEN_KEY);
-            const response = await fetch("/api/school/incoming-transfers", {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            const data = await response.json();
-            setIncomingRequests(data || []);
-        } catch (error) {
-            console.error("Error fetching incoming requests:", error);
-        }
-    };
-
-    const fetchStudents = async () => {
-        try {
-            const token = localStorage.getItem(AUTH_TOKEN_KEY);
-            const response = await fetch("/api/school/students", {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            const data = await response.json();
-            setStudents(data || []);
+            const data = await TransferService.fetchStudentsForSchool(schoolId);
+            // Filter to ensure only this school's students (safety check)
+            const filteredBySchool = data.filter(student => student.school_id === parseInt(schoolId));
+            setAvailableStudents(filteredBySchool);
+            setStudentSearchResults(filteredBySchool); // Show all students by default
         } catch (error) {
             console.error("Error fetching students:", error);
         }
     };
 
-    const fetchSchools = async () => {
+    const fetchOutgoingTransfers = async () => {
         try {
-            const token = localStorage.getItem(AUTH_TOKEN_KEY);
-            const response = await fetch("/admin/schools", {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            const data = await response.json();
-            setSchools(data || []);
+            const data = await TransferService.getOutgoingTransfers(schoolId);
+            setOutgoingTransfers(data);
         } catch (error) {
-            console.error("Error fetching schools:", error);
+            console.error("Error fetching outgoing transfers:", error);
+        }
+    };
+
+    const fetchIncomingRequests = async () => {
+        try {
+            const data = await TransferService.getIncomingTransfers(schoolId);
+            setIncomingRequests(data);
+        } catch (error) {
+            console.error("Error fetching incoming requests:", error);
         }
     };
 
     const fetchDistricts = async () => {
         try {
-            const token = localStorage.getItem(AUTH_TOKEN_KEY);
-            const response = await fetch("/admin/districts", {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            const data = await response.json();
-            setDistricts(data || []);
+            const data = await TransferService.fetchDistricts();
+            setDistricts(data);
         } catch (error) {
             console.error("Error fetching districts:", error);
         }
     };
 
-    const searchStudents = async (query) => {
+    const fetchAllSchools = async () => {
+        try {
+            const data = await TransferService.fetchAllSchools();
+            setSchools(data);
+        } catch (error) {
+            console.error("Error fetching schools:", error);
+        }
+    };
+
+    const searchStudents = (query) => {
         if (!query.trim()) {
-            setStudentSearchResults([]);
+            // Show all students when search is empty
+            setStudentSearchResults(availableStudents);
             return;
         }
 
-        setIsSearching(true);
-        try {
-            const token = localStorage.getItem(AUTH_TOKEN_KEY);
-            // Search by student number or name
-            const params = new URLSearchParams();
-            if (!isNaN(query)) {
-                // If it's a number, search by student number
-                params.append('student_number', query);
-            } else {
-                // If it's text, search by first name or last name
-                params.append('first_name', query);
-                params.append('last_name', query);
-            }
+        // Filter available students locally
+        const filtered = availableStudents.filter(student =>
+            student.first_name?.toLowerCase().includes(query.toLowerCase()) ||
+            student.last_name?.toLowerCase().includes(query.toLowerCase()) ||
+            student.student_number?.includes(query)
+        );
 
-            const response = await fetch(`/admin/students?${params}`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            const data = await response.json();
-            setStudentSearchResults(data || []);
-        } catch (error) {
-            console.error("Error searching students:", error);
-            setStudentSearchResults([]);
-        } finally {
-            setIsSearching(false);
-        }
+        setStudentSearchResults(filtered);
     };
 
     const selectStudent = (student) => {
         setSelectedStudent(student);
         setInitiateForm(prev => ({ ...prev, studentId: student.id }));
         setStudentSearch(`${student.first_name} ${student.last_name} (${student.student_number})`);
-        setStudentSearchResults([]);
     };
 
     const clearStudentSelection = () => {
         setSelectedStudent(null);
         setInitiateForm(prev => ({ ...prev, studentId: "" }));
         setStudentSearch("");
-        setStudentSearchResults([]);
+        setStudentSearchResults(availableStudents); // Show all students again
     };
 
     const handleInitiateTransfer = async (e) => {
@@ -165,33 +138,20 @@ export default function SchoolTransfers() {
         }
 
         try {
-            const token = localStorage.getItem(AUTH_TOKEN_KEY);
-            const response = await fetch("/school/transfers", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    student_id: selectedStudent.id,
-                    to_school: parseInt(initiateForm.toSchoolId),
-                    date_initiated: initiateForm.transferDate,
-                    reason: initiateForm.reason
-                })
+            await TransferService.createTransferRequest({
+                student_id: selectedStudent.id,
+                to_school_id: parseInt(initiateForm.toSchoolId),
+                date_initiated: initiateForm.transferDate,
+                reason: initiateForm.reason
             });
 
-            if (response.ok) {
-                alert("Transfer request initiated successfully!");
-                setInitiateForm({ studentId: "", toSchoolId: "", districtId: "", reason: "", transferDate: "" });
-                clearStudentSelection();
-                fetchTransfers();
-            } else {
-                const error = await response.json();
-                alert(error.message || "Failed to initiate transfer");
-            }
+            alert("Transfer request initiated successfully!");
+            setInitiateForm({ studentId: "", toSchoolId: "", districtId: "", reason: "", transferDate: "" });
+            clearStudentSelection();
+            fetchOutgoingTransfers();
         } catch (error) {
             console.error("Error initiating transfer:", error);
-            alert("Failed to initiate transfer");
+            alert("Error: " + error.message);
         }
     };
 
@@ -202,34 +162,31 @@ export default function SchoolTransfers() {
         }, 500);
 
         return () => clearTimeout(timer);
-    }, [studentSearch]);
+    }, [studentSearch, availableStudents]);
 
     const handleAcceptTransfer = async (transferId, action) => {
         try {
-            const token = localStorage.getItem(AUTH_TOKEN_KEY);
-            const response = await fetch(`/api/transfers/${transferId}/${action}`, {
-                method: "PUT",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`
-                }
-            });
-
-            if (response.ok) {
-                alert(`Transfer ${action}ed successfully!`);
-                fetchIncomingRequests();
-                fetchTransfers();
+            if (action === "accept") {
+                await TransferService.approveTransfer(transferId);
+            } else if (action === "reject") {
+                await TransferService.rejectTransfer(transferId);
+            } else if (action === "finalize") {
+                await TransferService.finalizeTransfer(transferId);
             }
+
+            alert(`Transfer ${action}ed successfully!`);
+            fetchIncomingRequests();
+            fetchOutgoingTransfers();
         } catch (error) {
             console.error(`Error ${action}ing transfer:`, error);
-            alert(`Failed to ${action} transfer`);
+            alert("Error: " + error.message);
         }
     };
 
-    const filteredTransfers = transfers.filter(transfer =>
-        transfer.studentName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        transfer.fromSchool?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        transfer.toSchool?.toLowerCase().includes(searchTerm.toLowerCase())
+    const filteredTransfers = outgoingTransfers.filter(transfer =>
+        (transfer.student_name?.toLowerCase().includes(searchTerm.toLowerCase()) || false) ||
+        (transfer.from_school_name?.toLowerCase().includes(searchTerm.toLowerCase()) || false) ||
+        (transfer.to_school_name?.toLowerCase().includes(searchTerm.toLowerCase()) || false)
     );
 
     const indexOfLastItem = currentPage * itemsPerPage;
@@ -299,62 +256,114 @@ export default function SchoolTransfers() {
                             <div className="tab-pane fade show active">
                                 <form onSubmit={handleInitiateTransfer} className="bg-light p-4 rounded shadow-sm">
                                     <div className="row">
-                                        {/* Student Search Section */}
+                                        {/* Student Search & Table Section */}
                                         <div className="col-12 mb-4">
                                             <div className="student-search-section bg-white p-4 rounded shadow-sm">
-                                                <h5 className="mb-3">
-                                                    <i className="bi bi-search me-2 text-primary"></i>Search Student
-                                                </h5>
-                                                <div className="position-relative">
-                                                    <input
-                                                        type="text"
-                                                        className="form-control form-control-lg"
-                                                        placeholder="Enter student name or student number..."
-                                                        value={studentSearch}
-                                                        onChange={(e) => setStudentSearch(e.target.value)}
-                                                    />
-                                                    {isSearching && (
-                                                        <div className="position-absolute top-50 end-0 translate-middle-y me-3">
-                                                            <div className="spinner-border spinner-border-sm text-primary" role="status">
-                                                                <span className="visually-hidden">Loading...</span>
-                                                            </div>
-                                                        </div>
+                                                <div className="d-flex justify-content-between align-items-center mb-3">
+                                                    <h5 className="mb-0">
+                                                        <i className="bi bi-search me-2 text-primary"></i>Select Student
+                                                    </h5>
+                                                    {selectedStudent && (
+                                                        <button
+                                                            type="button"
+                                                            className="btn btn-sm btn-outline-secondary"
+                                                            onClick={clearStudentSelection}
+                                                            title="Clear selection"
+                                                        >
+                                                            <i className="bi bi-x me-1"></i>Clear Selection
+                                                        </button>
                                                     )}
                                                 </div>
 
-                                                {/* Search Results Dropdown */}
-                                                {studentSearchResults.length > 0 && (
-                                                    <div className="search-results mt-2 border rounded bg-white shadow-sm" style={{ maxHeight: '200px', overflowY: 'auto' }}>
-                                                        {studentSearchResults.map(student => (
-                                                            <div
-                                                                key={student.id}
-                                                                className="search-result-item p-3 border-bottom cursor-pointer hover-bg-light"
-                                                                onClick={() => selectStudent(student)}
-                                                                style={{ cursor: 'pointer' }}
-                                                            >
-                                                                <div className="d-flex align-items-center">
-                                                                    <i className="bi bi-person-circle me-3 text-primary fs-4"></i>
-                                                                    <div>
-                                                                        <div className="fw-semibold">
+                                                {/* Search Input */}
+                                                <div className="mb-3">
+                                                    <input
+                                                        type="text"
+                                                        className="form-control form-control-lg"
+                                                        placeholder="Search by name or student number..."
+                                                        value={studentSearch}
+                                                        onChange={(e) => setStudentSearch(e.target.value)}
+                                                    />
+                                                </div>
+
+                                                {/* Students Table */}
+                                                <div className="table-responsive">
+                                                    <table className="table table-hover">
+                                                        <thead className="table-light">
+                                                            <tr>
+                                                                <th><i className="bi bi-person me-1"></i>Name</th>
+                                                                <th><i className="bi bi-list-ul me-1"></i>Student #</th>
+                                                                <th><i className="bi bi-book me-1"></i>Form</th>
+                                                                <th><i className="bi bi-venus-mars me-1"></i>Gender</th>
+                                                                <th><i className="bi bi-info-circle me-1"></i>Status</th>
+                                                                <th><i className="bi bi-hand-index me-1"></i>Action</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {studentSearchResults.length > 0 ? (
+                                                                studentSearchResults.map(student => (
+                                                                    <tr key={student.id} className={selectedStudent?.id === student.id ? 'table-primary' : ''}>
+                                                                        <td className="fw-semibold">
+                                                                            <i className="bi bi-person-circle me-2 text-primary"></i>
                                                                             {student.first_name} {student.last_name}
-                                                                        </div>
-                                                                        <small className="text-muted">
-                                                                            Student #: {student.student_number} | Form {student.form_level}
-                                                                        </small>
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
+                                                                        </td>
+                                                                        <td>{student.student_number}</td>
+                                                                        <td>
+                                                                            <span className="badge bg-info">Form {student.form_level}</span>
+                                                                        </td>
+                                                                        <td>{student.gender}</td>
+                                                                        <td>
+                                                                            <span className={`badge bg-${student.status === 'active' ? 'success' : 'secondary'}`}>
+                                                                                {student.status}
+                                                                            </span>
+                                                                        </td>
+                                                                        <td>
+                                                                            <button
+                                                                                type="button"
+                                                                                className={`btn btn-sm ${selectedStudent?.id === student.id ? 'btn-primary' : 'btn-outline-primary'}`}
+                                                                                onClick={() => selectStudent(student)}
+                                                                            >
+                                                                                {selectedStudent?.id === student.id ? (
+                                                                                    <>
+                                                                                        <i className="bi bi-check-circle me-1"></i>Selected
+                                                                                    </>
+                                                                                ) : (
+                                                                                    <>
+                                                                                        <i className="bi bi-hand-index me-1"></i>Select
+                                                                                    </>
+                                                                                )}
+                                                                            </button>
+                                                                        </td>
+                                                                    </tr>
+                                                                ))
+                                                            ) : (
+                                                                <tr>
+                                                                    <td colSpan="6" className="text-center text-muted py-4">
+                                                                        {availableStudents.length === 0 ? (
+                                                                            <>
+                                                                                <i className="bi bi-inbox" style={{ fontSize: '2rem', display: 'block', marginBottom: '0.5rem' }}></i>
+                                                                                No students available
+                                                                            </>
+                                                                        ) : (
+                                                                            <>
+                                                                                <i className="bi bi-search" style={{ fontSize: '2rem', display: 'block', marginBottom: '0.5rem' }}></i>
+                                                                                No students match your search
+                                                                            </>
+                                                                        )}
+                                                                    </td>
+                                                                </tr>
+                                                            )}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
 
                                                 {/* Selected Student Profile */}
                                                 {selectedStudent && (
-                                                    <div className="student-profile mt-3 p-4 bg-primary text-white rounded shadow-sm">
+                                                    <div className="student-profile mt-4 p-4 bg-primary text-white rounded shadow-sm">
                                                         <div className="d-flex align-items-start">
                                                             <i className="bi bi-person-circle fs-1 me-4 text-white"></i>
                                                             <div className="flex-grow-1">
-                                                                <h6 className="mb-2">Student Profile</h6>
+                                                                <h6 className="mb-3">Selected Student Profile</h6>
                                                                 <div className="row">
                                                                     <div className="col-md-6">
                                                                         <p className="mb-1"><strong>Name:</strong> {selectedStudent.first_name} {selectedStudent.last_name}</p>
@@ -365,19 +374,11 @@ export default function SchoolTransfers() {
                                                                     <div className="col-md-6">
                                                                         <p className="mb-1"><strong>Date of Birth:</strong> {new Date(selectedStudent.date_of_birth).toLocaleDateString()}</p>
                                                                         <p className="mb-1"><strong>Guardian:</strong> {selectedStudent.guardian_name}</p>
-                                                                        <p className="mb-1"><strong>Previous School:</strong> {selectedStudent.previous_school}</p>
+                                                                        <p className="mb-1"><strong>Previous School:</strong> {selectedStudent.previous_school || 'N/A'}</p>
                                                                         <p className="mb-1"><strong>Status:</strong> {selectedStudent.status}</p>
                                                                     </div>
                                                                 </div>
                                                             </div>
-                                                            <button
-                                                                type="button"
-                                                                className="btn btn-sm btn-outline-light ms-3"
-                                                                onClick={clearStudentSelection}
-                                                                title="Clear selection"
-                                                            >
-                                                                <i className="bi bi-x"></i>
-                                                            </button>
                                                         </div>
                                                     </div>
                                                 )}
@@ -507,12 +508,12 @@ export default function SchoolTransfers() {
                                                     {incomingRequests.map(request => (
                                                         <tr key={request.id}>
                                                             <td className="fw-semibold">
-                                                                {request.studentName}
+                                                                {request.student_name}
                                                                 <br />
-                                                                <small className="text-muted">{request.studentNumber}</small>
+                                                                <small className="text-muted">{request.student_number}</small>
                                                             </td>
-                                                            <td>{request.fromSchool}</td>
-                                                            <td>{new Date(request.transferDate).toLocaleDateString()}</td>
+                                                            <td>{request.from_school_name}</td>
+                                                            <td>{request.date_initiated ? new Date(request.date_initiated).toLocaleDateString() : "N/A"}</td>
                                                             <td>{request.reason}</td>
                                                             <td>
                                                                 <div className="btn-group" role="group">
@@ -581,20 +582,20 @@ export default function SchoolTransfers() {
                                                 {currentItems.map(transfer => (
                                                     <tr key={transfer.id}>
                                                         <td className="fw-semibold">
-                                                            {transfer.studentName}
+                                                            {transfer.student_name}
                                                             <br />
-                                                            <small className="text-muted">{transfer.studentNumber}</small>
+                                                            <small className="text-muted">{transfer.student_number}</small>
                                                         </td>
-                                                        <td>{transfer.fromSchool}</td>
-                                                        <td>{transfer.toSchool}</td>
-                                                        <td>{new Date(transfer.transferDate).toLocaleDateString()}</td>
+                                                        <td>{transfer.from_school_name}</td>
+                                                        <td>{transfer.to_school_name}</td>
+                                                        <td>{transfer.date_initiated ? new Date(transfer.date_initiated).toLocaleDateString() : "N/A"}</td>
                                                         <td>{transfer.reason}</td>
                                                         <td>
                                                             <span className={`badge bg-${getStatusBadge(transfer.status)}`}>
                                                                 {transfer.status?.toUpperCase()}
                                                             </span>
                                                         </td>
-                                                        <td>{new Date(transfer.createdAt).toLocaleDateString()}</td>
+                                                        <td>{transfer.created_at ? new Date(transfer.created_at).toLocaleDateString() : "N/A"}</td>
                                                     </tr>
                                                 ))}
                                             </tbody>

@@ -3,7 +3,6 @@ import * as Yup from "yup";
 import { useFormik } from "formik";
 import AuthService from "../Admin/services/auth";
 import { useNavigate } from "react-router-dom";
-import { USER_ROLE_KEY } from "../constants/storageKeys";
 import "../../App.css";
 
 export default function UnifiedLogin() {
@@ -29,6 +28,8 @@ export default function UnifiedLogin() {
       try {
         const response = await AuthService.login(values.email, values.password);
         const role = response.role?.toLowerCase();
+        const regionId = response.region_id;
+        const schoolId = response.school_id;
 
         setAlert({
           type: "success",
@@ -40,9 +41,9 @@ export default function UnifiedLogin() {
           if (role?.includes("super")) {
             navigate("/admin/dashboard");
           } else if (role?.includes("regional") || role?.includes("region")) {
-            navigate("/regional/dashboard");
+            navigate(regionId ? `/regional/${regionId}/dashboard` : "/dashboard");
           } else if (role?.includes("school")) {
-            navigate("/school/dashboard");
+            navigate(schoolId ? `/school/${schoolId}/dashboard` : "/dashboard");
           } else if (role?.includes("admin")) {
             navigate("/admin/dashboard");
           } else {

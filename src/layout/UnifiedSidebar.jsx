@@ -1,19 +1,25 @@
 import React, { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import "bootstrap-icons/font/bootstrap-icons.css";
-import { AUTH_TOKEN_KEY, USER_ROLE_KEY, DISPLAY_NAME_KEY } from "../views/constants/storageKeys";
+import { USER_ROLE_KEY, DISPLAY_NAME_KEY, REGION_ID_KEY, SCHOOL_ID_KEY } from "../views/constants/storageKeys";
 import AuthService from "../views/Admin/services/auth";
 
 export default function UnifiedSidebar({ isMobileOpen = false, setIsMobileOpen = () => { } }) {
   const navigate = useNavigate();
   const [role, setRole] = useState("");
   const [displayName, setDisplayName] = useState("User");
+  const [regionId, setRegionId] = useState("");
+  const [schoolId, setSchoolId] = useState("");
 
   useEffect(() => {
     const storedRole = localStorage.getItem(USER_ROLE_KEY);
     const storedName = localStorage.getItem(DISPLAY_NAME_KEY);
+    const storedRegionId = localStorage.getItem(REGION_ID_KEY);
+    const storedSchoolId = localStorage.getItem(SCHOOL_ID_KEY);
     if (storedRole) setRole(storedRole.toLowerCase());
     if (storedName) setDisplayName(storedName);
+    if (storedRegionId) setRegionId(storedRegionId);
+    if (storedSchoolId) setSchoolId(storedSchoolId);
   }, []);
 
   const logout = () => {
@@ -27,37 +33,47 @@ export default function UnifiedSidebar({ isMobileOpen = false, setIsMobileOpen =
       { name: "Manage Divisions", path: "/admin/managedivisions", icon: "bi-diagram-3" },
       { name: "Manage Districts", path: "/admin/managedistricts", icon: "bi-geo-alt" },
       { name: "Manage Schools", path: "/admin/manageschools", icon: "bi-building" },
-      { name: "Manage Users", path: "/admin/users", icon: "bi-people" },
       { name: "Academic Year", path: "/admin/manageacademicyear", icon: "bi-calendar4-week" },
       { name: "Manage Students", path: "/admin/managestudents", icon: "bi-journal-bookmark" },
       { name: "Transfers", path: "/admin/transfers", icon: "bi-arrow-left-right" },
-      { name: "Exam Results", path: "/admin/exam-results", icon: "bi-graph-up" },
       { name: "Reports", path: "/admin/reports", icon: "bi-file-earmark-text" },
-      { name: "Settings", path: "/admin/settings", icon: "bi-gear" },
+      { name: "Notifications", path: "/admin/notifications", icon: "bi-bell", badge: 6 },
     ],
-    region_admin: [
-      { name: "Dashboard", path: "/dashboard", icon: "bi-speedometer2" },
-      { name: "Districts", path: "/regional/districts", icon: "bi-geo-alt" },
-      { name: "Schools", path: "/regional/schools", icon: "bi-building" },
-      { name: "Students", path: "/regional/students", icon: "bi-journal-bookmark" },
-      { name: "Transfer Requests", path: "/regional/transfers", icon: "bi-arrow-left-right" },
-      { name: "Reports", path: "/regional/reports", icon: "bi-file-earmark-text" },
-      { name: "Settings", path: "/regional/settings", icon: "bi-gear" },
-    ],
-    school_manager: [
-      { name: "Dashboard", path: "/dashboard", icon: "bi-speedometer2" },
-      { name: "Register Students", path: "/school/register", icon: "bi-person-plus" },
-      { name: "Students", path: "/school/students", icon: "bi-journal-bookmark" },
-      { name: "Transfers", path: "/school/transfers", icon: "bi-arrow-left-right" },
-      { name: "Performance", path: "/school/performance", icon: "bi-bar-chart" },
-      { name: "Reports", path: "/school/reports", icon: "bi-file-earmark-text" },
-      { name: "Settings", path: "/school/settings", icon: "bi-gear" },
-    ],
+    region_admin: regionId ? [
+      { name: "Dashboard", path: `/regional/${regionId}/dashboard`, icon: "bi-speedometer2" },
+      { name: "Districts", path: `/regional/${regionId}/districts`, icon: "bi-geo-alt" },
+      { name: "Schools", path: `/regional/${regionId}/schools`, icon: "bi-building" },
+      { name: "Students", path: `/regional/${regionId}/students`, icon: "bi-journal-bookmark" },
+      { name: "Transfer Requests", path: `/regional/${regionId}/transfers`, icon: "bi-arrow-left-right" },
+      { name: "Reports", path: `/regional/${regionId}/reports`, icon: "bi-file-earmark-text" },
+      { name: "Settings", path: `/regional/${regionId}/settings`, icon: "bi-gear" },
+      { name: "Notifications", path: `/regional/${regionId}/notifications`, icon: "bi-bell", badge: 6 },
+    ] : [],
+    school_admin: schoolId ? [
+      { name: "Dashboard", path: `/school/${schoolId}/dashboard`, icon: "bi-speedometer2" },
+      { name: "Register Students", path: `/school/${schoolId}/register`, icon: "bi-person-plus" },
+      { name: "Students", path: `/school/${schoolId}/students`, icon: "bi-journal-bookmark" },
+      { name: "Transfers", path: `/school/${schoolId}/transfers`, icon: "bi-arrow-left-right" },
+      { name: "Reports", path: `/school/${schoolId}/reports`, icon: "bi-file-earmark-text" },
+      { name: "Settings", path: `/school/${schoolId}/settings`, icon: "bi-gear" },
+      { name: "Notifications", path: `/school/${schoolId}/notifications`, icon: "bi-bell", badge: 6 },
+    ] : [],
+    school_manager: schoolId ? [
+      { name: "Dashboard", path: `/school/${schoolId}/dashboard`, icon: "bi-speedometer2" },
+      { name: "Register Students", path: `/school/${schoolId}/register`, icon: "bi-person-plus" },
+      { name: "Students", path: `/school/${schoolId}/students`, icon: "bi-journal-bookmark" },
+      { name: "Transfers", path: `/school/${schoolId}/transfers`, icon: "bi-arrow-left-right" },
+      { name: "Reports", path: `/school/${schoolId}/reports`, icon: "bi-file-earmark-text" },
+      { name: "Settings", path: `/school/${schoolId}/settings`, icon: "bi-gear" },
+      { name: "Notifications", path: `/school/${schoolId}/notifications`, icon: "bi-bell", badge: 6 },
+    ] : [],
   };
 
   const menuItems = [
-    ...(roleMenus[role] || roleMenus.super_admin),
-    { name: "Notifications", path: "/notifications", icon: "bi-bell", badge: 6 },
+    ...(roleMenus[role] || 
+        (role?.includes("school") ? (schoolId ? (roleMenus.school_manager || roleMenus.school_admin) : []) :
+         role?.includes("region") ? (regionId ? roleMenus.region_admin : []) :
+         roleMenus.super_admin)),
   ];
 
   const getRoleLabel = () => {
@@ -71,7 +87,7 @@ export default function UnifiedSidebar({ isMobileOpen = false, setIsMobileOpen =
       default:
         return "User";
     }
-  };
+  };  
 
   const getLinkClass = ({ isActive }) => `unified-sidebar-link d-flex align-items-center justify-content-between px-3 py-2 mb-2 rounded ${isActive ? "active" : ""}`;
 
@@ -94,8 +110,8 @@ export default function UnifiedSidebar({ isMobileOpen = false, setIsMobileOpen =
             </div>
           </div>
           <div className="mt-3 unified-brand-meta">
-            <div className="small text-white-75">Signed in as</div>
             <div className="fw-semibold">{displayName}</div>
+            <div className="small text-white-75">{role}</div>
           </div>
         </div>
 

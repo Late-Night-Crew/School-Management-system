@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { AUTH_TOKEN_KEY } from "../constants/storageKeys";
+import { useParams } from "react-router-dom";
+import SchoolStudentService from "./services/studentService";
+import SchoolService from "./services/schoolService";
+import { SCHOOL_ID_KEY } from "../constants/storageKeys";
 
 export default function StudentEnroll() {
     const [students, setStudents] = useState([]);
@@ -49,12 +52,8 @@ export default function StudentEnroll() {
 
     const fetchStudents = async () => {
         try {
-            const token = localStorage.getItem(AUTH_TOKEN_KEY);
-            const response = await fetch("/api/school/students", {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            const data = await response.json();
-            setStudents(data);
+            const data = await SchoolStudentService.fetchStudentsForSchool();
+            setStudents(Array.isArray(data) ? data : []);
         } catch (error) {
             console.error("Error fetching students:", error);
         }
@@ -62,12 +61,8 @@ export default function StudentEnroll() {
 
     const fetchDistricts = async () => {
         try {
-            const token = localStorage.getItem(AUTH_TOKEN_KEY);
-            const response = await fetch("/api/districts", {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            const data = await response.json();
-            setDistricts(data);
+            const data = await SchoolService.fetchDistricts();
+            setDistricts(Array.isArray(data) ? data : []);
         } catch (error) {
             console.error("Error fetching districts:", error);
         }
@@ -75,12 +70,8 @@ export default function StudentEnroll() {
 
     const fetchSchools = async (districtId) => {
         try {
-            const token = localStorage.getItem(AUTH_TOKEN_KEY);
-            const response = await fetch(`/api/districts/${districtId}/schools`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            const data = await response.json();
-            setSchools(data);
+            const data = await SchoolService.fetchSchoolsByDistrict(districtId);
+            setSchools(Array.isArray(data) ? data : []);
         } catch (error) {
             console.error("Error fetching schools:", error);
         }
@@ -88,13 +79,9 @@ export default function StudentEnroll() {
 
     const fetchCurrentSchool = async (schoolId) => {
         try {
-            const token = localStorage.getItem(AUTH_TOKEN_KEY);
-            const response = await fetch(`/api/schools/${schoolId}`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            const data = await response.json();
-            setCurrentSchool(data.name);
-            setFormData(prev => ({ ...prev, currentSchool: data.name }));
+            const data = await SchoolService.getSchoolById(schoolId);
+            setCurrentSchool(data.name || "");
+            setFormData(prev => ({ ...prev, currentSchool: data.name || "" }));
         } catch (error) {
             console.error("Error fetching current school:", error);
         }
@@ -108,49 +95,58 @@ export default function StudentEnroll() {
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
-            const token = localStorage.getItem(AUTH_TOKEN_KEY);
-            const response = await fetch("/api/students", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`
-                },
-                body: JSON.stringify(formData)
+            const schoolId = localStorage.getItem(SCHOOL_ID_KEY);
+            
+            // Map form data to backend schema
+            const submitData = {
+                first_name: formData.firstname,
+                last_name: formData.lastname,
+                gender: formData.gender,
+                date_of_birth: formData.dateOfBirth,
+                form_level: parseInt(formData.class) || 0,
+                school_id: parseInt(schoolId),
+                student_number: formData.studentNumber,
+                guardian_name: `${formData.guardianFirstname} ${formData.guardianLastname}`,
+                previous_school: formData.previousSchool,
+                status: "active",
+                academic_year_id: 1
+            };
+            
+            await SchoolStudentService.createStudent(submitData);
+            
+            alert("Student enrolled successfully!");
+            setFormData({
+                firstname: "",
+                middlename: "",
+                lastname: "",
+                studentNumber: "",
+                gender: "",
+                dateOfBirth: "",
+                class: "",
+                previousDistrict: "",
+                previousSchool: "",
+                currentSchool: currentSchool,
+                disability: false,
+                disabilityDetails: "",
+                guardianFirstname: "",
+                guardianMiddlename: "",
+                guardianLastname: "",
+                guardianPhone: "",
+                guardianAltPhone: "",
+                guardianEmail: "",
+                guardianRelationship: ""
             });
-            if (response.ok) {
-                alert("Student enrolled successfully!");
-                setFormData({
-                    firstname: "",
-                    middlename: "",
-                    lastname: "",
-                    studentNumber: "",
-                    gender: "",
-                    dateOfBirth: "",
-                    class: "",
-                    previousDistrict: "",
-                    previousSchool: "",
-                    currentSchool: currentSchool,
-                    disability: false,
-                    disabilityDetails: "",
-                    guardianFirstname: "",
-                    guardianMiddlename: "",
-                    guardianLastname: "",
-                    guardianPhone: "",
-                    guardianAltPhone: "",
-                    guardianEmail: "",
-                    guardianRelationship: ""
-                });
-                fetchStudents();
-            }
+            fetchStudents();
         } catch (error) {
             console.error("Error enrolling student:", error);
+            alert("Error: " + error.message);
         }
     };
 
     const filteredStudents = students.filter(student =>
-        student.firstname.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        student.lastname.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        student.studentNumber.includes(searchTerm)
+        (student.first_name?.toLowerCase().includes(searchTerm.toLowerCase()) || false) ||
+        (student.last_name?.toLowerCase().includes(searchTerm.toLowerCase()) || false) ||
+        (student.student_number?.includes(searchTerm) || false)
     );
 
     const indexOfLastStudent = currentPage * studentsPerPage;
@@ -162,21 +158,21 @@ export default function StudentEnroll() {
     const handleEdit = (student) => {
         // Populate form with student data for editing
         setFormData({
-            firstname: student.firstname,
-            middlename: student.middlename || "",
-            lastname: student.lastname,
-            studentNumber: student.studentNumber,
-            gender: student.gender,
-            dateOfBirth: student.dateOfBirth.split('T')[0], // Format for date input
-            class: student.class,
-            previousDistrict: student.previousDistrict || "",
-            previousSchool: student.previousSchool || "",
+            firstname: student.first_name || "",
+            middlename: student.middle_name || "",
+            lastname: student.last_name || "",
+            studentNumber: student.student_number || "",
+            gender: student.gender || "",
+            dateOfBirth: student.date_of_birth ? student.date_of_birth.split('T')[0] : "", // Format for date input
+            class: student.form_level || "",
+            previousDistrict: student.previous_district || "",
+            previousSchool: student.previous_school || "",
             currentSchool: currentSchool,
-            disability: student.disability,
-            disabilityDetails: student.disabilityDetails || "",
-            guardianFirstname: student.guardianFirstname,
-            guardianMiddlename: student.guardianMiddlename || "",
-            guardianLastname: student.guardianLastname,
+            disability: false,
+            disabilityDetails: "",
+            guardianFirstname: "",
+            guardianMiddlename: "",
+            guardianLastname: student.guardian_name || "",
             guardianPhone: student.guardianPhone,
             guardianAltPhone: student.guardianAltPhone || "",
             guardianEmail: student.guardianEmail || "",
@@ -191,17 +187,12 @@ export default function StudentEnroll() {
     const handleDelete = async (studentId) => {
         if (window.confirm("Are you sure you want to delete this student?")) {
             try {
-                const token = localStorage.getItem(AUTH_TOKEN_KEY);
-                const response = await fetch(`/api/students/${studentId}`, {
-                    method: "DELETE",
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-                if (response.ok) {
-                    alert("Student deleted successfully!");
-                    fetchStudents();
-                }
+                await SchoolStudentService.deleteStudent(studentId);
+                alert("Student deleted successfully!");
+                fetchStudents();
             } catch (error) {
                 console.error("Error deleting student:", error);
+                alert("Error: " + error.message);
             }
         }
     };
@@ -538,19 +529,16 @@ export default function StudentEnroll() {
                                             <tbody>
                                                 {currentStudents.map(student => (
                                                     <tr key={student.id}>
-                                                        <td className="fw-semibold">{student.studentNumber}</td>
-                                                        <td>{student.firstname} {student.middlename ? student.middlename + ' ' : ''}{student.lastname}</td>
-                                                        <td><span className="badge bg-primary">{student.class}</span></td>
-                                                        <td>{student.gender}</td>
-                                                        <td>{new Date(student.dateOfBirth).toLocaleDateString()}</td>
-                                                        <td>{student.previousSchool || 'N/A'}</td>
+                                                        <td className="fw-semibold">{student.student_number || "N/A"}</td>
+                                                        <td>{student.first_name} {student.last_name}</td>
+                                                        <td><span className="badge bg-primary">{student.form_level || "N/A"}</span></td>
+                                                        <td>{student.gender || "N/A"}</td>
+                                                        <td>{student.date_of_birth ? new Date(student.date_of_birth).toLocaleDateString() : "N/A"}</td>
+                                                        <td>{student.previous_school || 'N/A'}</td>
                                                         <td>
-                                                            {student.disability ? 
-                                                                <span className="badge bg-warning text-dark">Yes</span> : 
-                                                                <span className="badge bg-success">No</span>
-                                                            }
+                                                            <span className="badge bg-success">{student.status || "Active"}</span>
                                                         </td>
-                                                        <td>{student.guardianFirstname} {student.guardianLastname}</td>
+                                                        <td>{student.guardian_name || "N/A"}</td>
                                                         <td>
                                                             <div className="btn-group" role="group">
                                                                 <button 
