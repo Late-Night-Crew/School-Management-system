@@ -29,13 +29,13 @@ import RegionalNotifications from "./views/Regional/Notifications";
 
 // SCHOOL
 import SchoolDashboard from "./views/School/Dashboard";
+import AcademicYear from "./views/School/AcademicYear";
 import SchoolTransfers from "./views/School/Transfers";
 import SchoolReports from "./views/School/Reports";
 import SchoolSettings from "./views/School/Settings";
 import SchoolNotifications from "./views/School/Notifications";
 import StudentEnroll from "./views/School/StudentEnroll";
 import Students from "./views/School/Students";
-import AddSubjects from "./views/School/AddSubjects";
 import EnterMarks from "./views/School/EnterMarks";
 
 const router = createHashRouter([
@@ -91,10 +91,10 @@ const router = createHashRouter([
         children: [
           { index: true, element: <SchoolDashboard /> },
           { path: "dashboard", element: <SchoolDashboard /> },
+          { path: "academicyear", element: <AcademicYear /> },
           { path: "register", element: <StudentEnroll /> },
           { path: "students", element: <Students /> },
-          { path: "add-subjects", element: <AddSubjects /> },
-          { path: "enter-marks", element: <EnterMarks /> },
+          { path: "marks", element: <EnterMarks /> },
           { path: "transfers", element: <SchoolTransfers /> },
           { path: "reports", element: <SchoolReports /> },
           { path: "settings", element: <SchoolSettings /> },
