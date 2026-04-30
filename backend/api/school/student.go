@@ -12,11 +12,27 @@ import (
 
 func CreateTransferRequest(transferService services.TransferService, logger logging.Logger) fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
+		pathSchoolID, err := common.ParseIDFromCtx(ctx, "school_id")
+		if err != nil || pathSchoolID < 1 {
+			return problemdetail.BadRequest(ctx, "Invalid school ID")
+		}
+
+		tokenSchoolID, err := common.GetSchoolIDFromCtx(ctx)
+		if err != nil {
+			return problemdetail.Unauthorized(ctx, "School admin access required")
+		}
+
+		if tokenSchoolID != pathSchoolID {
+			return problemdetail.Forbidden(ctx, "Forbidden school access")
+		}
 
 		var req schema.CreateTransferRequest
 		if _, err := common.ParseBodyThenValidate(ctx, &req); err != nil {
 			return problemdetail.BadRequest(ctx, err.Error())
 		}
+
+		// Ensure the from_school_id matches the path school_id
+		req.FromSchoolID = pathSchoolID
 
 		transferRequest, err := transferService.CreateTransferRequest(ctx.Context(), &req)
 		if err != nil {
@@ -30,12 +46,22 @@ func CreateTransferRequest(transferService services.TransferService, logger logg
 
 func GetIncomingTransfers(transferService services.TransferService, logger logging.Logger) fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
-		id, err := ctx.ParamsInt("id")
-		if err != nil || id < 1 {
+		pathSchoolID, err := common.ParseIDFromCtx(ctx, "school_id")
+		if err != nil || pathSchoolID < 1 {
 			return problemdetail.BadRequest(ctx, "Invalid school ID")
 		}
+
+		tokenSchoolID, err := common.GetSchoolIDFromCtx(ctx)
+		if err != nil {
+			return problemdetail.Unauthorized(ctx, "School admin access required")
+		}
+
+		if tokenSchoolID != pathSchoolID {
+			return problemdetail.Forbidden(ctx, "Forbidden school access")
+		}
+
 		req := &schema.GetIncomingTransfersRequest{
-			ToSchoolID: int64(id),
+			ToSchoolID: pathSchoolID,
 		}
 		transfers, err := transferService.GetIncomingTransfersRequest(ctx.Context(), req)
 		if err != nil {
@@ -48,12 +74,22 @@ func GetIncomingTransfers(transferService services.TransferService, logger loggi
 
 func GetOutgoingTransfers(transferService services.TransferService, logger logging.Logger) fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
-		id, err := ctx.ParamsInt("id")
-		if err != nil || id < 1 {
+		pathSchoolID, err := common.ParseIDFromCtx(ctx, "school_id")
+		if err != nil || pathSchoolID < 1 {
 			return problemdetail.BadRequest(ctx, "Invalid school ID")
 		}
+
+		tokenSchoolID, err := common.GetSchoolIDFromCtx(ctx)
+		if err != nil {
+			return problemdetail.Unauthorized(ctx, "School admin access required")
+		}
+
+		if tokenSchoolID != pathSchoolID {
+			return problemdetail.Forbidden(ctx, "Forbidden school access")
+		}
+
 		req := &schema.GetOutgoingTransfersRequest{
-			FromSchoolID: int64(id),
+			FromSchoolID: pathSchoolID,
 		}
 
 		transfers, err := transferService.GetOutgoingTransfers(ctx.Context(), req.FromSchoolID)
@@ -67,21 +103,50 @@ func GetOutgoingTransfers(transferService services.TransferService, logger loggi
 
 func GetTransferByID(transferService services.TransferService, logger logging.Logger) fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
-		id, err := ctx.ParamsInt("id")
-		if err != nil || id < 1 {
-			return problemdetail.BadRequest(ctx, "Invalid tranfser ID")
+		pathSchoolID, err := common.ParseIDFromCtx(ctx, "school_id")
+		if err != nil || pathSchoolID < 1 {
+			return problemdetail.BadRequest(ctx, "Invalid school ID")
 		}
-		transfer, err := transferService.GetTransferByID(ctx.Context(), int64(id))
+
+		tokenSchoolID, err := common.GetSchoolIDFromCtx(ctx)
+		if err != nil {
+			return problemdetail.Unauthorized(ctx, "School admin access required")
+		}
+
+		if tokenSchoolID != pathSchoolID {
+			return problemdetail.Forbidden(ctx, "Forbidden school access")
+		}
+
+		id, err := common.ParseIDParam(ctx, "id")
+		if err != nil || id < 1 {
+			return problemdetail.BadRequest(ctx, "Invalid transfer ID")
+		}
+
+		transfer, err := transferService.GetTransferByID(ctx.Context(), id)
 		if err != nil {
 			logger.Error("failed to get transfer by ID", "error", err)
-			return problemdetail.ServerErrorProblem(ctx, "Failed to get tranfser by ID")
+			return problemdetail.ServerErrorProblem(ctx, "Failed to get transfer by ID")
 		}
-		return ctx.Status(fiber.StatusAccepted).JSON(transfer)
+		return ctx.Status(fiber.StatusOK).JSON(transfer)
 	}
 }
 
 func ApproveTransfer(transferService services.TransferService, logger logging.Logger) fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
+		pathSchoolID, err := common.ParseIDFromCtx(ctx, "school_id")
+		if err != nil || pathSchoolID < 1 {
+			return problemdetail.BadRequest(ctx, "Invalid school ID")
+		}
+
+		tokenSchoolID, err := common.GetSchoolIDFromCtx(ctx)
+		if err != nil {
+			return problemdetail.Unauthorized(ctx, "School admin access required")
+		}
+
+		if tokenSchoolID != pathSchoolID {
+			return problemdetail.Forbidden(ctx, "Forbidden school access")
+		}
+
 		transferID, err := common.ParseIDParam(ctx, "id")
 		if err != nil {
 			return problemdetail.BadRequest(ctx, "Invalid transfer ID in path")
@@ -98,6 +163,20 @@ func ApproveTransfer(transferService services.TransferService, logger logging.Lo
 
 func FinalizeTransfer(transferService services.TransferService, logger logging.Logger) fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
+		pathSchoolID, err := common.ParseIDFromCtx(ctx, "school_id")
+		if err != nil || pathSchoolID < 1 {
+			return problemdetail.BadRequest(ctx, "Invalid school ID")
+		}
+
+		tokenSchoolID, err := common.GetSchoolIDFromCtx(ctx)
+		if err != nil {
+			return problemdetail.Unauthorized(ctx, "School admin access required")
+		}
+
+		if tokenSchoolID != pathSchoolID {
+			return problemdetail.Forbidden(ctx, "Forbidden school access")
+		}
+
 		transferID, err := common.ParseIDParam(ctx, "id")
 		if err != nil {
 			return problemdetail.BadRequest(ctx, "Invalid transfer ID in path")
@@ -113,32 +192,41 @@ func FinalizeTransfer(transferService services.TransferService, logger logging.L
 }
 
 func RejectTransfer(transferService services.TransferService, logger logging.Logger) fiber.Handler {
-    return func(ctx *fiber.Ctx) error {
-        // 1. Parse transfer ID from path
-        transferID, err := common.ParseIDParam(ctx, "id")
-        if err != nil {
-            return problemdetail.BadRequest(ctx, "Invalid transfer ID in path")
-        }
+	return func(ctx *fiber.Ctx) error {
+		pathSchoolID, err := common.ParseIDFromCtx(ctx, "school_id")
+		if err != nil || pathSchoolID < 1 {
+			return problemdetail.BadRequest(ctx, "Invalid school ID")
+		}
 
-        // 2. Parse the reason from the request body
-        var req schema.RejectRequest
-        if err := ctx.BodyParser(&req); err != nil {
-            return problemdetail.BadRequest(ctx, "Invalid rejection reason provided")
-        }
-        
-        // 3. (Optional Validation) Check if the reason is not empty
-        if req.Reason == "" {
-             return problemdetail.BadRequest(ctx, "Rejection reason cannot be empty.")
-        }
-        
-        // 4. Call the service
-        transfer, err := transferService.RejectTransfer(ctx.Context(), transferID, req.Reason)
-        if err != nil {
-            logger.Error("failed to reject transfer: ", "error", err)
-            return problemdetail.ServerErrorProblem(ctx, "Failed to reject transfer")
-        }
+		tokenSchoolID, err := common.GetSchoolIDFromCtx(ctx)
+		if err != nil {
+			return problemdetail.Unauthorized(ctx, "School admin access required")
+		}
 
-        // 5. Return the result
-        return ctx.Status(fiber.StatusOK).JSON(transfer)
-    }
+		if tokenSchoolID != pathSchoolID {
+			return problemdetail.Forbidden(ctx, "Forbidden school access")
+		}
+
+		transferID, err := common.ParseIDParam(ctx, "id")
+		if err != nil {
+			return problemdetail.BadRequest(ctx, "Invalid transfer ID in path")
+		}
+
+		var req schema.RejectRequest
+		if err := ctx.BodyParser(&req); err != nil {
+			return problemdetail.BadRequest(ctx, "Invalid rejection reason provided")
+		}
+
+		if req.Reason == "" {
+			return problemdetail.BadRequest(ctx, "Rejection reason cannot be empty.")
+		}
+
+		transfer, err := transferService.RejectTransfer(ctx.Context(), transferID, req.Reason)
+		if err != nil {
+			logger.Error("failed to reject transfer: ", "error", err)
+			return problemdetail.ServerErrorProblem(ctx, "Failed to reject transfer")
+		}
+
+		return ctx.Status(fiber.StatusOK).JSON(transfer)
+	}
 }
