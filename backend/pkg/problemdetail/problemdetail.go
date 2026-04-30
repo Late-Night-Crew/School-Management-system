@@ -48,6 +48,24 @@ func ServerErrorProblem(ctx *fiber.Ctx, message string) error {
 	return ctx.Status(http.StatusInternalServerError).JSON(ServerErrorProblemDetail(message))
 }
 
+func Unauthorized(ctx *fiber.Ctx, message string) error {
+	return ctx.Status(http.StatusUnauthorized).JSON(ProblemDetail{
+		Type:    "problemdetail.example.com/http/types/Unauthorized",
+		Title:   "Unauthorized",
+		Detail:  message,
+		Context: nil,
+	})
+}
+
+func Forbidden(ctx *fiber.Ctx, message string) error {
+	return ctx.Status(http.StatusForbidden).JSON(ProblemDetail{
+		Type:    "problemdetail.example.com/http/types/Forbidden",
+		Title:   "Forbidden",
+		Detail: message,
+		Context: nil,
+	})
+}
+
 func BadRequest(ctx *fiber.Ctx, message string) error {
 	return ctx.Status(http.StatusBadRequest).JSON(BadRequestProblemDetail(message))
 }

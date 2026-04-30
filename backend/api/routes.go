@@ -1,9 +1,10 @@
 package api
 
 import (
-	"github.com/gofiber/fiber/v2/middleware/limiter"
 	"nsms/api/admin"
 	"nsms/api/school"
+
+	"github.com/gofiber/fiber/v2/middleware/limiter"
 )
 
 func (api *API) routes() {
@@ -51,7 +52,6 @@ func (api *API) adminRoutes() {
 	adminApi.Put("/academic_years/:id", authenticationMiddleware, admin.UpdateAcademicYear(api.AcademicYearService, api.logger))
 	adminApi.Delete("/academic_years/:id", authenticationMiddleware, admin.DeleteAcademicYear(api.AcademicYearService, api.logger))
 
-
 	// TODO IMPLEMENT ADMIN LEVEL TRANSFER ACTIONS
 	// adminApi.Get("/transfers", authenticationMiddleware, admin.GetTransferList(api.TransferService, api.logger))
 
@@ -63,25 +63,40 @@ func (api *API) SchoolRoutes() {
 	authenticationMiddleware := RequireAuthentication([]byte(api.Config.Auth.JwtSecretKey))
 
 	// 1. CREATE Transfer Request (POST)
-    schoolAPi.Post("/transfers", authenticationMiddleware, school.CreateTransferRequest(api.TransferService, api.logger))
+	schoolAPi.Post("/transfers", authenticationMiddleware, school.CreateTransferRequest(api.TransferService, api.logger))
 
-    // 2. GET SINGLE Transfer by Transfer ID (Dedicated Path)
-    // This handles requests like /school/transfers/12
-    schoolAPi.Get("/transfers/:id", authenticationMiddleware, school.GetTransferByID(api.TransferService, api.logger)) 
+	// 2. GET SINGLE Transfer by Transfer ID (Dedicated Path)
+	// This handles requests like /school/transfers/12
+	schoolAPi.Get("/transfers/:id", authenticationMiddleware, school.GetTransferByID(api.TransferService, api.logger))
 
-    // 3. GET LIST of Transfers by CONTEXT (Fixed Path Segment)
-    // This handles requests like /school/transfers/incoming
-    schoolAPi.Get("/transfers/incoming/:id", authenticationMiddleware, school.GetIncomingTransfers(api.TransferService, api.logger))
-	
+	// 3. GET LIST of Transfers by CONTEXT (Fixed Path Segment)
+	// This handles requests like /school/transfers/incoming
+	schoolAPi.Get("/transfers/incoming/:id", authenticationMiddleware, school.GetIncomingTransfers(api.TransferService, api.logger))
 
-    // 4. GET LIST of Transfers by CONTEXT (Fixed Path Segment)
-    // This handles requests like /school/transfers/outgoing
-   schoolAPi.Get("/transfers/outgoing/:id", authenticationMiddleware, school.GetOutgoingTransfers(api.TransferService, api.logger))
-    
-    // 5. UPDATE Status (Approve)
-    schoolAPi.Put("/transfers/:id/approve", authenticationMiddleware, school.ApproveTransfer(api.TransferService, api.logger))
+	// 4. GET LIST of Transfers by CONTEXT (Fixed Path Segment)
+	// This handles requests like /school/transfers/outgoing
+	schoolAPi.Get("/transfers/outgoing/:id", authenticationMiddleware, school.GetOutgoingTransfers(api.TransferService, api.logger))
+
+	// 5. UPDATE Status (Approve)
+	schoolAPi.Put("/transfers/:id/approve", authenticationMiddleware, school.ApproveTransfer(api.TransferService, api.logger))
 	schoolAPi.Patch("/transfers/:id/finalize", authenticationMiddleware, school.FinalizeTransfer(api.TransferService, api.logger))
 
 	// 6 reject transfer
 	schoolAPi.Patch("/transfers/:id/reject", authenticationMiddleware, school.RejectTransfer(api.TransferService, api.logger))
+
+	schoolAdminApi := api.app.Group("/school/:school_id", RequireAuthentication([]byte(api.Config.Auth.JwtSecretKey)))
+
+	// School admin student management
+	schoolAdminApi.Get("/dashboard", authenticationMiddleware, school.GetSchoolDashboard(api.SchoolAdminService, api.logger))
+	schoolAdminApi.Get("/students", authenticationMiddleware, school.GetStudentsForSchool(api.SchoolAdminService, api.logger))
+	schoolAdminApi.Get("/students/:id", authenticationMiddleware, school.GetStudentByIDForSchool(api.SchoolAdminService, api.logger))
+	schoolAdminApi.Post("/students", authenticationMiddleware, school.CreateStudentForSchool(api.SchoolAdminService, api.logger))
+	schoolAdminApi.Put("/students/:id", authenticationMiddleware, school.UpdateStudentForSchool(api.SchoolAdminService, api.logger))
+	schoolAdminApi.Delete("/students/:id", authenticationMiddleware, school.DeleteStudentForSchool(api.SchoolAdminService, api.logger))
+
+	// School admin exam results and reports
+	schoolAdminApi.Get("/exam_results", authenticationMiddleware, school.ListExamResultsForSchool(api.SchoolAdminService, api.logger))
+	schoolAdminApi.Get("/exam_results/:academic_year_id", authenticationMiddleware, school.GetExamResultForSchoolByAcademicYear(api.SchoolAdminService, api.logger))
+	schoolAdminApi.Post("/exam_results", authenticationMiddleware, school.CreateExamResultForSchool(api.SchoolAdminService, api.logger))
+	schoolAdminApi.Put("/exam_results/:id", authenticationMiddleware, school.UpdateExamResultForSchool(api.SchoolAdminService, api.logger))
 }
