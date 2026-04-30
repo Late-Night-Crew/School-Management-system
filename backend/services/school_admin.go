@@ -8,6 +8,7 @@ import (
 	"nsms/database/dbsqlc"
 	"nsms/logging"
 	"nsms/schema"
+	"strings"
 )
 
 type SchoolAdminService interface {
@@ -48,7 +49,7 @@ func (s *schoolAdminService) GetDashboardStats(ctx context.Context, schoolID int
 	}, nil
 }
 
-func mapDBStudent(dbStudent dbsqlc.GetStudentsBySchoolIDRow) *schema.Student {
+func mapDBStudent(dbStudent dbsqlc.GetStudentsBySchoolIDRow, subjectIDs []int64) *schema.Student {
 	dateOfBirth := ""
 	if dbStudent.DateOfBirth.Valid {
 		dateOfBirth = dbStudent.DateOfBirth.Time.Format("2006-01-02")
@@ -65,9 +66,29 @@ func mapDBStudent(dbStudent dbsqlc.GetStudentsBySchoolIDRow) *schema.Student {
 	if dbStudent.GuardianName.Valid {
 		guardianName = dbStudent.GuardianName.String
 	}
+	guardianPhone := ""
+	if dbStudent.GuardianPhone.Valid {
+		guardianPhone = dbStudent.GuardianPhone.String
+	}
+	guardianAltPhone := ""
+	if dbStudent.GuardianAltPhone.Valid {
+		guardianAltPhone = dbStudent.GuardianAltPhone.String
+	}
+	guardianEmail := ""
+	if dbStudent.GuardianEmail.Valid {
+		guardianEmail = dbStudent.GuardianEmail.String
+	}
+	guardianRelationship := ""
+	if dbStudent.GuardianRelationship.Valid {
+		guardianRelationship = dbStudent.GuardianRelationship.String
+	}
 	previousSchool := ""
 	if dbStudent.PreviousSchool.Valid {
 		previousSchool = dbStudent.PreviousSchool.String
+	}
+	disabilityDetails := ""
+	if dbStudent.DisabilityDetails.Valid {
+		disabilityDetails = dbStudent.DisabilityDetails.String
 	}
 
 	academicYearID := int64(0)
@@ -76,18 +97,27 @@ func mapDBStudent(dbStudent dbsqlc.GetStudentsBySchoolIDRow) *schema.Student {
 	}
 
 	return &schema.Student{
-		ID:             int64(dbStudent.ID),
-		StudentNumber:  dbStudent.StudentNumber,
-		FirstName:      dbStudent.FirstName,
-		LastName:       dbStudent.LastName,
-		DateOfBirth:    dateOfBirth,
-		Gender:         gender,
-		FormLevel:      int(dbStudent.FormLevel.Int32),
-		GuardianName:   guardianName,
-		PreviousSchool: previousSchool,
-		SchoolID:       int64(dbStudent.SchoolID),
-		AcademicYearID: academicYearID,
-		Status:         status,
+		ID:                   int64(dbStudent.ID),
+		StudentNumber:        dbStudent.StudentNumber,
+		FirstName:            dbStudent.FirstName,
+		MiddleName:           dbStudent.MiddleName.String,
+		LastName:             dbStudent.LastName,
+		DateOfBirth:          dateOfBirth,
+		Gender:               gender,
+		FormLevel:            int(dbStudent.FormLevel.Int32),
+		GuardianName:         guardianName,
+		GuardianPhone:        guardianPhone,
+		GuardianAltPhone:     guardianAltPhone,
+		GuardianEmail:        guardianEmail,
+		GuardianRelationship: guardianRelationship,
+		PreviousSchool:       previousSchool,
+		PreviousSchoolID:     int64(dbStudent.PreviousSchoolID.Int32),
+		SchoolID:             int64(dbStudent.SchoolID),
+		AcademicYearID:       academicYearID,
+		Disability:           dbStudent.Disability.Bool,
+		DisabilityDetails:    disabilityDetails,
+		Status:               status,
+		SubjectIDs:           subjectIDs,
 	}
 }
 
@@ -106,9 +136,20 @@ func (s *schoolAdminService) GetStudentsBySchoolID(ctx context.Context, schoolID
 	if err != nil {
 		return nil, fmt.Errorf("failed to list students for school %d: %w", schoolID, err)
 	}
+
+	studentIDs := make([]int32, 0, len(dbStudents))
+	for _, student := range dbStudents {
+		studentIDs = append(studentIDs, int32(student.ID))
+	}
+
+	subjectIDsByStudent, err := s.loadStudentSubjectIDs(ctx, studentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load student subjects: %w", err)
+	}
+
 	out := make([]*schema.Student, 0, len(dbStudents))
 	for _, student := range dbStudents {
-		out = append(out, mapDBStudent(student))
+		out = append(out, mapDBStudent(student, subjectIDsByStudent[int32(student.ID)]))
 	}
 	return out, nil
 }
@@ -121,10 +162,17 @@ func (s *schoolAdminService) GetStudentByIDAndSchoolID(ctx context.Context, scho
 		}
 		return nil, fmt.Errorf("failed to fetch student %d for school %d: %w", studentID, schoolID, err)
 	}
+
+	subjectIDsByStudent, err := s.loadStudentSubjectIDs(ctx, []int32{int32(dbStudent.ID)})
+	if err != nil {
+		return nil, fmt.Errorf("failed to load student subjects: %w", err)
+	}
+
 	return &schema.Student{
 		ID:            int64(dbStudent.ID),
 		StudentNumber: dbStudent.StudentNumber,
 		FirstName:     dbStudent.FirstName,
+		MiddleName:    dbStudent.MiddleName.String,
 		LastName:      dbStudent.LastName,
 		DateOfBirth: func() string {
 			if dbStudent.DateOfBirth.Valid {
@@ -132,42 +180,105 @@ func (s *schoolAdminService) GetStudentByIDAndSchoolID(ctx context.Context, scho
 			}
 			return ""
 		}(),
-		Gender:         dbStudent.Gender.String,
-		FormLevel:      int(dbStudent.FormLevel.Int32),
-		GuardianName:   dbStudent.GuardianName.String,
-		PreviousSchool: dbStudent.PreviousSchool.String,
-		SchoolID:       int64(dbStudent.SchoolID),
+		Gender:               dbStudent.Gender.String,
+		FormLevel:            int(dbStudent.FormLevel.Int32),
+		GuardianName:         dbStudent.GuardianName.String,
+		GuardianPhone:        dbStudent.GuardianPhone.String,
+		GuardianAltPhone:     dbStudent.GuardianAltPhone.String,
+		GuardianEmail:        dbStudent.GuardianEmail.String,
+		GuardianRelationship: dbStudent.GuardianRelationship.String,
+		PreviousSchool:       dbStudent.PreviousSchool.String,
+		PreviousSchoolID:     int64(dbStudent.PreviousSchoolID.Int32),
+		SchoolID:             int64(dbStudent.SchoolID),
 		AcademicYearID: func() int64 {
 			if dbStudent.AcademicYearID.Valid {
 				return int64(dbStudent.AcademicYearID.Int32)
 			}
 			return 0
 		}(),
-		Status: dbStudent.Status.String,
+		Disability:        dbStudent.Disability.Bool,
+		DisabilityDetails: dbStudent.DisabilityDetails.String,
+		Status:            dbStudent.Status.String,
+		SubjectIDs:        subjectIDsByStudent[int32(dbStudent.ID)],
 	}, nil
 }
 
+func (s *schoolAdminService) createStudentSubjectAssignments(ctx context.Context, studentID int32, subjectIDs []int64) error {
+	if len(subjectIDs) == 0 {
+		return nil
+	}
+
+	for _, subjectID := range subjectIDs {
+		if err := s.queries.CreateStudentSubjectAssignment(ctx, dbsqlc.CreateStudentSubjectAssignmentParams{
+			StudentID: studentID,
+			SubjectID: int32(subjectID),
+		}); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (s *schoolAdminService) loadStudentSubjectIDs(ctx context.Context, studentIDs []int32) (map[int32][]int64, error) {
+	subjectIDsByStudent := make(map[int32][]int64)
+	if len(studentIDs) == 0 {
+		return subjectIDsByStudent, nil
+	}
+
+	for _, id := range studentIDs {
+		dbRows, err := s.queries.ListStudentSubjectIDsByStudentID(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range dbRows {
+			subjectIDsByStudent[row.StudentID] = append(subjectIDsByStudent[row.StudentID], int64(row.SubjectID))
+		}
+	}
+
+	return subjectIDsByStudent, nil
+}
+
 func (s *schoolAdminService) CreateStudentForSchool(ctx context.Context, schoolID int64, req *schema.CreateStudentRequest) (*schema.Student, error) {
+	guardianName := req.GuardianName
+	if guardianName == "" {
+		guardianName = strings.TrimSpace(req.GuardianFirstname + " " + req.GuardianLastname)
+	}
+
 	dbStudent, err := s.queries.CreateStudent(ctx, dbsqlc.CreateStudentParams{
-		FirstName:      req.FirstName,
-		LastName:       req.LastName,
-		StudentNumber:  req.StudentNumber,
-		FormLevel:      sql.NullInt32{Int32: int32(req.FormLevel), Valid: true},
-		SchoolID:       int32(schoolID),
-		DateOfBirth:    common.StringToNullTime(req.DateOfBirth),
-		AcademicYearID: sql.NullInt32{Int32: int32(req.AcademicYearID), Valid: true},
-		Status:         sql.NullString{String: req.Status, Valid: req.Status != ""},
-		GuardianName:   sql.NullString{String: req.GuardianName, Valid: req.GuardianName != ""},
-		Gender:         sql.NullString{String: req.Gender, Valid: req.Gender != ""},
-		PreviousSchool: sql.NullString{String: req.PreviousSchool, Valid: req.PreviousSchool != ""},
+		StudentNumber:        req.StudentNumber,
+		FirstName:            req.FirstName,
+		MiddleName:           sql.NullString{String: req.MiddleName, Valid: req.MiddleName != ""},
+		LastName:             req.LastName,
+		DateOfBirth:          common.StringToNullTime(req.DateOfBirth),
+		Gender:               sql.NullString{String: req.Gender, Valid: req.Gender != ""},
+		FormLevel:            sql.NullInt32{Int32: int32(req.FormLevel), Valid: true},
+		GuardianName:         sql.NullString{String: guardianName, Valid: guardianName != ""},
+		GuardianPhone:        sql.NullString{String: req.GuardianPhone, Valid: req.GuardianPhone != ""},
+		GuardianAltPhone:     sql.NullString{String: req.GuardianAltPhone, Valid: req.GuardianAltPhone != ""},
+		GuardianEmail:        sql.NullString{String: req.GuardianEmail, Valid: req.GuardianEmail != ""},
+		GuardianRelationship: sql.NullString{String: req.GuardianRelationship, Valid: req.GuardianRelationship != ""},
+		PreviousSchool:       sql.NullString{String: req.PreviousSchool, Valid: req.PreviousSchool != ""},
+		PreviousSchoolID:     sql.NullInt32{Int32: int32(req.PreviousSchoolID), Valid: req.PreviousSchoolID != 0},
+		SchoolID:             int32(schoolID),
+		AcademicYearID:       sql.NullInt32{Int32: int32(req.AcademicYearID), Valid: req.AcademicYearID != 0},
+		Disability:           sql.NullBool{Bool: req.Disability, Valid: true},
+		DisabilityDetails:    sql.NullString{String: req.DisabilityDetails, Valid: req.DisabilityDetails != ""},
+		Status:               sql.NullString{String: req.Status, Valid: req.Status != ""},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create student for school %d: %w", schoolID, err)
 	}
+
+	if err := s.createStudentSubjectAssignments(ctx, dbStudent.ID, req.SubjectIDs); err != nil {
+		return nil, fmt.Errorf("failed to assign student subjects: %w", err)
+	}
+
 	return &schema.Student{
 		ID:            int64(dbStudent.ID),
 		StudentNumber: dbStudent.StudentNumber,
 		FirstName:     dbStudent.FirstName,
+		MiddleName:    dbStudent.MiddleName.String,
 		LastName:      dbStudent.LastName,
 		DateOfBirth: func() string {
 			if dbStudent.DateOfBirth.Valid {
@@ -175,44 +286,74 @@ func (s *schoolAdminService) CreateStudentForSchool(ctx context.Context, schoolI
 			}
 			return ""
 		}(),
-		Gender:         dbStudent.Gender.String,
-		FormLevel:      int(dbStudent.FormLevel.Int32),
-		GuardianName:   dbStudent.GuardianName.String,
-		PreviousSchool: dbStudent.PreviousSchool.String,
-		SchoolID:       int64(dbStudent.SchoolID),
+		Gender:               dbStudent.Gender.String,
+		FormLevel:            int(dbStudent.FormLevel.Int32),
+		GuardianName:         dbStudent.GuardianName.String,
+		GuardianPhone:        dbStudent.GuardianPhone.String,
+		GuardianAltPhone:     dbStudent.GuardianAltPhone.String,
+		GuardianEmail:        dbStudent.GuardianEmail.String,
+		GuardianRelationship: dbStudent.GuardianRelationship.String,
+		PreviousSchool:       dbStudent.PreviousSchool.String,
+		PreviousSchoolID:     int64(dbStudent.PreviousSchoolID.Int32),
+		SchoolID:             int64(dbStudent.SchoolID),
 		AcademicYearID: func() int64 {
 			if dbStudent.AcademicYearID.Valid {
 				return int64(dbStudent.AcademicYearID.Int32)
 			}
 			return 0
 		}(),
-		Status: dbStudent.Status.String,
+		Disability:        dbStudent.Disability.Bool,
+		DisabilityDetails: dbStudent.DisabilityDetails.String,
+		Status:            dbStudent.Status.String,
+		SubjectIDs:        req.SubjectIDs,
 	}, nil
 }
 
 func (s *schoolAdminService) UpdateStudentForSchool(ctx context.Context, schoolID int64, req *schema.UpdateStudentRequest) (*schema.Student, error) {
+	guardianName := req.GuardianName
+	if guardianName == "" {
+		guardianName = strings.TrimSpace(req.GuardianFirstname + " " + req.GuardianLastname)
+	}
+
 	dbStudent, err := s.queries.UpdateStudentByIDAndSchoolID(ctx, dbsqlc.UpdateStudentByIDAndSchoolIDParams{
-		ID:             int32(req.ID),
-		StudentNumber:  req.StudentNumber,
-		FirstName:      req.FirstName,
-		LastName:       req.LastName,
-		DateOfBirth:    common.StringToNullTime(req.DateOfBirth),
-		Gender:         sql.NullString{String: req.Gender, Valid: req.Gender != ""},
-		FormLevel:      sql.NullInt32{Int32: int32(req.FormLevel), Valid: true},
-		GuardianName:   sql.NullString{String: req.GuardianName, Valid: req.GuardianName != ""},
-		PreviousSchool: sql.NullString{String: req.PreviousSchool, Valid: req.PreviousSchool != ""},
-		SchoolID:       int32(schoolID),
-		AcademicYearID: sql.NullInt32{Int32: int32(req.AcademicYearID), Valid: true},
-		Status:         sql.NullString{String: req.Status, Valid: req.Status != ""},
-		SchoolID_2:     int32(schoolID),
+		ID:                   int32(req.ID),
+		StudentNumber:        req.StudentNumber,
+		FirstName:            req.FirstName,
+		MiddleName:           sql.NullString{String: req.MiddleName, Valid: req.MiddleName != ""},
+		LastName:             req.LastName,
+		DateOfBirth:          common.StringToNullTime(req.DateOfBirth),
+		Gender:               sql.NullString{String: req.Gender, Valid: req.Gender != ""},
+		FormLevel:            sql.NullInt32{Int32: int32(req.FormLevel), Valid: true},
+		GuardianName:         sql.NullString{String: guardianName, Valid: guardianName != ""},
+		GuardianPhone:        sql.NullString{String: req.GuardianPhone, Valid: req.GuardianPhone != ""},
+		GuardianAltPhone:     sql.NullString{String: req.GuardianAltPhone, Valid: req.GuardianAltPhone != ""},
+		GuardianEmail:        sql.NullString{String: req.GuardianEmail, Valid: req.GuardianEmail != ""},
+		GuardianRelationship: sql.NullString{String: req.GuardianRelationship, Valid: req.GuardianRelationship != ""},
+		PreviousSchool:       sql.NullString{String: req.PreviousSchool, Valid: req.PreviousSchool != ""},
+		PreviousSchoolID:     sql.NullInt32{Int32: int32(req.PreviousSchoolID), Valid: req.PreviousSchoolID != 0},
+		SchoolID:             int32(schoolID),
+		AcademicYearID:       sql.NullInt32{Int32: int32(req.AcademicYearID), Valid: req.AcademicYearID != 0},
+		Disability:           sql.NullBool{Bool: req.Disability, Valid: true},
+		DisabilityDetails:    sql.NullString{String: req.DisabilityDetails, Valid: req.DisabilityDetails != ""},
+		Status:               sql.NullString{String: req.Status, Valid: req.Status != ""},
+		SchoolID_2:           int32(schoolID),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to update student %d for school %d: %w", req.ID, schoolID, err)
 	}
+
+	if err := s.queries.DeleteStudentSubjectsByStudentID(ctx, int32(req.ID)); err != nil {
+		return nil, fmt.Errorf("failed to delete existing student subjects: %w", err)
+	}
+	if err := s.createStudentSubjectAssignments(ctx, int32(req.ID), req.SubjectIDs); err != nil {
+		return nil, fmt.Errorf("failed to assign student subjects: %w", err)
+	}
+
 	return &schema.Student{
 		ID:            int64(dbStudent.ID),
 		StudentNumber: dbStudent.StudentNumber,
 		FirstName:     dbStudent.FirstName,
+		MiddleName:    dbStudent.MiddleName.String,
 		LastName:      dbStudent.LastName,
 		DateOfBirth: func() string {
 			if dbStudent.DateOfBirth.Valid {
@@ -220,18 +361,26 @@ func (s *schoolAdminService) UpdateStudentForSchool(ctx context.Context, schoolI
 			}
 			return ""
 		}(),
-		Gender:         dbStudent.Gender.String,
-		FormLevel:      int(dbStudent.FormLevel.Int32),
-		GuardianName:   dbStudent.GuardianName.String,
-		PreviousSchool: dbStudent.PreviousSchool.String,
-		SchoolID:       int64(dbStudent.SchoolID),
+		Gender:               dbStudent.Gender.String,
+		FormLevel:            int(dbStudent.FormLevel.Int32),
+		GuardianName:         dbStudent.GuardianName.String,
+		GuardianPhone:        dbStudent.GuardianPhone.String,
+		GuardianAltPhone:     dbStudent.GuardianAltPhone.String,
+		GuardianEmail:        dbStudent.GuardianEmail.String,
+		GuardianRelationship: dbStudent.GuardianRelationship.String,
+		PreviousSchool:       dbStudent.PreviousSchool.String,
+		PreviousSchoolID:     int64(dbStudent.PreviousSchoolID.Int32),
+		SchoolID:             int64(dbStudent.SchoolID),
 		AcademicYearID: func() int64 {
 			if dbStudent.AcademicYearID.Valid {
 				return int64(dbStudent.AcademicYearID.Int32)
 			}
 			return 0
 		}(),
-		Status: dbStudent.Status.String,
+		Disability:        dbStudent.Disability.Bool,
+		DisabilityDetails: dbStudent.DisabilityDetails.String,
+		Status:            dbStudent.Status.String,
+		SubjectIDs:        req.SubjectIDs,
 	}, nil
 }
 

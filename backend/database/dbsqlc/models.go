@@ -46,20 +46,45 @@ type School struct {
 }
 
 type Student struct {
-	ID             int32
-	StudentNumber  string
-	FirstName      string
-	LastName       string
-	Gender         sql.NullString
-	DateOfBirth    sql.NullTime
-	PreviousSchool sql.NullString
-	GuardianName   sql.NullString
-	FormLevel      sql.NullInt32
-	Status         sql.NullString
-	SchoolID       int32
-	AcademicYearID sql.NullInt32
-	CreatedAt      sql.NullTime
-	UpdatedAt      sql.NullTime
+	ID                   int32
+	StudentNumber        string
+	FirstName            string
+	LastName             string
+	Gender               sql.NullString
+	DateOfBirth          sql.NullTime
+	PreviousSchool       sql.NullString
+	GuardianName         sql.NullString
+	FormLevel            sql.NullInt32
+	Status               sql.NullString
+	SchoolID             int32
+	AcademicYearID       sql.NullInt32
+	CreatedAt            sql.NullTime
+	UpdatedAt            sql.NullTime
+	MiddleName           sql.NullString
+	GuardianPhone        sql.NullString
+	GuardianAltPhone     sql.NullString
+	GuardianEmail        sql.NullString
+	GuardianRelationship sql.NullString
+	PreviousSchoolID     sql.NullInt32
+	Disability           sql.NullBool
+	DisabilityDetails    sql.NullString
+}
+
+type StudentSubject struct {
+	ID        int32
+	StudentID int32
+	SubjectID int32
+	CreatedAt sql.NullTime
+	UpdatedAt sql.NullTime
+}
+
+type Subject struct {
+	ID          int32
+	Code        string
+	Name        string
+	Description sql.NullString
+	CreatedAt   sql.NullTime
+	UpdatedAt   sql.NullTime
 }
 
 type Transfer struct {

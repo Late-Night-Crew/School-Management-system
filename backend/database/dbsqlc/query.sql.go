@@ -246,76 +246,116 @@ INSERT INTO
     students (
         student_number,
         first_name,
+        middle_name,
         last_name,
         date_of_birth,
         gender,
         form_level,
         guardian_name,
+        guardian_phone,
+        guardian_alt_phone,
+        guardian_email,
+        guardian_relationship,
         previous_school,
+        previous_school_id,
         school_id,
         academic_year_id,
+        disability,
+        disability_details,
         status
     )
 VALUES
-    ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id,
+    ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING id,
     student_number,
     first_name,
+    middle_name,
     last_name,
     date_of_birth,
     gender,
     form_level,
     guardian_name,
+    guardian_phone,
+    guardian_alt_phone,
+    guardian_email,
+    guardian_relationship,
     previous_school,
+    previous_school_id,
     school_id,
     academic_year_id,
+    disability,
+    disability_details,
     status,
     created_at,
     updated_at
 `
 
 type CreateStudentParams struct {
-	StudentNumber  string
-	FirstName      string
-	LastName       string
-	DateOfBirth    sql.NullTime
-	Gender         sql.NullString
-	FormLevel      sql.NullInt32
-	GuardianName   sql.NullString
-	PreviousSchool sql.NullString
-	SchoolID       int32
-	AcademicYearID sql.NullInt32
-	Status         sql.NullString
+	StudentNumber        string
+	FirstName            string
+	MiddleName           sql.NullString
+	LastName             string
+	DateOfBirth          sql.NullTime
+	Gender               sql.NullString
+	FormLevel            sql.NullInt32
+	GuardianName         sql.NullString
+	GuardianPhone        sql.NullString
+	GuardianAltPhone     sql.NullString
+	GuardianEmail        sql.NullString
+	GuardianRelationship sql.NullString
+	PreviousSchool       sql.NullString
+	PreviousSchoolID     sql.NullInt32
+	SchoolID             int32
+	AcademicYearID       sql.NullInt32
+	Disability           sql.NullBool
+	DisabilityDetails    sql.NullString
+	Status               sql.NullString
 }
 
 type CreateStudentRow struct {
-	ID             int32
-	StudentNumber  string
-	FirstName      string
-	LastName       string
-	DateOfBirth    sql.NullTime
-	Gender         sql.NullString
-	FormLevel      sql.NullInt32
-	GuardianName   sql.NullString
-	PreviousSchool sql.NullString
-	SchoolID       int32
-	AcademicYearID sql.NullInt32
-	Status         sql.NullString
-	CreatedAt      sql.NullTime
-	UpdatedAt      sql.NullTime
+	ID                   int32
+	StudentNumber        string
+	FirstName            string
+	MiddleName           sql.NullString
+	LastName             string
+	DateOfBirth          sql.NullTime
+	Gender               sql.NullString
+	FormLevel            sql.NullInt32
+	GuardianName         sql.NullString
+	GuardianPhone        sql.NullString
+	GuardianAltPhone     sql.NullString
+	GuardianEmail        sql.NullString
+	GuardianRelationship sql.NullString
+	PreviousSchool       sql.NullString
+	PreviousSchoolID     sql.NullInt32
+	SchoolID             int32
+	AcademicYearID       sql.NullInt32
+	Disability           sql.NullBool
+	DisabilityDetails    sql.NullString
+	Status               sql.NullString
+	CreatedAt            sql.NullTime
+	UpdatedAt            sql.NullTime
 }
 
 func (q *Queries) CreateStudent(ctx context.Context, arg CreateStudentParams) (CreateStudentRow, error) {
 	row := q.db.QueryRowContext(ctx, createStudent,
 		arg.StudentNumber,
 		arg.FirstName,
+		arg.MiddleName,
 		arg.LastName,
 		arg.DateOfBirth,
 		arg.Gender,
 		arg.FormLevel,
 		arg.GuardianName,
+		arg.GuardianPhone,
+		arg.GuardianAltPhone,
+		arg.GuardianEmail,
+		arg.GuardianRelationship,
 		arg.PreviousSchool,
+		arg.PreviousSchoolID,
 		arg.SchoolID,
 		arg.AcademicYearID,
+		arg.Disability,
+		arg.DisabilityDetails,
 		arg.Status,
 	)
 	var i CreateStudentRow
@@ -323,19 +363,45 @@ func (q *Queries) CreateStudent(ctx context.Context, arg CreateStudentParams) (C
 		&i.ID,
 		&i.StudentNumber,
 		&i.FirstName,
+		&i.MiddleName,
 		&i.LastName,
 		&i.DateOfBirth,
 		&i.Gender,
 		&i.FormLevel,
 		&i.GuardianName,
+		&i.GuardianPhone,
+		&i.GuardianAltPhone,
+		&i.GuardianEmail,
+		&i.GuardianRelationship,
 		&i.PreviousSchool,
+		&i.PreviousSchoolID,
 		&i.SchoolID,
 		&i.AcademicYearID,
+		&i.Disability,
+		&i.DisabilityDetails,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const createStudentSubjectAssignment = `-- name: CreateStudentSubjectAssignment :exec
+INSERT INTO
+    student_subjects (student_id, subject_id)
+VALUES
+    ($1, $2)
+ON CONFLICT DO NOTHING
+`
+
+type CreateStudentSubjectAssignmentParams struct {
+	StudentID int32
+	SubjectID int32
+}
+
+func (q *Queries) CreateStudentSubjectAssignment(ctx context.Context, arg CreateStudentSubjectAssignmentParams) error {
+	_, err := q.db.ExecContext(ctx, createStudentSubjectAssignment, arg.StudentID, arg.SubjectID)
+	return err
 }
 
 const createTransferRequest = `-- name: CreateTransferRequest :one
@@ -549,6 +615,18 @@ type DeleteStudentByIDAndSchoolIDParams struct {
 
 func (q *Queries) DeleteStudentByIDAndSchoolID(ctx context.Context, arg DeleteStudentByIDAndSchoolIDParams) error {
 	_, err := q.db.ExecContext(ctx, deleteStudentByIDAndSchoolID, arg.ID, arg.SchoolID)
+	return err
+}
+
+const deleteStudentSubjectsByStudentID = `-- name: DeleteStudentSubjectsByStudentID :exec
+DELETE FROM
+    student_subjects
+WHERE
+    student_id = $1
+`
+
+func (q *Queries) DeleteStudentSubjectsByStudentID(ctx context.Context, studentID int32) error {
+	_, err := q.db.ExecContext(ctx, deleteStudentSubjectsByStudentID, studentID)
 	return err
 }
 
@@ -954,14 +1032,22 @@ SELECT
     id,
     student_number,
     first_name,
+    middle_name,
     last_name,
     date_of_birth,
     gender,
     form_level,
     guardian_name,
+    guardian_phone,
+    guardian_alt_phone,
+    guardian_email,
+    guardian_relationship,
     previous_school,
+    previous_school_id,
     school_id,
     academic_year_id,
+    disability,
+    disability_details,
     status,
     created_at,
     updated_at
@@ -972,20 +1058,28 @@ WHERE
 `
 
 type GetStudentByIDRow struct {
-	ID             int32
-	StudentNumber  string
-	FirstName      string
-	LastName       string
-	DateOfBirth    sql.NullTime
-	Gender         sql.NullString
-	FormLevel      sql.NullInt32
-	GuardianName   sql.NullString
-	PreviousSchool sql.NullString
-	SchoolID       int32
-	AcademicYearID sql.NullInt32
-	Status         sql.NullString
-	CreatedAt      sql.NullTime
-	UpdatedAt      sql.NullTime
+	ID                   int32
+	StudentNumber        string
+	FirstName            string
+	MiddleName           sql.NullString
+	LastName             string
+	DateOfBirth          sql.NullTime
+	Gender               sql.NullString
+	FormLevel            sql.NullInt32
+	GuardianName         sql.NullString
+	GuardianPhone        sql.NullString
+	GuardianAltPhone     sql.NullString
+	GuardianEmail        sql.NullString
+	GuardianRelationship sql.NullString
+	PreviousSchool       sql.NullString
+	PreviousSchoolID     sql.NullInt32
+	SchoolID             int32
+	AcademicYearID       sql.NullInt32
+	Disability           sql.NullBool
+	DisabilityDetails    sql.NullString
+	Status               sql.NullString
+	CreatedAt            sql.NullTime
+	UpdatedAt            sql.NullTime
 }
 
 func (q *Queries) GetStudentByID(ctx context.Context, id int32) (GetStudentByIDRow, error) {
@@ -995,14 +1089,22 @@ func (q *Queries) GetStudentByID(ctx context.Context, id int32) (GetStudentByIDR
 		&i.ID,
 		&i.StudentNumber,
 		&i.FirstName,
+		&i.MiddleName,
 		&i.LastName,
 		&i.DateOfBirth,
 		&i.Gender,
 		&i.FormLevel,
 		&i.GuardianName,
+		&i.GuardianPhone,
+		&i.GuardianAltPhone,
+		&i.GuardianEmail,
+		&i.GuardianRelationship,
 		&i.PreviousSchool,
+		&i.PreviousSchoolID,
 		&i.SchoolID,
 		&i.AcademicYearID,
+		&i.Disability,
+		&i.DisabilityDetails,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -1015,14 +1117,22 @@ SELECT
     id,
     student_number,
     first_name,
+    middle_name,
     last_name,
     date_of_birth,
     gender,
     form_level,
     guardian_name,
+    guardian_phone,
+    guardian_alt_phone,
+    guardian_email,
+    guardian_relationship,
     previous_school,
+    previous_school_id,
     school_id,
     academic_year_id,
+    disability,
+    disability_details,
     status,
     created_at,
     updated_at
@@ -1039,20 +1149,28 @@ type GetStudentByIDAndSchoolIDParams struct {
 }
 
 type GetStudentByIDAndSchoolIDRow struct {
-	ID             int32
-	StudentNumber  string
-	FirstName      string
-	LastName       string
-	DateOfBirth    sql.NullTime
-	Gender         sql.NullString
-	FormLevel      sql.NullInt32
-	GuardianName   sql.NullString
-	PreviousSchool sql.NullString
-	SchoolID       int32
-	AcademicYearID sql.NullInt32
-	Status         sql.NullString
-	CreatedAt      sql.NullTime
-	UpdatedAt      sql.NullTime
+	ID                   int32
+	StudentNumber        string
+	FirstName            string
+	MiddleName           sql.NullString
+	LastName             string
+	DateOfBirth          sql.NullTime
+	Gender               sql.NullString
+	FormLevel            sql.NullInt32
+	GuardianName         sql.NullString
+	GuardianPhone        sql.NullString
+	GuardianAltPhone     sql.NullString
+	GuardianEmail        sql.NullString
+	GuardianRelationship sql.NullString
+	PreviousSchool       sql.NullString
+	PreviousSchoolID     sql.NullInt32
+	SchoolID             int32
+	AcademicYearID       sql.NullInt32
+	Disability           sql.NullBool
+	DisabilityDetails    sql.NullString
+	Status               sql.NullString
+	CreatedAt            sql.NullTime
+	UpdatedAt            sql.NullTime
 }
 
 func (q *Queries) GetStudentByIDAndSchoolID(ctx context.Context, arg GetStudentByIDAndSchoolIDParams) (GetStudentByIDAndSchoolIDRow, error) {
@@ -1062,14 +1180,22 @@ func (q *Queries) GetStudentByIDAndSchoolID(ctx context.Context, arg GetStudentB
 		&i.ID,
 		&i.StudentNumber,
 		&i.FirstName,
+		&i.MiddleName,
 		&i.LastName,
 		&i.DateOfBirth,
 		&i.Gender,
 		&i.FormLevel,
 		&i.GuardianName,
+		&i.GuardianPhone,
+		&i.GuardianAltPhone,
+		&i.GuardianEmail,
+		&i.GuardianRelationship,
 		&i.PreviousSchool,
+		&i.PreviousSchoolID,
 		&i.SchoolID,
 		&i.AcademicYearID,
+		&i.Disability,
+		&i.DisabilityDetails,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -1095,14 +1221,22 @@ SELECT
     id,
     student_number,
     first_name,
+    middle_name,
     last_name,
     date_of_birth,
     gender,
     form_level,
     guardian_name,
+    guardian_phone,
+    guardian_alt_phone,
+    guardian_email,
+    guardian_relationship,
     previous_school,
+    previous_school_id,
     school_id,
     academic_year_id,
+    disability,
+    disability_details,
     status,
     created_at,
     updated_at
@@ -1116,20 +1250,28 @@ ORDER BY
 `
 
 type GetStudentsBySchoolIDRow struct {
-	ID             int32
-	StudentNumber  string
-	FirstName      string
-	LastName       string
-	DateOfBirth    sql.NullTime
-	Gender         sql.NullString
-	FormLevel      sql.NullInt32
-	GuardianName   sql.NullString
-	PreviousSchool sql.NullString
-	SchoolID       int32
-	AcademicYearID sql.NullInt32
-	Status         sql.NullString
-	CreatedAt      sql.NullTime
-	UpdatedAt      sql.NullTime
+	ID                   int32
+	StudentNumber        string
+	FirstName            string
+	MiddleName           sql.NullString
+	LastName             string
+	DateOfBirth          sql.NullTime
+	Gender               sql.NullString
+	FormLevel            sql.NullInt32
+	GuardianName         sql.NullString
+	GuardianPhone        sql.NullString
+	GuardianAltPhone     sql.NullString
+	GuardianEmail        sql.NullString
+	GuardianRelationship sql.NullString
+	PreviousSchool       sql.NullString
+	PreviousSchoolID     sql.NullInt32
+	SchoolID             int32
+	AcademicYearID       sql.NullInt32
+	Disability           sql.NullBool
+	DisabilityDetails    sql.NullString
+	Status               sql.NullString
+	CreatedAt            sql.NullTime
+	UpdatedAt            sql.NullTime
 }
 
 func (q *Queries) GetStudentsBySchoolID(ctx context.Context, schoolID int32) ([]GetStudentsBySchoolIDRow, error) {
@@ -1145,14 +1287,22 @@ func (q *Queries) GetStudentsBySchoolID(ctx context.Context, schoolID int32) ([]
 			&i.ID,
 			&i.StudentNumber,
 			&i.FirstName,
+			&i.MiddleName,
 			&i.LastName,
 			&i.DateOfBirth,
 			&i.Gender,
 			&i.FormLevel,
 			&i.GuardianName,
+			&i.GuardianPhone,
+			&i.GuardianAltPhone,
+			&i.GuardianEmail,
+			&i.GuardianRelationship,
 			&i.PreviousSchool,
+			&i.PreviousSchoolID,
 			&i.SchoolID,
 			&i.AcademicYearID,
+			&i.Disability,
+			&i.DisabilityDetails,
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -1610,19 +1760,65 @@ func (q *Queries) ListSchoolsByDistrictId(ctx context.Context, districtID int32)
 	return items, nil
 }
 
+const listStudentSubjectIDsByStudentID = `-- name: ListStudentSubjectIDsByStudentID :many
+SELECT
+    student_id,
+    subject_id
+FROM
+    student_subjects
+WHERE
+    student_id = $1
+`
+
+type ListStudentSubjectIDsByStudentIDRow struct {
+	StudentID int32
+	SubjectID int32
+}
+
+func (q *Queries) ListStudentSubjectIDsByStudentID(ctx context.Context, studentID int32) ([]ListStudentSubjectIDsByStudentIDRow, error) {
+	rows, err := q.db.QueryContext(ctx, listStudentSubjectIDsByStudentID, studentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListStudentSubjectIDsByStudentIDRow
+	for rows.Next() {
+		var i ListStudentSubjectIDsByStudentIDRow
+		if err := rows.Scan(&i.StudentID, &i.SubjectID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listStudents = `-- name: ListStudents :many
 SELECT
     id,
     student_number,
     first_name,
+    middle_name,
     last_name,
     date_of_birth,
     gender,
     form_level,
     guardian_name,
+    guardian_phone,
+    guardian_alt_phone,
+    guardian_email,
+    guardian_relationship,
     previous_school,
+    previous_school_id,
     school_id,
     academic_year_id,
+    disability,
+    disability_details,
     status,
     created_at,
     updated_at
@@ -1640,20 +1836,28 @@ type ListStudentsParams struct {
 }
 
 type ListStudentsRow struct {
-	ID             int32
-	StudentNumber  string
-	FirstName      string
-	LastName       string
-	DateOfBirth    sql.NullTime
-	Gender         sql.NullString
-	FormLevel      sql.NullInt32
-	GuardianName   sql.NullString
-	PreviousSchool sql.NullString
-	SchoolID       int32
-	AcademicYearID sql.NullInt32
-	Status         sql.NullString
-	CreatedAt      sql.NullTime
-	UpdatedAt      sql.NullTime
+	ID                   int32
+	StudentNumber        string
+	FirstName            string
+	MiddleName           sql.NullString
+	LastName             string
+	DateOfBirth          sql.NullTime
+	Gender               sql.NullString
+	FormLevel            sql.NullInt32
+	GuardianName         sql.NullString
+	GuardianPhone        sql.NullString
+	GuardianAltPhone     sql.NullString
+	GuardianEmail        sql.NullString
+	GuardianRelationship sql.NullString
+	PreviousSchool       sql.NullString
+	PreviousSchoolID     sql.NullInt32
+	SchoolID             int32
+	AcademicYearID       sql.NullInt32
+	Disability           sql.NullBool
+	DisabilityDetails    sql.NullString
+	Status               sql.NullString
+	CreatedAt            sql.NullTime
+	UpdatedAt            sql.NullTime
 }
 
 func (q *Queries) ListStudents(ctx context.Context, arg ListStudentsParams) ([]ListStudentsRow, error) {
@@ -1669,14 +1873,22 @@ func (q *Queries) ListStudents(ctx context.Context, arg ListStudentsParams) ([]L
 			&i.ID,
 			&i.StudentNumber,
 			&i.FirstName,
+			&i.MiddleName,
 			&i.LastName,
 			&i.DateOfBirth,
 			&i.Gender,
 			&i.FormLevel,
 			&i.GuardianName,
+			&i.GuardianPhone,
+			&i.GuardianAltPhone,
+			&i.GuardianEmail,
+			&i.GuardianRelationship,
 			&i.PreviousSchool,
+			&i.PreviousSchoolID,
 			&i.SchoolID,
 			&i.AcademicYearID,
+			&i.Disability,
+			&i.DisabilityDetails,
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -1997,63 +2209,95 @@ UPDATE
 SET
     student_number = $2,
     first_name = $3,
-    last_name = $4,
-    date_of_birth = $5,
-    gender = $6,
-    form_level = $7,
-    guardian_name = $8,
-    previous_school = $9,
-    school_id = $10,
-    academic_year_id = $11,
-    status = $12,
+    middle_name = $4,
+    last_name = $5,
+    date_of_birth = $6,
+    gender = $7,
+    form_level = $8,
+    guardian_name = $9,
+    guardian_phone = $10,
+    guardian_alt_phone = $11,
+    guardian_email = $12,
+    guardian_relationship = $13,
+    previous_school = $14,
+    previous_school_id = $15,
+    school_id = $16,
+    academic_year_id = $17,
+    disability = $18,
+    disability_details = $19,
+    status = $20,
     updated_at = NOW()
 WHERE
     id = $1 RETURNING id,
     student_number,
     first_name,
+    middle_name,
     last_name,
     date_of_birth,
     gender,
     form_level,
     guardian_name,
+    guardian_phone,
+    guardian_alt_phone,
+    guardian_email,
+    guardian_relationship,
     previous_school,
+    previous_school_id,
     school_id,
     academic_year_id,
+    disability,
+    disability_details,
     status,
     created_at,
     updated_at
 `
 
 type UpdateStudentParams struct {
-	ID             int32
-	StudentNumber  string
-	FirstName      string
-	LastName       string
-	DateOfBirth    sql.NullTime
-	Gender         sql.NullString
-	FormLevel      sql.NullInt32
-	GuardianName   sql.NullString
-	PreviousSchool sql.NullString
-	SchoolID       int32
-	AcademicYearID sql.NullInt32
-	Status         sql.NullString
+	ID                   int32
+	StudentNumber        string
+	FirstName            string
+	MiddleName           sql.NullString
+	LastName             string
+	DateOfBirth          sql.NullTime
+	Gender               sql.NullString
+	FormLevel            sql.NullInt32
+	GuardianName         sql.NullString
+	GuardianPhone        sql.NullString
+	GuardianAltPhone     sql.NullString
+	GuardianEmail        sql.NullString
+	GuardianRelationship sql.NullString
+	PreviousSchool       sql.NullString
+	PreviousSchoolID     sql.NullInt32
+	SchoolID             int32
+	AcademicYearID       sql.NullInt32
+	Disability           sql.NullBool
+	DisabilityDetails    sql.NullString
+	Status               sql.NullString
 }
 
 type UpdateStudentRow struct {
-	ID             int32
-	StudentNumber  string
-	FirstName      string
-	LastName       string
-	DateOfBirth    sql.NullTime
-	Gender         sql.NullString
-	FormLevel      sql.NullInt32
-	GuardianName   sql.NullString
-	PreviousSchool sql.NullString
-	SchoolID       int32
-	AcademicYearID sql.NullInt32
-	Status         sql.NullString
-	CreatedAt      sql.NullTime
-	UpdatedAt      sql.NullTime
+	ID                   int32
+	StudentNumber        string
+	FirstName            string
+	MiddleName           sql.NullString
+	LastName             string
+	DateOfBirth          sql.NullTime
+	Gender               sql.NullString
+	FormLevel            sql.NullInt32
+	GuardianName         sql.NullString
+	GuardianPhone        sql.NullString
+	GuardianAltPhone     sql.NullString
+	GuardianEmail        sql.NullString
+	GuardianRelationship sql.NullString
+	PreviousSchool       sql.NullString
+	PreviousSchoolID     sql.NullInt32
+	SchoolID             int32
+	AcademicYearID       sql.NullInt32
+	Disability           sql.NullBool
+	DisabilityDetails    sql.NullString
+	Status               sql.NullString
+	CreatedAt            sql.NullTime
+	UpdatedAt            sql.NullTime
 }
 
 func (q *Queries) UpdateStudent(ctx context.Context, arg UpdateStudentParams) (UpdateStudentRow, error) {
@@ -2061,14 +2305,22 @@ func (q *Queries) UpdateStudent(ctx context.Context, arg UpdateStudentParams) (U
 		arg.ID,
 		arg.StudentNumber,
 		arg.FirstName,
+		arg.MiddleName,
 		arg.LastName,
 		arg.DateOfBirth,
 		arg.Gender,
 		arg.FormLevel,
 		arg.GuardianName,
+		arg.GuardianPhone,
+		arg.GuardianAltPhone,
+		arg.GuardianEmail,
+		arg.GuardianRelationship,
 		arg.PreviousSchool,
+		arg.PreviousSchoolID,
 		arg.SchoolID,
 		arg.AcademicYearID,
+		arg.Disability,
+		arg.DisabilityDetails,
 		arg.Status,
 	)
 	var i UpdateStudentRow
@@ -2076,14 +2328,22 @@ func (q *Queries) UpdateStudent(ctx context.Context, arg UpdateStudentParams) (U
 		&i.ID,
 		&i.StudentNumber,
 		&i.FirstName,
+		&i.MiddleName,
 		&i.LastName,
 		&i.DateOfBirth,
 		&i.Gender,
 		&i.FormLevel,
 		&i.GuardianName,
+		&i.GuardianPhone,
+		&i.GuardianAltPhone,
+		&i.GuardianEmail,
+		&i.GuardianRelationship,
 		&i.PreviousSchool,
+		&i.PreviousSchoolID,
 		&i.SchoolID,
 		&i.AcademicYearID,
+		&i.Disability,
+		&i.DisabilityDetails,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -2097,66 +2357,98 @@ UPDATE
 SET
     student_number = $2,
     first_name = $3,
-    last_name = $4,
-    date_of_birth = $5,
-    gender = $6,
-    form_level = $7,
-    guardian_name = $8,
-    previous_school = $9,
-    school_id = $10,
-    academic_year_id = $11,
-    status = $12,
+    middle_name = $4,
+    last_name = $5,
+    date_of_birth = $6,
+    gender = $7,
+    form_level = $8,
+    guardian_name = $9,
+    guardian_phone = $10,
+    guardian_alt_phone = $11,
+    guardian_email = $12,
+    guardian_relationship = $13,
+    previous_school = $14,
+    previous_school_id = $15,
+    school_id = $16,
+    academic_year_id = $17,
+    disability = $18,
+    disability_details = $19,
+    status = $20,
     updated_at = NOW()
 WHERE
     id = $1
-    AND school_id = $13
+    AND school_id = $21
 RETURNING id,
     student_number,
     first_name,
+    middle_name,
     last_name,
     date_of_birth,
     gender,
     form_level,
     guardian_name,
+    guardian_phone,
+    guardian_alt_phone,
+    guardian_email,
+    guardian_relationship,
     previous_school,
+    previous_school_id,
     school_id,
     academic_year_id,
+    disability,
+    disability_details,
     status,
     created_at,
     updated_at
 `
 
 type UpdateStudentByIDAndSchoolIDParams struct {
-	ID             int32
-	StudentNumber  string
-	FirstName      string
-	LastName       string
-	DateOfBirth    sql.NullTime
-	Gender         sql.NullString
-	FormLevel      sql.NullInt32
-	GuardianName   sql.NullString
-	PreviousSchool sql.NullString
-	SchoolID       int32
-	AcademicYearID sql.NullInt32
-	Status         sql.NullString
-	SchoolID_2     int32
+	ID                   int32
+	StudentNumber        string
+	FirstName            string
+	MiddleName           sql.NullString
+	LastName             string
+	DateOfBirth          sql.NullTime
+	Gender               sql.NullString
+	FormLevel            sql.NullInt32
+	GuardianName         sql.NullString
+	GuardianPhone        sql.NullString
+	GuardianAltPhone     sql.NullString
+	GuardianEmail        sql.NullString
+	GuardianRelationship sql.NullString
+	PreviousSchool       sql.NullString
+	PreviousSchoolID     sql.NullInt32
+	SchoolID             int32
+	AcademicYearID       sql.NullInt32
+	Disability           sql.NullBool
+	DisabilityDetails    sql.NullString
+	Status               sql.NullString
+	SchoolID_2           int32
 }
 
 type UpdateStudentByIDAndSchoolIDRow struct {
-	ID             int32
-	StudentNumber  string
-	FirstName      string
-	LastName       string
-	DateOfBirth    sql.NullTime
-	Gender         sql.NullString
-	FormLevel      sql.NullInt32
-	GuardianName   sql.NullString
-	PreviousSchool sql.NullString
-	SchoolID       int32
-	AcademicYearID sql.NullInt32
-	Status         sql.NullString
-	CreatedAt      sql.NullTime
-	UpdatedAt      sql.NullTime
+	ID                   int32
+	StudentNumber        string
+	FirstName            string
+	MiddleName           sql.NullString
+	LastName             string
+	DateOfBirth          sql.NullTime
+	Gender               sql.NullString
+	FormLevel            sql.NullInt32
+	GuardianName         sql.NullString
+	GuardianPhone        sql.NullString
+	GuardianAltPhone     sql.NullString
+	GuardianEmail        sql.NullString
+	GuardianRelationship sql.NullString
+	PreviousSchool       sql.NullString
+	PreviousSchoolID     sql.NullInt32
+	SchoolID             int32
+	AcademicYearID       sql.NullInt32
+	Disability           sql.NullBool
+	DisabilityDetails    sql.NullString
+	Status               sql.NullString
+	CreatedAt            sql.NullTime
+	UpdatedAt            sql.NullTime
 }
 
 func (q *Queries) UpdateStudentByIDAndSchoolID(ctx context.Context, arg UpdateStudentByIDAndSchoolIDParams) (UpdateStudentByIDAndSchoolIDRow, error) {
@@ -2164,14 +2456,22 @@ func (q *Queries) UpdateStudentByIDAndSchoolID(ctx context.Context, arg UpdateSt
 		arg.ID,
 		arg.StudentNumber,
 		arg.FirstName,
+		arg.MiddleName,
 		arg.LastName,
 		arg.DateOfBirth,
 		arg.Gender,
 		arg.FormLevel,
 		arg.GuardianName,
+		arg.GuardianPhone,
+		arg.GuardianAltPhone,
+		arg.GuardianEmail,
+		arg.GuardianRelationship,
 		arg.PreviousSchool,
+		arg.PreviousSchoolID,
 		arg.SchoolID,
 		arg.AcademicYearID,
+		arg.Disability,
+		arg.DisabilityDetails,
 		arg.Status,
 		arg.SchoolID_2,
 	)
@@ -2180,14 +2480,22 @@ func (q *Queries) UpdateStudentByIDAndSchoolID(ctx context.Context, arg UpdateSt
 		&i.ID,
 		&i.StudentNumber,
 		&i.FirstName,
+		&i.MiddleName,
 		&i.LastName,
 		&i.DateOfBirth,
 		&i.Gender,
 		&i.FormLevel,
 		&i.GuardianName,
+		&i.GuardianPhone,
+		&i.GuardianAltPhone,
+		&i.GuardianEmail,
+		&i.GuardianRelationship,
 		&i.PreviousSchool,
+		&i.PreviousSchoolID,
 		&i.SchoolID,
 		&i.AcademicYearID,
+		&i.Disability,
+		&i.DisabilityDetails,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,

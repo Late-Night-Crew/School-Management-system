@@ -279,28 +279,44 @@ INSERT INTO
     students (
         student_number,
         first_name,
+        middle_name,
         last_name,
         date_of_birth,
         gender,
         form_level,
         guardian_name,
+        guardian_phone,
+        guardian_alt_phone,
+        guardian_email,
+        guardian_relationship,
         previous_school,
+        previous_school_id,
         school_id,
         academic_year_id,
+        disability,
+        disability_details,
         status
     )
 VALUES
-    ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id,
+    ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING id,
     student_number,
     first_name,
+    middle_name,
     last_name,
     date_of_birth,
     gender,
     form_level,
     guardian_name,
+    guardian_phone,
+    guardian_alt_phone,
+    guardian_email,
+    guardian_relationship,
     previous_school,
+    previous_school_id,
     school_id,
     academic_year_id,
+    disability,
+    disability_details,
     status,
     created_at,
     updated_at;
@@ -310,14 +326,22 @@ SELECT
     id,
     student_number,
     first_name,
+    middle_name,
     last_name,
     date_of_birth,
     gender,
     form_level,
     guardian_name,
+    guardian_phone,
+    guardian_alt_phone,
+    guardian_email,
+    guardian_relationship,
     previous_school,
+    previous_school_id,
     school_id,
     academic_year_id,
+    disability,
+    disability_details,
     status,
     created_at,
     updated_at
@@ -331,14 +355,22 @@ SELECT
     id,
     student_number,
     first_name,
+    middle_name,
     last_name,
     date_of_birth,
     gender,
     form_level,
     guardian_name,
+    guardian_phone,
+    guardian_alt_phone,
+    guardian_email,
+    guardian_relationship,
     previous_school,
+    previous_school_id,
     school_id,
     academic_year_id,
+    disability,
+    disability_details,
     status,
     created_at,
     updated_at
@@ -355,28 +387,44 @@ UPDATE
 SET
     student_number = $2,
     first_name = $3,
-    last_name = $4,
-    date_of_birth = $5,
-    gender = $6,
-    form_level = $7,
-    guardian_name = $8,
-    previous_school = $9,
-    school_id = $10,
-    academic_year_id = $11,
-    status = $12,
+    middle_name = $4,
+    last_name = $5,
+    date_of_birth = $6,
+    gender = $7,
+    form_level = $8,
+    guardian_name = $9,
+    guardian_phone = $10,
+    guardian_alt_phone = $11,
+    guardian_email = $12,
+    guardian_relationship = $13,
+    previous_school = $14,
+    previous_school_id = $15,
+    school_id = $16,
+    academic_year_id = $17,
+    disability = $18,
+    disability_details = $19,
+    status = $20,
     updated_at = NOW()
 WHERE
     id = $1 RETURNING id,
     student_number,
     first_name,
+    middle_name,
     last_name,
     date_of_birth,
     gender,
     form_level,
     guardian_name,
+    guardian_phone,
+    guardian_alt_phone,
+    guardian_email,
+    guardian_relationship,
     previous_school,
+    previous_school_id,
     school_id,
     academic_year_id,
+    disability,
+    disability_details,
     status,
     created_at,
     updated_at;
@@ -392,14 +440,22 @@ SELECT
     id,
     student_number,
     first_name,
+    middle_name,
     last_name,
     date_of_birth,
     gender,
     form_level,
     guardian_name,
+    guardian_phone,
+    guardian_alt_phone,
+    guardian_email,
+    guardian_relationship,
     previous_school,
+    previous_school_id,
     school_id,
     academic_year_id,
+    disability,
+    disability_details,
     status,
     created_at,
     updated_at
@@ -416,14 +472,22 @@ SELECT
     id,
     student_number,
     first_name,
+    middle_name,
     last_name,
     date_of_birth,
     gender,
     form_level,
     guardian_name,
+    guardian_phone,
+    guardian_alt_phone,
+    guardian_email,
+    guardian_relationship,
     previous_school,
+    previous_school_id,
     school_id,
     academic_year_id,
+    disability,
+    disability_details,
     status,
     created_at,
     updated_at
@@ -439,30 +503,46 @@ UPDATE
 SET
     student_number = $2,
     first_name = $3,
-    last_name = $4,
-    date_of_birth = $5,
-    gender = $6,
-    form_level = $7,
-    guardian_name = $8,
-    previous_school = $9,
-    school_id = $10,
-    academic_year_id = $11,
-    status = $12,
+    middle_name = $4,
+    last_name = $5,
+    date_of_birth = $6,
+    gender = $7,
+    form_level = $8,
+    guardian_name = $9,
+    guardian_phone = $10,
+    guardian_alt_phone = $11,
+    guardian_email = $12,
+    guardian_relationship = $13,
+    previous_school = $14,
+    previous_school_id = $15,
+    school_id = $16,
+    academic_year_id = $17,
+    disability = $18,
+    disability_details = $19,
+    status = $20,
     updated_at = NOW()
 WHERE
     id = $1
-    AND school_id = $13
+    AND school_id = $21
 RETURNING id,
     student_number,
     first_name,
+    middle_name,
     last_name,
     date_of_birth,
     gender,
     form_level,
     guardian_name,
+    guardian_phone,
+    guardian_alt_phone,
+    guardian_email,
+    guardian_relationship,
     previous_school,
+    previous_school_id,
     school_id,
     academic_year_id,
+    disability,
+    disability_details,
     status,
     created_at,
     updated_at;
@@ -473,6 +553,28 @@ DELETE FROM
 WHERE
     id = $1
     AND school_id = $2;
+
+-- name: CreateStudentSubjectAssignment :exec
+INSERT INTO
+    student_subjects (student_id, subject_id)
+VALUES
+    ($1, $2)
+ON CONFLICT DO NOTHING;
+
+-- name: DeleteStudentSubjectsByStudentID :exec
+DELETE FROM
+    student_subjects
+WHERE
+    student_id = $1;
+
+-- name: ListStudentSubjectIDsByStudentID :many
+SELECT
+    student_id,
+    subject_id
+FROM
+    student_subjects
+WHERE
+    student_id = $1;
 
 -- name: GetSchoolDashboardStats :one
 SELECT
