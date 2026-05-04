@@ -1,25 +1,11 @@
 import React, { useState, useEffect } from "react";
 import SchoolStudentService from "./services/studentService";
 import SchoolService from "./services/schoolService";
+import SubjectService from "./services/subjectService";
+import AcademicYearService from "./services/academicYearService";
 import { SCHOOL_ID_KEY } from "../constants/storageKeys";
 import ToastNote from "../../components/ToastNote";
 import ConfirmModal from "../../components/ConfirmModal";
-
-// Mock Data for Subjects (Icons removed as requested)
-const AVAILABLE_SUBJECTS = [
-    { id: 1,  name: "Mathematics" },
-    { id: 2,  name: "English Language" },
-    { id: 3,  name: "Combined Science" },
-    { id: 4,  name: "Biology" },
-    { id: 5,  name: "Physics" },
-    { id: 6,  name: "Chemistry" },
-    { id: 7,  name: "History" },
-    { id: 8,  name: "Geography" },
-    { id: 9,  name: "Agriculture" },
-    { id: 10, name: "Computer Science" },
-    { id: 11, name: "Physical Education" },
-    { id: 12, name: "Civic Education" },
-];
 
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap');
@@ -380,49 +366,57 @@ export default function StudentEnroll() {
         selectedSubjects:[]
     };
 
-    const [students,      setStudents]      = useState([]);
-    const [searchTerm,    setSearchTerm]    = useState("");
-    const [currentPage,   setCurrentPage]   = useState(1);
-    const [activeTab,     setActiveTab]     = useState("form");
-    const [toast,         setToast]         = useState({ show:false, message:"", variant:"success" });
-    const [modal,         setModal]         = useState({ show:false, studentId:null });
-    const [isEditing,     setIsEditing]     = useState(false);
-    const [editingId,     setEditingId]     = useState(null);
-    const [form,          setForm]          = useState(BLANK);
-    const [districts,     setDistricts]     = useState([]);
-    const [schools,       setSchools]       = useState([]);
-    const [currentSchool, setCurrentSchool] = useState("");
+    const [students,             setStudents]             = useState([]);
+    const [subjects,             setSubjects]             = useState([]);
+    const [searchTerm,           setSearchTerm]           = useState("");
+    const [currentPage,          setCurrentPage]          = useState(1);
+    const [activeTab,            setActiveTab]            = useState("form");
+    const [toast,                setToast]                = useState({ show:false, message:"", variant:"success" });
+    const [modal,                setModal]                = useState({ show:false, studentId:null });
+    const [isEditing,            setIsEditing]            = useState(false);
+    const [editingId,            setEditingId]            = useState(null);
+    const [form,                 setForm]                 = useState(BLANK);
+    const [districts,            setDistricts]            = useState([]);
+    const [schools,              setSchools]              = useState([]);
+    const [currentSchool,        setCurrentSchool]        = useState("");
+    const [activeAcademicYear,   setActiveAcademicYear]   = useState(null);
 
     const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
     useEffect(() => {
-        fetchStudents(); fetchDistricts();
+        fetchStudents(); fetchDistricts(); fetchSubjects(); fetchActiveAcademicYear();
         const id = localStorage.getItem("schoolId");
         if (id) fetchCurrentSchool(id);
     }, []);
 
-    const fetchStudents      = async () => { try { const d = await SchoolStudentService.fetchStudentsForSchool(); setStudents(Array.isArray(d)?d:[]); } catch(e){console.error(e);} };
-    const fetchDistricts     = async () => { try { const d = await SchoolService.fetchDistricts(); setDistricts(Array.isArray(d)?d:[]); } catch(e){console.error(e);} };
-    const fetchSchools       = async (id) => { try { const d = await SchoolService.fetchSchoolsByDistrict(id); setSchools(Array.isArray(d)?d:[]); } catch(e){console.error(e);} };
-    const fetchCurrentSchool = async (id) => {
+    const fetchStudents           = async () => { try { const d = await SchoolStudentService.fetchStudentsForSchool(); setStudents(Array.isArray(d)?d:[]); } catch(e){console.error(e);} };
+    const fetchDistricts          = async () => { try { const d = await SchoolService.fetchDistricts(); setDistricts(Array.isArray(d)?d:[]); } catch(e){console.error(e);} };
+    const fetchSchools            = async (id) => { try { const d = await SchoolService.fetchSchoolsByDistrict(id); setSchools(Array.isArray(d)?d:[]); } catch(e){console.error(e);} };
+    const fetchSubjects           = async () => { try { const d = await SubjectService.fetchAllSubjects(); setSubjects(Array.isArray(d)?d:[]); } catch(e){console.error(e);} };
+    const fetchActiveAcademicYear = async () => { try { const d = await AcademicYearService.getActiveAcademicYear(); setActiveAcademicYear(d); } catch(e){console.error(e);} };
+    const fetchCurrentSchool      = async (id) => {
         try { const d = await SchoolService.getSchoolById(id); setCurrentSchool(d.name||""); setForm(p=>({...p, currentSchool:d.name||""})); }
         catch(e){console.error(e);}
     };
 
     const handleDistrictChange = (id) => { set("previousDistrict", id); set("previousSchool",""); fetchSchools(id); };
     const toggleSubject = (id) => set("selectedSubjects", form.selectedSubjects.includes(id) ? form.selectedSubjects.filter(s=>s!==id) : [...form.selectedSubjects, id]);
-    const toggleAll = () => set("selectedSubjects", form.selectedSubjects.length === AVAILABLE_SUBJECTS.length ? [] : AVAILABLE_SUBJECTS.map(s=>s.id));
+    const toggleAll = () => set("selectedSubjects", form.selectedSubjects.length === subjects.length ? [] : subjects.map(s=>s.id));
 
     const resetForm = () => { setIsEditing(false); setEditingId(null); setForm({...BLANK, currentSchool}); };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
+            if (!activeAcademicYear) {
+                setToast({ show:true, message:"No active academic year found. Please contact administrator.", variant:"danger" });
+                return;
+            }
             const schoolId = localStorage.getItem(SCHOOL_ID_KEY);
             const payload = {
                 first_name: form.firstname, middle_name: form.middlename, last_name: form.lastname,
                 student_number: form.studentNumber, gender: form.gender, date_of_birth: form.dateOfBirth,
-                form_level: form.class, school_id: parseInt(schoolId),
+                form_level: parseInt(form.class), school_id: parseInt(schoolId),
                 guardian_firstname: form.guardianFirstname, guardian_middlename: form.guardianMiddlename,
                 guardian_lastname: form.guardianLastname,
                 guardian_name: `${form.guardianFirstname} ${form.guardianLastname}`,
@@ -430,7 +424,7 @@ export default function StudentEnroll() {
                 guardian_relationship: form.guardianRelationship, guardian_email: form.guardianEmail,
                 previous_school_id: form.previousSchool ? parseInt(form.previousSchool) : null,
                 disability: form.disability, disability_details: form.disabilityDetails,
-                subject_ids: form.selectedSubjects, status: "active", academic_year_id: 1
+                subject_ids: form.selectedSubjects, status: "active", academic_year_id: parseInt(activeAcademicYear.id)
             };
             if (isEditing) {
                 await SchoolStudentService.updateStudent(editingId, payload);
@@ -452,7 +446,7 @@ export default function StudentEnroll() {
             firstname: s.first_name||"", middlename: s.middle_name||"", lastname: s.last_name||"",
             studentNumber: s.student_number||"", gender: s.gender||"",
             dateOfBirth: s.date_of_birth ? s.date_of_birth.split('T')[0] : "",
-            class: s.form_level||"", previousDistrict: s.previous_district||"", previousSchool: s.previous_school||"",
+            class: s.form_level ? String(s.form_level) : "", previousDistrict: s.previous_district||"", previousSchool: s.previous_school||"",
             currentSchool, disability: s.disability||false, disabilityDetails: s.disability_details||"",
             guardianFirstname: parts[0]||"", guardianMiddlename: "",
             guardianLastname: parts.length > 1 ? parts.slice(1).join(' ') : "",
@@ -479,9 +473,14 @@ export default function StudentEnroll() {
     );
     const totalPages = Math.ceil(filtered.length / PER_PAGE);
     const pageRows   = filtered.slice((currentPage-1)*PER_PAGE, currentPage*PER_PAGE);
-    const allSel     = form.selectedSubjects.length === AVAILABLE_SUBJECTS.length;
+    const allSel     = form.selectedSubjects.length === subjects.length;
 
-    const CLASSES = ["Form 1","Form 2","Form 3","Form 4"];
+    const CLASSES = [
+        { value: "1", label: "Form 1" },
+        { value: "2", label: "Form 2" },
+        { value: "3", label: "Form 3" },
+        { value: "4", label: "Form 4" }
+    ];
 
     return (
         <>
@@ -569,7 +568,7 @@ export default function StudentEnroll() {
                                             <div className="sel-w">
                                                 <select className="sel" value={form.class} onChange={e=>set('class',e.target.value)} required>
                                                     <option value="">Select class…</option>
-                                                    {CLASSES.map(c=><option key={c} value={c}>{c}</option>)}
+                                                    {CLASSES.map(c=><option key={c.value} value={c.value}>{c.label}</option>)}
                                                 </select>
                                             </div>
                                         </div>
@@ -596,6 +595,12 @@ export default function StudentEnroll() {
                                         <div className="f">
                                             <label className="lbl">Current School</label>
                                             <input className="inp" type="text" value={form.currentSchool} readOnly/>
+                                        </div>
+                                    </div>
+                                    <div className="g g3" style={{marginBottom:14}}>
+                                        <div className="f">
+                                            <label className="lbl">Academic Year *</label>
+                                            <input className="inp" type="text" value={activeAcademicYear ? `${activeAcademicYear.year} (${activeAcademicYear.start_date} - ${activeAcademicYear.end_date})` : "Loading..."} readOnly/>
                                         </div>
                                     </div>
                                     {/* Disability toggle */}
@@ -639,7 +644,7 @@ export default function StudentEnroll() {
                                             <div className="sel-w">
                                                 <select className="sel" value={form.guardianRelationship} onChange={e=>set('guardianRelationship',e.target.value)} required>
                                                     <option value="">Select…</option>
-                                                    {["Father","Mother","Guardian","Other"].map(r=><option key={r} value={r}>{r}</option>)}
+                                                    {["Father","Mother","Guardian","Other"].map(r=><option key={r} value={r.toLowerCase()}>{r}</option>)}
                                                 </select>
                                             </div>
                                         </div>
@@ -666,18 +671,24 @@ export default function StudentEnroll() {
                                     </div>
                                 </div>
                                 <div className="se-card-body">
-                                    <div className="subjs">
-                                        {AVAILABLE_SUBJECTS.map(sub=>{
-                                            const on = form.selectedSubjects.includes(sub.id);
-                                            return (
-                                                <div key={sub.id} className={`subj ${on?'on':''}`} onClick={()=>toggleSubject(sub.id)}>
-                                                    {/* Subject Icon removed as requested */}
-                                                    <span className="subj-name">{sub.name}</span>
-                                                    <span className="subj-chk">{on?'✓':''}</span>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
+                                    {subjects.length === 0 ? (
+                                        <div style={{textAlign:'center',padding:'32px 16px',color:'#9ca3af'}}>
+                                            <i className="bi bi-info-circle" style={{fontSize:'24px',marginBottom:'10px',display:'block'}}></i>
+                                            <p style={{fontSize:'13px'}}>Loading subjects...</p>
+                                        </div>
+                                    ) : (
+                                        <div className="subjs">
+                                            {subjects.map(sub=>{
+                                                const on = form.selectedSubjects.includes(sub.id);
+                                                return (
+                                                    <div key={sub.id} className={`subj ${on?'on':''}`} onClick={()=>toggleSubject(sub.id)}>
+                                                        <span className="subj-name">{sub.name}</span>
+                                                        <span className="subj-chk">{on?'✓':''}</span>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 

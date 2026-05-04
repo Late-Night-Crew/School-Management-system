@@ -1,11 +1,12 @@
 package api
 
 import (
-	"github.com/gofiber/fiber/v2"
 	"nsms/config"
 	"nsms/database/dbsqlc"
 	"nsms/logging"
 	"nsms/services"
+
+	"github.com/gofiber/fiber/v2"
 )
 
 type API struct {
@@ -20,6 +21,7 @@ type API struct {
 	AcademicYearService services.AcademicYearService
 	TransferService     services.TransferService
 	SchoolAdminService  services.SchoolAdminService
+	SubjectService      services.SubjectService
 }
 
 func NewAPI(config *config.Config) *API {
@@ -38,6 +40,7 @@ func NewAPI(config *config.Config) *API {
 		AcademicYearService: services.NewAcademicYearService(dbConn, logger),
 		TransferService:     services.NewTransferService(dbConn, logger),
 		SchoolAdminService:  services.NewSchoolAdminService(dbConn, logger),
+		SubjectService:      services.NewSubjectService(dbConn, logger),
 	}
 }
 

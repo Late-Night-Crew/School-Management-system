@@ -52,6 +52,12 @@ func (api *API) adminRoutes() {
 	adminApi.Put("/academic_years/:id", authenticationMiddleware, admin.UpdateAcademicYear(api.AcademicYearService, api.logger))
 	adminApi.Delete("/academic_years/:id", authenticationMiddleware, admin.DeleteAcademicYear(api.AcademicYearService, api.logger))
 
+	adminApi.Get("/subjects", authenticationMiddleware, admin.GetSubjectList(api.SubjectService, api.logger))
+	adminApi.Get("/subjects/:id", authenticationMiddleware, admin.GetSubjectByID(api.SubjectService, api.logger))
+	adminApi.Post("/subjects", authenticationMiddleware, admin.CreateSubject(api.SubjectService, api.logger))
+	adminApi.Put("/subjects/:id", authenticationMiddleware, admin.UpdateSubject(api.SubjectService, api.logger))
+	adminApi.Delete("/subjects/:id", authenticationMiddleware, admin.DeleteSubject(api.SubjectService, api.logger))
+
 	// TODO IMPLEMENT ADMIN LEVEL TRANSFER ACTIONS
 	// adminApi.Get("/transfers", authenticationMiddleware, admin.GetTransferList(api.TransferService, api.logger))
 

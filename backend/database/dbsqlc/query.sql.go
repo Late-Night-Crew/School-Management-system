@@ -404,6 +404,38 @@ func (q *Queries) CreateStudentSubjectAssignment(ctx context.Context, arg Create
 	return err
 }
 
+const createSubject = `-- name: CreateSubject :one
+INSERT INTO
+    subjects (code, name, description)
+VALUES
+    ($1, $2, $3) RETURNING id,
+    code,
+    name,
+    description,
+    created_at,
+    updated_at
+`
+
+type CreateSubjectParams struct {
+	Code        string
+	Name        string
+	Description sql.NullString
+}
+
+func (q *Queries) CreateSubject(ctx context.Context, arg CreateSubjectParams) (Subject, error) {
+	row := q.db.QueryRowContext(ctx, createSubject, arg.Code, arg.Name, arg.Description)
+	var i Subject
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.Name,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createTransferRequest = `-- name: CreateTransferRequest :one
 INSERT INTO transfers (
     student_id,
@@ -627,6 +659,18 @@ WHERE
 
 func (q *Queries) DeleteStudentSubjectsByStudentID(ctx context.Context, studentID int32) error {
 	_, err := q.db.ExecContext(ctx, deleteStudentSubjectsByStudentID, studentID)
+	return err
+}
+
+const deleteSubject = `-- name: DeleteSubject :exec
+DELETE FROM
+    subjects
+WHERE
+    id = $1
+`
+
+func (q *Queries) DeleteSubject(ctx context.Context, id int32) error {
+	_, err := q.db.ExecContext(ctx, deleteSubject, id)
 	return err
 }
 
@@ -1320,6 +1364,34 @@ func (q *Queries) GetStudentsBySchoolID(ctx context.Context, schoolID int32) ([]
 	return items, nil
 }
 
+const getSubjectByID = `-- name: GetSubjectByID :one
+SELECT
+    id,
+    code,
+    name,
+    description,
+    created_at,
+    updated_at
+FROM
+    subjects
+WHERE
+    id = $1
+`
+
+func (q *Queries) GetSubjectByID(ctx context.Context, id int32) (Subject, error) {
+	row := q.db.QueryRowContext(ctx, getSubjectByID, id)
+	var i Subject
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.Name,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getTransferByID = `-- name: GetTransferByID :one
 SELECT
     id,
@@ -1890,6 +1962,50 @@ func (q *Queries) ListStudents(ctx context.Context, arg ListStudentsParams) ([]L
 			&i.Disability,
 			&i.DisabilityDetails,
 			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSubjects = `-- name: ListSubjects :many
+SELECT
+    id,
+    code,
+    name,
+    description,
+    created_at,
+    updated_at
+FROM
+    subjects
+ORDER BY
+    name
+`
+
+func (q *Queries) ListSubjects(ctx context.Context) ([]Subject, error) {
+	rows, err := q.db.QueryContext(ctx, listSubjects)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Subject
+	for rows.Next() {
+		var i Subject
+		if err := rows.Scan(
+			&i.ID,
+			&i.Code,
+			&i.Name,
+			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -2497,6 +2613,49 @@ func (q *Queries) UpdateStudentByIDAndSchoolID(ctx context.Context, arg UpdateSt
 		&i.Disability,
 		&i.DisabilityDetails,
 		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateSubject = `-- name: UpdateSubject :one
+UPDATE
+    subjects
+SET
+    code = $2,
+    name = $3,
+    description = $4,
+    updated_at = CURRENT_TIMESTAMP
+WHERE
+    id = $1 RETURNING id,
+    code,
+    name,
+    description,
+    created_at,
+    updated_at
+`
+
+type UpdateSubjectParams struct {
+	ID          int32
+	Code        string
+	Name        string
+	Description sql.NullString
+}
+
+func (q *Queries) UpdateSubject(ctx context.Context, arg UpdateSubjectParams) (Subject, error) {
+	row := q.db.QueryRowContext(ctx, updateSubject,
+		arg.ID,
+		arg.Code,
+		arg.Name,
+		arg.Description,
+	)
+	var i Subject
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.Name,
+		&i.Description,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

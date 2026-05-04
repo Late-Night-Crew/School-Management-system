@@ -859,3 +859,62 @@ SET
 WHERE
     id = $1
 RETURNING id, status, rejection_reason;
+
+-- name: CreateSubject :one
+INSERT INTO
+    subjects (code, name, description)
+VALUES
+    ($1, $2, $3) RETURNING id,
+    code,
+    name,
+    description,
+    created_at,
+    updated_at;
+
+-- name: ListSubjects :many
+SELECT
+    id,
+    code,
+    name,
+    description,
+    created_at,
+    updated_at
+FROM
+    subjects
+ORDER BY
+    name;
+
+-- name: GetSubjectByID :one
+SELECT
+    id,
+    code,
+    name,
+    description,
+    created_at,
+    updated_at
+FROM
+    subjects
+WHERE
+    id = $1;
+
+-- name: UpdateSubject :one
+UPDATE
+    subjects
+SET
+    code = $2,
+    name = $3,
+    description = $4,
+    updated_at = CURRENT_TIMESTAMP
+WHERE
+    id = $1 RETURNING id,
+    code,
+    name,
+    description,
+    created_at,
+    updated_at;
+
+-- name: DeleteSubject :exec
+DELETE FROM
+    subjects
+WHERE
+    id = $1;
