@@ -9,14 +9,14 @@ const getAuthHeaders = () => {
 };
 
 const SchoolStudentService = {
-  // Fetch all students for the current school
+  // Fetch all students for the current school using scoped endpoint
   fetchStudentsForSchool: async (schoolId = null) => {
     try {
       const id = schoolId || localStorage.getItem(SCHOOL_ID_KEY);
       if (!id) throw new Error("School ID not found");
       
       const response = await axios.get(
-        `${NSMS_URL}/admin/students?school_id=${id}`,
+        `${NSMS_URL}/school/${id}/students`,
         { headers: getAuthHeaders() }
       );
       return Array.isArray(response.data) ? response.data : [];
@@ -26,11 +26,14 @@ const SchoolStudentService = {
     }
   },
 
-  // Get a single student by ID
-  getStudentById: async (studentId) => {
+  // Get a single student by ID using scoped endpoint
+  getStudentById: async (studentId, schoolId = null) => {
     try {
+      const id = schoolId || localStorage.getItem(SCHOOL_ID_KEY);
+      if (!id) throw new Error("School ID not found");
+      
       const response = await axios.get(
-        `${NSMS_URL}/admin/students/${studentId}`,
+        `${NSMS_URL}/school/${id}/students/${studentId}`,
         { headers: getAuthHeaders() }
       );
       return response.data;
@@ -40,11 +43,14 @@ const SchoolStudentService = {
     }
   },
 
-  // Create a new student
-  createStudent: async (studentData) => {
+  // Create a new student using scoped endpoint
+  createStudent: async (studentData, schoolId = null) => {
     try {
+      const id = schoolId || localStorage.getItem(SCHOOL_ID_KEY);
+      if (!id) throw new Error("School ID not found");
+      
       const response = await axios.post(
-        `${NSMS_URL}/admin/students`,
+        `${NSMS_URL}/school/${id}/students`,
         studentData,
         { headers: getAuthHeaders() }
       );
@@ -55,11 +61,14 @@ const SchoolStudentService = {
     }
   },
 
-  // Update an existing student
-  updateStudent: async (studentId, studentData) => {
+  // Update an existing student using scoped endpoint
+  updateStudent: async (studentId, studentData, schoolId = null) => {
     try {
+      const id = schoolId || localStorage.getItem(SCHOOL_ID_KEY);
+      if (!id) throw new Error("School ID not found");
+      
       const response = await axios.put(
-        `${NSMS_URL}/admin/students/${studentId}`,
+        `${NSMS_URL}/school/${id}/students/${studentId}`,
         studentData,
         { headers: getAuthHeaders() }
       );
@@ -70,11 +79,14 @@ const SchoolStudentService = {
     }
   },
 
-  // Delete a student
-  deleteStudent: async (studentId) => {
+  // Delete a student using scoped endpoint
+  deleteStudent: async (studentId, schoolId = null) => {
     try {
+      const id = schoolId || localStorage.getItem(SCHOOL_ID_KEY);
+      if (!id) throw new Error("School ID not found");
+      
       const response = await axios.delete(
-        `${NSMS_URL}/admin/students/${studentId}`,
+        `${NSMS_URL}/school/${id}/students/${studentId}`,
         { headers: getAuthHeaders() }
       );
       return response.data;

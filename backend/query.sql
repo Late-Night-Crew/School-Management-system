@@ -279,28 +279,44 @@ INSERT INTO
     students (
         student_number,
         first_name,
+        middle_name,
         last_name,
         date_of_birth,
         gender,
         form_level,
         guardian_name,
+        guardian_phone,
+        guardian_alt_phone,
+        guardian_email,
+        guardian_relationship,
         previous_school,
+        previous_school_id,
         school_id,
         academic_year_id,
+        disability,
+        disability_details,
         status
     )
 VALUES
-    ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id,
+    ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING id,
     student_number,
     first_name,
+    middle_name,
     last_name,
     date_of_birth,
     gender,
     form_level,
     guardian_name,
+    guardian_phone,
+    guardian_alt_phone,
+    guardian_email,
+    guardian_relationship,
     previous_school,
+    previous_school_id,
     school_id,
     academic_year_id,
+    disability,
+    disability_details,
     status,
     created_at,
     updated_at;
@@ -310,14 +326,22 @@ SELECT
     id,
     student_number,
     first_name,
+    middle_name,
     last_name,
     date_of_birth,
     gender,
     form_level,
     guardian_name,
+    guardian_phone,
+    guardian_alt_phone,
+    guardian_email,
+    guardian_relationship,
     previous_school,
+    previous_school_id,
     school_id,
     academic_year_id,
+    disability,
+    disability_details,
     status,
     created_at,
     updated_at
@@ -331,14 +355,22 @@ SELECT
     id,
     student_number,
     first_name,
+    middle_name,
     last_name,
     date_of_birth,
     gender,
     form_level,
     guardian_name,
+    guardian_phone,
+    guardian_alt_phone,
+    guardian_email,
+    guardian_relationship,
     previous_school,
+    previous_school_id,
     school_id,
     academic_year_id,
+    disability,
+    disability_details,
     status,
     created_at,
     updated_at
@@ -355,28 +387,44 @@ UPDATE
 SET
     student_number = $2,
     first_name = $3,
-    last_name = $4,
-    date_of_birth = $5,
-    gender = $6,
-    form_level = $7,
-    guardian_name = $8,
-    previous_school = $9,
-    school_id = $10,
-    academic_year_id = $11,
-    status = $12,
+    middle_name = $4,
+    last_name = $5,
+    date_of_birth = $6,
+    gender = $7,
+    form_level = $8,
+    guardian_name = $9,
+    guardian_phone = $10,
+    guardian_alt_phone = $11,
+    guardian_email = $12,
+    guardian_relationship = $13,
+    previous_school = $14,
+    previous_school_id = $15,
+    school_id = $16,
+    academic_year_id = $17,
+    disability = $18,
+    disability_details = $19,
+    status = $20,
     updated_at = NOW()
 WHERE
     id = $1 RETURNING id,
     student_number,
     first_name,
+    middle_name,
     last_name,
     date_of_birth,
     gender,
     form_level,
     guardian_name,
+    guardian_phone,
+    guardian_alt_phone,
+    guardian_email,
+    guardian_relationship,
     previous_school,
+    previous_school_id,
     school_id,
     academic_year_id,
+    disability,
+    disability_details,
     status,
     created_at,
     updated_at;
@@ -392,14 +440,22 @@ SELECT
     id,
     student_number,
     first_name,
+    middle_name,
     last_name,
     date_of_birth,
     gender,
     form_level,
     guardian_name,
+    guardian_phone,
+    guardian_alt_phone,
+    guardian_email,
+    guardian_relationship,
     previous_school,
+    previous_school_id,
     school_id,
     academic_year_id,
+    disability,
+    disability_details,
     status,
     created_at,
     updated_at
@@ -410,6 +466,196 @@ WHERE
 ORDER BY
     last_name ASC,
     first_name ASC;
+
+-- name: GetStudentByIDAndSchoolID :one
+SELECT
+    id,
+    student_number,
+    first_name,
+    middle_name,
+    last_name,
+    date_of_birth,
+    gender,
+    form_level,
+    guardian_name,
+    guardian_phone,
+    guardian_alt_phone,
+    guardian_email,
+    guardian_relationship,
+    previous_school,
+    previous_school_id,
+    school_id,
+    academic_year_id,
+    disability,
+    disability_details,
+    status,
+    created_at,
+    updated_at
+FROM
+    students
+WHERE
+    id = $1
+    AND school_id = $2;
+
+-- name: UpdateStudentByIDAndSchoolID :one
+UPDATE
+    students
+SET
+    student_number = $2,
+    first_name = $3,
+    middle_name = $4,
+    last_name = $5,
+    date_of_birth = $6,
+    gender = $7,
+    form_level = $8,
+    guardian_name = $9,
+    guardian_phone = $10,
+    guardian_alt_phone = $11,
+    guardian_email = $12,
+    guardian_relationship = $13,
+    previous_school = $14,
+    previous_school_id = $15,
+    school_id = $16,
+    academic_year_id = $17,
+    disability = $18,
+    disability_details = $19,
+    status = $20,
+    updated_at = NOW()
+WHERE
+    id = $1
+    AND school_id = $21
+RETURNING id,
+    student_number,
+    first_name,
+    middle_name,
+    last_name,
+    date_of_birth,
+    gender,
+    form_level,
+    guardian_name,
+    guardian_phone,
+    guardian_alt_phone,
+    guardian_email,
+    guardian_relationship,
+    previous_school,
+    previous_school_id,
+    school_id,
+    academic_year_id,
+    disability,
+    disability_details,
+    status,
+    created_at,
+    updated_at;
+
+-- name: DeleteStudentByIDAndSchoolID :exec
+DELETE FROM
+    students
+WHERE
+    id = $1
+    AND school_id = $2;
+
+-- name: CreateStudentSubjectAssignment :exec
+INSERT INTO
+    student_subjects (student_id, subject_id)
+VALUES
+    ($1, $2)
+ON CONFLICT DO NOTHING;
+
+-- name: DeleteStudentSubjectsByStudentID :exec
+DELETE FROM
+    student_subjects
+WHERE
+    student_id = $1;
+
+-- name: ListStudentSubjectIDsByStudentID :many
+SELECT
+    student_id,
+    subject_id
+FROM
+    student_subjects
+WHERE
+    student_id = $1;
+
+-- name: GetSchoolDashboardStats :one
+SELECT
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1) AS student_count,
+    (SELECT COUNT(*) FROM transfers t WHERE t.to_school = $1) AS incoming_transfer_count,
+    (SELECT COUNT(*) FROM transfers t WHERE t.from_school = $1) AS outgoing_transfer_count,
+    (SELECT COUNT(*) FROM exam_results e WHERE e.school_id = $1) AS exam_result_count;
+
+-- name: GetStudentCountBySchoolID :one
+SELECT COUNT(*) AS count
+FROM students
+WHERE school_id = $1;
+
+-- name: GetIncomingTransferCountBySchoolID :one
+SELECT COUNT(*) AS count
+FROM transfers
+WHERE to_school = $1;
+
+-- name: GetOutgoingTransferCountBySchoolID :one
+SELECT COUNT(*) AS count
+FROM transfers
+WHERE from_school = $1;
+
+-- name: ListExamResultsBySchoolID :many
+SELECT
+    id,
+    school_id,
+    academic_year_id,
+    jce_pass_rate,
+    msce_pass_rate
+FROM
+    exam_results
+WHERE
+    school_id = $1
+ORDER BY
+    academic_year_id DESC;
+
+-- name: GetExamResultBySchoolIDAndAcademicYear :one
+SELECT
+    id,
+    school_id,
+    academic_year_id,
+    jce_pass_rate,
+    msce_pass_rate
+FROM
+    exam_results
+WHERE
+    school_id = $1
+    AND academic_year_id = $2;
+
+-- name: CreateExamResult :one
+INSERT INTO exam_results (
+    school_id,
+    academic_year_id,
+    jce_pass_rate,
+    msce_pass_rate
+)
+VALUES
+    ($1, $2, $3, $4)
+RETURNING id,
+    school_id,
+    academic_year_id,
+    jce_pass_rate,
+    msce_pass_rate;
+
+-- name: UpdateExamResult :one
+UPDATE exam_results
+SET
+    jce_pass_rate = $2,
+    msce_pass_rate = $3
+WHERE
+    id = $1
+RETURNING id,
+    school_id,
+    academic_year_id,
+    jce_pass_rate,
+    msce_pass_rate;
+
+-- name: DeleteExamResult :exec
+DELETE FROM exam_results
+WHERE id = $1;
 
 -- name: ListAcademicYears :many
 SELECT
@@ -514,6 +760,22 @@ FROM
 WHERE
     id = $1;
 
+-- name: GetTransferByIDForSchool :one
+SELECT
+    id,
+    student_id,
+    from_school,
+    to_school,
+    status,
+    date_initiated,
+    date_accepted,
+    reason
+FROM
+    transfers
+WHERE
+    id = $1
+    AND ($2 = from_school OR $2 = to_school);
+
 -- name: ApproveTransfer :one
 WITH updated_student AS (
     UPDATE students
@@ -529,6 +791,30 @@ WHERE
     transfers.id = sqlc.arg(transfer_id)
 RETURNING transfers.id, status, date_accepted;
 
+-- name: ApproveTransferForSchool :one
+WITH updated_student AS (
+    UPDATE students
+    SET school_id = sqlc.arg(new_school_id)
+    WHERE students.id = sqlc.arg(student_id)
+    RETURNING students.id
+)
+UPDATE transfers
+SET
+    status = 'Accepted',
+    date_accepted = CURRENT_TIMESTAMP
+WHERE
+    transfers.id = sqlc.arg(transfer_id)
+    AND transfers.to_school = sqlc.arg(school_id)
+RETURNING transfers.id, status, date_accepted;
+
+-- name: FinalizeTransferForSchool :one
+UPDATE transfers
+SET
+    status = 'Completed'
+WHERE
+    transfers.id = $1
+    AND ($2 = from_school OR $2 = to_school)
+RETURNING transfers.id, status;
 
 -- name: FinalizeTransfer :one
 UPDATE transfers
@@ -537,6 +823,17 @@ SET
 WHERE
     transfers.id = $1
 RETURNING transfers.id, status;
+
+-- name: RejectTransferForSchool :one
+UPDATE transfers
+SET
+    status = 'Rejected',
+    rejection_reason = $2,
+    date_accepted = NULL
+WHERE
+    id = $1
+    AND ($3 = from_school OR $3 = to_school)
+RETURNING id, status, rejection_reason;
 
 -- name: GetOutgoingTransfers :many
 SELECT
@@ -562,3 +859,62 @@ SET
 WHERE
     id = $1
 RETURNING id, status, rejection_reason;
+
+-- name: CreateSubject :one
+INSERT INTO
+    subjects (code, name, description)
+VALUES
+    ($1, $2, $3) RETURNING id,
+    code,
+    name,
+    description,
+    created_at,
+    updated_at;
+
+-- name: ListSubjects :many
+SELECT
+    id,
+    code,
+    name,
+    description,
+    created_at,
+    updated_at
+FROM
+    subjects
+ORDER BY
+    name;
+
+-- name: GetSubjectByID :one
+SELECT
+    id,
+    code,
+    name,
+    description,
+    created_at,
+    updated_at
+FROM
+    subjects
+WHERE
+    id = $1;
+
+-- name: UpdateSubject :one
+UPDATE
+    subjects
+SET
+    code = $2,
+    name = $3,
+    description = $4,
+    updated_at = CURRENT_TIMESTAMP
+WHERE
+    id = $1 RETURNING id,
+    code,
+    name,
+    description,
+    created_at,
+    updated_at;
+
+-- name: DeleteSubject :exec
+DELETE FROM
+    subjects
+WHERE
+    id = $1;
