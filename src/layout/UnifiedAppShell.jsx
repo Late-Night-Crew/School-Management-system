@@ -1,30 +1,12 @@
-import React, { useEffect, useState } from "react";
-import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Navigate, Outlet, useLocation } from "react-router-dom";
 import UnifiedSidebar from "./UnifiedSidebar";
-import { AUTH_TOKEN_KEY, USER_ROLE_KEY, DISPLAY_NAME_KEY } from "../views/constants/storageKeys";
+import { getSession, homePath, canAccess } from "../auth/session";
 
 export default function UnifiedAppShell() {
   const location = useLocation();
-  const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [role, setRole] = useState("user");
-  const [displayName, setDisplayName] = useState("User");
-
-  useEffect(() => {
-    const token = localStorage.getItem(AUTH_TOKEN_KEY);
-    if (!token) {
-      navigate("/login");
-    }
-  }, [navigate]);
-
-  useEffect(() => {
-    const storedRole = localStorage.getItem(USER_ROLE_KEY);
-    const storedName = localStorage.getItem(DISPLAY_NAME_KEY);
-    if (storedRole) setRole(storedRole);
-    if (storedName) setDisplayName(storedName);
-  }, []);
-
   useEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 900px)");
 
@@ -50,23 +32,17 @@ export default function UnifiedAppShell() {
     };
   }, []);
 
-  const hideSidebar = location.pathname === "/login";
-
   const getInitials = (text) => {
     return text
       .split(/[_\s]+/)
       .map((word) => word[0])
+      .slice(0, 2)
       .join("")
       .toUpperCase();
   };
 
-  const getTitle = () => {
-    const route = location.pathname === "/" ? "Dashboard" : location.pathname.replace(/\//g, " ").trim();
-    return route
-      .split(" ")
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(" ");
-  };
+  // Top bar title: which portal the user is in (each page shows its own title)
+  const getTitle = () => PORTAL_TITLES[location.pathname.split("/")[1]] || "Dashboard";
 
   const headerStyles = {
     ...styles.topbar,
@@ -78,13 +54,21 @@ export default function UnifiedAppShell() {
     zIndex: 15,
   };
 
+  // Pages draw their own padding (see components/ui/Page); leave room for the fixed top bar
   const contentStyles = {
     ...styles.content,
-    paddingTop: "88px",
+    paddingTop: TOPBAR_HEIGHT,
   };
 
-  if (hideSidebar) {
-    return <Outlet />;
+  // Route guard: no valid session -> login; a page outside the user's role or
+  // their own region/school -> their home page.
+  const session = getSession();
+  const home = homePath(session);
+  if (!home) {
+    return <Navigate to="/login" replace />;
+  }
+  if (!canAccess(location.pathname, session)) {
+    return <Navigate to={home} replace />;
   }
 
   return (
@@ -121,7 +105,7 @@ export default function UnifiedAppShell() {
               </div>
             </div>
 
-            <div style={styles.avatar}>{getInitials(displayName || role)}</div>
+            <div style={styles.avatar}>{getInitials(session.displayName)}</div>
           </header>
 
           <main style={contentStyles}>
@@ -133,15 +117,25 @@ export default function UnifiedAppShell() {
   );
 }
 
+const TOPBAR_HEIGHT = 72;
+
+const PORTAL_TITLES = {
+  admin: "Ministry Administration",
+  regional: "Regional Office",
+  school: "School Portal",
+};
+
 const styles = {
   pageContainer: {
+    fontFamily: "var(--ui-font)",
     display: "flex",
     minHeight: "100vh",
-    background: "#f5f7fb",
+    background: "var(--ui-bg)",
   },
   sidebarArea: {
-    minWidth: "280px",
-    background: "#006a3d",
+    width: "280px",
+    flexShrink: 0,
+    background: "var(--ui-navy)",
     color: "#fff",
     height: "100vh",
     position: "sticky",
@@ -167,11 +161,15 @@ const styles = {
   },
   mainArea: {
     flex: 1,
+    // Without this the main area grows to fit wide tables instead of letting them scroll
+    minWidth: 0,
     display: "flex",
     flexDirection: "column",
     minHeight: "100vh",
   },
   topbar: {
+    height: TOPBAR_HEIGHT,
+    boxSizing: "border-box",
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
@@ -211,7 +209,7 @@ const styles = {
     width: "42px",
     height: "42px",
     borderRadius: "50%",
-    background: "#166534",
+    background: "var(--ui-gradient-button)",
     color: "#fff",
     display: "flex",
     alignItems: "center",
@@ -220,6 +218,6 @@ const styles = {
     fontSize: "14px",
   },
   content: {
-    padding: "18px",
+    padding: 0,
   },
 };

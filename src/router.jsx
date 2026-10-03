@@ -1,77 +1,73 @@
-import React from "react";
 import { createHashRouter } from "react-router-dom";
 
 import UnifiedAppShell from "./layout/UnifiedAppShell";
-import UnifiedLogin from "./views/Auth/UnifiedLogin";
+import LoginPage from "./pages/auth/LoginPage";
 
-import Dashboard from "./views/Dashboard";
+// Super admin
+import AdminDashboard from "./pages/admin/AdminDashboard";
+import AdminNotifications from "./pages/admin/AdminNotifications";
+import AdminReports from "./pages/admin/AdminReports";
+import AdminTransfers from "./pages/admin/AdminTransfers";
+import ManageAcademicYears from "./pages/admin/ManageAcademicYears";
+import ManageDistricts from "./pages/admin/ManageDistricts";
+import ManageDivisions from "./pages/admin/ManageDivisions";
+import ManageSchools from "./pages/admin/ManageSchools";
+import ManageStudents from "./pages/admin/ManageStudents";
+import ManageSubjects from "./pages/admin/ManageSubjects";
 
-// ADMIN
-import AdminDashboard from "./views/Admin/Dashboard";
-import ManageSchool from "./views/Admin/Manageschools";
-import Districts from "./views/Admin/ManageDistricts";
-import ManageDivisions from "./views/Admin/ManageDivisions";
-import AcademicManager from "./views/Admin/AcademicYear";
-import ManageStudents from "./views/Admin/Managestudents";
-import ManageTransfers from "./views/Admin/Transfers";
-import AdminReports from "./views/Admin/Reports";
-import AdminNotifications from "./views/Admin/Notifications";
+// Regional admin
+import RegionalDashboard from "./pages/regional/RegionalDashboard";
+import RegionalDistricts from "./pages/regional/RegionalDistricts";
+import RegionalNotifications from "./pages/regional/RegionalNotifications";
+import RegionalReports from "./pages/regional/RegionalReports";
+import RegionalSchools from "./pages/regional/RegionalSchools";
+import RegionalSettings from "./pages/regional/RegionalSettings";
+import RegionalStudents from "./pages/regional/RegionalStudents";
+import RegionalTransfers from "./pages/regional/RegionalTransfers";
 
-// REGIONAL
-import RegionalDashboard from "./views/Regional/Dashboard";
-import RegionalDistricts from "./views/Regional/Districts";
-import RegionalSchools from "./views/Regional/Schools";
-import RegionalStudents from "./views/Regional/Students";
-import RegionalTransfers from "./views/Regional/Transfers";
-import RegionalReports from "./views/Regional/Reports";
-import RegionalSettings from "./views/Regional/Settings";
-import RegionalNotifications from "./views/Regional/Notifications";
+// School manager
+import EnterMarks from "./pages/school/EnterMarks";
+import SchoolAcademicYears from "./pages/school/SchoolAcademicYears";
+import SchoolDashboard from "./pages/school/SchoolDashboard";
+import SchoolNotifications from "./pages/school/SchoolNotifications";
+import SchoolReports from "./pages/school/SchoolReports";
+import SchoolSettings from "./pages/school/SchoolSettings";
+import SchoolStudents from "./pages/school/SchoolStudents";
+import SchoolTransfers from "./pages/school/SchoolTransfers";
+import StudentEnroll from "./pages/school/StudentEnroll";
 
-// SCHOOL
-import SchoolDashboard from "./views/School/Dashboard";
-import AcademicYear from "./views/School/AcademicYear";
-import SchoolTransfers from "./views/School/Transfers";
-import SchoolReports from "./views/School/Reports";
-import SchoolSettings from "./views/School/Settings";
-import SchoolNotifications from "./views/School/Notifications";
-import StudentEnroll from "./views/School/StudentEnroll";
-import Students from "./views/School/Students";
-import EnterMarks from "./views/School/EnterMarks";
-
+// Every page except login renders inside UnifiedAppShell, which checks the session
+// and redirects users away from pages outside their role (see auth/session.js).
+// Sidebar links for each role are defined in layout/UnifiedSidebar.jsx.
 const router = createHashRouter([
-  {
-    path: "/login",
-    element: <UnifiedLogin />,
-  },
-
+  { path: "/login", element: <LoginPage /> },
   {
     path: "/",
     element: <UnifiedAppShell />,
     children: [
-      // ROOT
-      { index: true, element: <Dashboard /> },
-      { path: "dashboard", element: <Dashboard /> },
+      // Redirected to the user's role home page by UnifiedAppShell
+      { index: true, element: null },
+      { path: "dashboard", element: null },
 
-      // ADMIN (no ID needed)
       {
         path: "admin",
         children: [
           { index: true, element: <AdminDashboard /> },
           { path: "dashboard", element: <AdminDashboard /> },
           { path: "managedivisions", element: <ManageDivisions /> },
-          { path: "managedistricts", element: <Districts /> },
-          { path: "manageschools", element: <ManageSchool /> },
-          { path: "manageacademicyear", element: <AcademicManager /> },
+          { path: "managedistricts", element: <ManageDistricts /> },
+          { path: "manageschools", element: <ManageSchools /> },
+          { path: "manageacademicyear", element: <ManageAcademicYears /> },
           { path: "managestudents", element: <ManageStudents /> },
-          { path: "transfers", element: <ManageTransfers /> },
+          { path: "managesubjects", element: <ManageSubjects /> },
+          { path: "transfers", element: <AdminTransfers /> },
           { path: "reports", element: <AdminReports /> },
           { path: "notifications", element: <AdminNotifications /> },
         ],
       },
 
-      // REGIONAL (with ID)
       {
-        path: "regional/:regionalId",
+        path: "regional/:regionId",
         children: [
           { index: true, element: <RegionalDashboard /> },
           { path: "dashboard", element: <RegionalDashboard /> },
@@ -85,15 +81,14 @@ const router = createHashRouter([
         ],
       },
 
-      // SCHOOL (with ID)
       {
         path: "school/:schoolId",
         children: [
           { index: true, element: <SchoolDashboard /> },
           { path: "dashboard", element: <SchoolDashboard /> },
-          { path: "academicyear", element: <AcademicYear /> },
+          { path: "academicyear", element: <SchoolAcademicYears /> },
           { path: "register", element: <StudentEnroll /> },
-          { path: "students", element: <Students /> },
+          { path: "students", element: <SchoolStudents /> },
           { path: "marks", element: <EnterMarks /> },
           { path: "transfers", element: <SchoolTransfers /> },
           { path: "reports", element: <SchoolReports /> },

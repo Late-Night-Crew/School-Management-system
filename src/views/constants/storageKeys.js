@@ -1,9 +1,0 @@
-export const AUTH_TOKEN_KEY = "authToken";
-export const DISPLAY_NAME_KEY = "displayName";
-export const USER_ROLE_KEY = "role";
-export const USER_ID_KEY = "userId";
-export const USER_EMAIL_KEY = "userEmail";
-export const REGION_ID_KEY = "regionId";
-export const DISTRICT_ID_KEY = "districtId";
-export const SCHOOL_ID_KEY = "schoolId";
-export const IS_SUPER_ADMIN_KEY = "isSuperAdmin";

@@ -96,3 +96,12 @@ func ValidationErrors(ctx *fiber.Ctx, message string, validationErrors any) erro
 		Context: validationErrors,
 	})
 }
+
+func Conflict(ctx *fiber.Ctx, message string) error {
+	return ctx.Status(http.StatusConflict).JSON(ProblemDetail{
+		Type:    "problemdetail.example.com/http/types/Conflict",
+		Title:   "Conflict",
+		Detail:  message,
+		Context: nil,
+	})
+}

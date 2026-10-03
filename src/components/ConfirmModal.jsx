@@ -1,21 +1,28 @@
-import React from "react";
-import { Modal, Button } from "react-bootstrap";
+import Button from "./ui/Button";
+import Dialog from "./ui/Dialog";
 
-export default function ConfirmModal({ show, onHide, onConfirm, title, body }) {
-    return (
-        <Modal show={show} onHide={onHide} centered>
-            <Modal.Header closeButton>
-                <Modal.Title>{title || "Confirm Action"}</Modal.Title>
-            </Modal.Header>
-            <Modal.Body>{body || "Are you sure?"}</Modal.Body>
-            <Modal.Footer>
-                <Button variant="secondary" onClick={onHide}>
-                    Cancel
-                </Button>
-                <Button variant="danger" onClick={onConfirm}>
-                    Confirm
-                </Button>
-            </Modal.Footer>
-        </Modal>
-    );
+// Yes/no confirmation. `confirmLabel` defaults to "Confirm"; `danger` styles it red.
+export default function ConfirmModal({ show, onHide, onConfirm, title, body, confirmLabel = "Confirm", danger = true }) {
+  return (
+    <Dialog
+      show={show}
+      onHide={onHide}
+      title={title || "Confirm Action"}
+      icon={danger ? "bi-exclamation-triangle" : "bi-question-circle"}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onHide}>
+            Cancel
+          </Button>
+          <Button variant={danger ? "danger" : "primary"} onClick={onConfirm}>
+            {confirmLabel}
+          </Button>
+        </>
+      }
+    >
+      <p className="mb-0" style={{ fontSize: 14, color: "var(--ui-text-body)" }}>
+        {body || "Are you sure?"}
+      </p>
+    </Dialog>
+  );
 }

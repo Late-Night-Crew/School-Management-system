@@ -9,83 +9,87 @@ import (
 	"context"
 	"database/sql"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 const approveTransfer = `-- name: ApproveTransfer :one
-WITH updated_student AS (
+
+WITH approved AS (
+    UPDATE transfers
+    SET
+        status = 'Accepted',
+        date_accepted = CURRENT_TIMESTAMP
+    WHERE
+        transfers.id = $1
+        AND transfers.status = 'Pending'
+    RETURNING transfers.id, transfers.student_id, transfers.to_school
+),
+moved AS (
     UPDATE students
-    SET school_id = $2
-    WHERE students.id = $3
+    SET school_id = approved.to_school, updated_at = CURRENT_TIMESTAMP
+    FROM approved
+    WHERE students.id = approved.student_id
     RETURNING students.id
 )
-UPDATE transfers
-SET
-    status = 'Accepted',
-    date_accepted = CURRENT_TIMESTAMP
-WHERE
-    transfers.id = $1
-RETURNING transfers.id, status, date_accepted
+SELECT approved.id FROM approved
 `
 
-type ApproveTransferParams struct {
-	TransferID  int32
-	NewSchoolID int32
-	StudentID   int32
-}
-
-type ApproveTransferRow struct {
-	ID           int32
-	Status       sql.NullString
-	DateAccepted sql.NullTime
-}
-
-func (q *Queries) ApproveTransfer(ctx context.Context, arg ApproveTransferParams) (ApproveTransferRow, error) {
-	row := q.db.QueryRowContext(ctx, approveTransfer, arg.TransferID, arg.NewSchoolID, arg.StudentID)
-	var i ApproveTransferRow
-	err := row.Scan(&i.ID, &i.Status, &i.DateAccepted)
-	return i, err
+// Approval marks the transfer Accepted and moves the student in one statement.
+// The student is only moved when the transfer row actually matched (still Pending,
+// and owned by the receiving school when school_id is given).
+func (q *Queries) ApproveTransfer(ctx context.Context, transferID int32) (int32, error) {
+	row := q.db.QueryRowContext(ctx, approveTransfer, transferID)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
 }
 
 const approveTransferForSchool = `-- name: ApproveTransferForSchool :one
-WITH updated_student AS (
+WITH approved AS (
+    UPDATE transfers
+    SET
+        status = 'Accepted',
+        date_accepted = CURRENT_TIMESTAMP
+    WHERE
+        transfers.id = $1
+        AND transfers.to_school = $2
+        AND transfers.status = 'Pending'
+    RETURNING transfers.id, transfers.student_id, transfers.to_school
+),
+moved AS (
     UPDATE students
-    SET school_id = $3
-    WHERE students.id = $4
+    SET school_id = approved.to_school, updated_at = CURRENT_TIMESTAMP
+    FROM approved
+    WHERE students.id = approved.student_id
     RETURNING students.id
 )
-UPDATE transfers
-SET
-    status = 'Accepted',
-    date_accepted = CURRENT_TIMESTAMP
-WHERE
-    transfers.id = $1
-    AND transfers.to_school = $2
-RETURNING transfers.id, status, date_accepted
+SELECT approved.id FROM approved
 `
 
 type ApproveTransferForSchoolParams struct {
-	TransferID  int32
-	SchoolID    int32
-	NewSchoolID int32
-	StudentID   int32
+	TransferID int32
+	SchoolID   int32
 }
 
-type ApproveTransferForSchoolRow struct {
-	ID           int32
-	Status       sql.NullString
-	DateAccepted sql.NullTime
+func (q *Queries) ApproveTransferForSchool(ctx context.Context, arg ApproveTransferForSchoolParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, approveTransferForSchool, arg.TransferID, arg.SchoolID)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
 }
 
-func (q *Queries) ApproveTransferForSchool(ctx context.Context, arg ApproveTransferForSchoolParams) (ApproveTransferForSchoolRow, error) {
-	row := q.db.QueryRowContext(ctx, approveTransferForSchool,
-		arg.TransferID,
-		arg.SchoolID,
-		arg.NewSchoolID,
-		arg.StudentID,
-	)
-	var i ApproveTransferForSchoolRow
-	err := row.Scan(&i.ID, &i.Status, &i.DateAccepted)
-	return i, err
+const countPendingTransfersForStudent = `-- name: CountPendingTransfersForStudent :one
+SELECT COUNT(*) AS count
+FROM transfers
+WHERE student_id = $1 AND status = 'Pending'
+`
+
+func (q *Queries) CountPendingTransfersForStudent(ctx context.Context, studentID int32) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countPendingTransfersForStudent, studentID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const createAcademicYear = `-- name: CreateAcademicYear :one
@@ -447,7 +451,7 @@ INSERT INTO transfers (
 )
 VALUES
     ($1, $2, $3, 'Pending', $4, $5)
-RETURNING id, student_id, from_school, to_school, status, date_initiated, reason
+RETURNING id
 `
 
 type CreateTransferRequestParams struct {
@@ -458,17 +462,7 @@ type CreateTransferRequestParams struct {
 	Reason        sql.NullString
 }
 
-type CreateTransferRequestRow struct {
-	ID            int32
-	StudentID     int32
-	FromSchool    int32
-	ToSchool      int32
-	Status        sql.NullString
-	DateInitiated sql.NullTime
-	Reason        sql.NullString
-}
-
-func (q *Queries) CreateTransferRequest(ctx context.Context, arg CreateTransferRequestParams) (CreateTransferRequestRow, error) {
+func (q *Queries) CreateTransferRequest(ctx context.Context, arg CreateTransferRequestParams) (int32, error) {
 	row := q.db.QueryRowContext(ctx, createTransferRequest,
 		arg.StudentID,
 		arg.FromSchool,
@@ -476,17 +470,9 @@ func (q *Queries) CreateTransferRequest(ctx context.Context, arg CreateTransferR
 		arg.DateInitiated,
 		arg.Reason,
 	)
-	var i CreateTransferRequestRow
-	err := row.Scan(
-		&i.ID,
-		&i.StudentID,
-		&i.FromSchool,
-		&i.ToSchool,
-		&i.Status,
-		&i.DateInitiated,
-		&i.Reason,
-	)
-	return i, err
+	var id int32
+	err := row.Scan(&id)
+	return id, err
 }
 
 const createUser = `-- name: CreateUser :one
@@ -596,6 +582,35 @@ func (q *Queries) DeleteExamResult(ctx context.Context, id int32) error {
 	return err
 }
 
+const deleteMarks = `-- name: DeleteMarks :exec
+DELETE FROM student_marks m
+USING (
+    SELECT unnest($1::int[]) AS student_id, unnest($2::int[]) AS subject_id
+) AS cleared
+WHERE m.student_id = cleared.student_id
+    AND m.subject_id = cleared.subject_id
+    AND m.academic_year_id = $3::int
+    AND m.term = $4::int
+`
+
+type DeleteMarksParams struct {
+	StudentIds     []int32
+	SubjectIds     []int32
+	AcademicYearID int32
+	Term           int32
+}
+
+// Removes the marks for the given (student, subject) pairs in one academic year and term.
+func (q *Queries) DeleteMarks(ctx context.Context, arg DeleteMarksParams) error {
+	_, err := q.db.ExecContext(ctx, deleteMarks,
+		pq.Array(arg.StudentIds),
+		pq.Array(arg.SubjectIds),
+		arg.AcademicYearID,
+		arg.Term,
+	)
+	return err
+}
+
 const deleteRegion = `-- name: DeleteRegion :exec
 DELETE FROM
     regions
@@ -690,50 +705,39 @@ func (q *Queries) DeleteUser(ctx context.Context, id int32) error {
 
 const finalizeTransfer = `-- name: FinalizeTransfer :one
 UPDATE transfers
-SET
-    status = 'Completed'
+SET status = 'Completed'
 WHERE
-    transfers.id = $1
-RETURNING transfers.id, status
+    id = $1
+    AND status = 'Accepted'
+RETURNING id
 `
 
-type FinalizeTransferRow struct {
-	ID     int32
-	Status sql.NullString
-}
-
-func (q *Queries) FinalizeTransfer(ctx context.Context, id int32) (FinalizeTransferRow, error) {
+func (q *Queries) FinalizeTransfer(ctx context.Context, id int32) (int32, error) {
 	row := q.db.QueryRowContext(ctx, finalizeTransfer, id)
-	var i FinalizeTransferRow
-	err := row.Scan(&i.ID, &i.Status)
-	return i, err
+	err := row.Scan(&id)
+	return id, err
 }
 
 const finalizeTransferForSchool = `-- name: FinalizeTransferForSchool :one
 UPDATE transfers
-SET
-    status = 'Completed'
+SET status = 'Completed'
 WHERE
-    transfers.id = $1
-    AND ($2 = from_school OR $2 = to_school)
-RETURNING transfers.id, status
+    id = $1
+    AND from_school = $2
+    AND status = 'Accepted'
+RETURNING id
 `
 
 type FinalizeTransferForSchoolParams struct {
-	ID         int32
-	FromSchool int32
+	TransferID int32
+	SchoolID   int32
 }
 
-type FinalizeTransferForSchoolRow struct {
-	ID     int32
-	Status sql.NullString
-}
-
-func (q *Queries) FinalizeTransferForSchool(ctx context.Context, arg FinalizeTransferForSchoolParams) (FinalizeTransferForSchoolRow, error) {
-	row := q.db.QueryRowContext(ctx, finalizeTransferForSchool, arg.ID, arg.FromSchool)
-	var i FinalizeTransferForSchoolRow
-	err := row.Scan(&i.ID, &i.Status)
-	return i, err
+func (q *Queries) FinalizeTransferForSchool(ctx context.Context, arg FinalizeTransferForSchoolParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, finalizeTransferForSchool, arg.TransferID, arg.SchoolID)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
 }
 
 const findDistrictById = `-- name: FindDistrictById :one
@@ -987,29 +991,45 @@ func (q *Queries) GetOutgoingTransferCountBySchoolID(ctx context.Context, fromSc
 
 const getOutgoingTransfers = `-- name: GetOutgoingTransfers :many
 SELECT
-    id,
-    student_id,
-    from_school,
-    to_school,
-    status,
-    date_initiated,
-    date_accepted,
-    reason
+    t.id,
+    t.student_id,
+    t.from_school,
+    t.to_school,
+    t.status,
+    t.date_initiated,
+    t.date_accepted,
+    t.reason,
+    t.rejection_reason,
+    s.student_number,
+    s.first_name AS student_first_name,
+    s.last_name AS student_last_name,
+    fs.name AS from_school_name,
+    ts.name AS to_school_name
 FROM
-    transfers
+    transfers t
+    JOIN students s ON s.id = t.student_id
+    JOIN schools fs ON fs.id = t.from_school
+    JOIN schools ts ON ts.id = t.to_school
 WHERE
-    from_school = $1
+    t.from_school = $1
+ORDER BY t.date_initiated DESC, t.id DESC
 `
 
 type GetOutgoingTransfersRow struct {
-	ID            int32
-	StudentID     int32
-	FromSchool    int32
-	ToSchool      int32
-	Status        sql.NullString
-	DateInitiated sql.NullTime
-	DateAccepted  sql.NullTime
-	Reason        sql.NullString
+	ID               int32
+	StudentID        int32
+	FromSchool       int32
+	ToSchool         int32
+	Status           sql.NullString
+	DateInitiated    sql.NullTime
+	DateAccepted     sql.NullTime
+	Reason           sql.NullString
+	RejectionReason  sql.NullString
+	StudentNumber    string
+	StudentFirstName string
+	StudentLastName  string
+	FromSchoolName   string
+	ToSchoolName     string
 }
 
 func (q *Queries) GetOutgoingTransfers(ctx context.Context, fromSchool int32) ([]GetOutgoingTransfersRow, error) {
@@ -1030,6 +1050,105 @@ func (q *Queries) GetOutgoingTransfers(ctx context.Context, fromSchool int32) ([
 			&i.DateInitiated,
 			&i.DateAccepted,
 			&i.Reason,
+			&i.RejectionReason,
+			&i.StudentNumber,
+			&i.StudentFirstName,
+			&i.StudentLastName,
+			&i.FromSchoolName,
+			&i.ToSchoolName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getRegionDashboardStats = `-- name: GetRegionDashboardStats :one
+WITH region_schools AS (
+    SELECT sc.id
+    FROM schools sc
+    JOIN districts d ON d.id = sc.district_id
+    WHERE d.region_id = $1
+)
+SELECT
+    (SELECT COUNT(*) FROM districts d WHERE d.region_id = $1) AS district_count,
+    (SELECT COUNT(*) FROM region_schools) AS school_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools)) AS student_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools) AND s.gender = 'Male') AS male_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools) AND s.gender = 'Female') AS female_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools) AND s.disability) AS disability_count,
+    (SELECT COUNT(*) FROM transfers t
+        WHERE t.status = 'Pending'
+        AND (t.from_school IN (SELECT id FROM region_schools) OR t.to_school IN (SELECT id FROM region_schools))
+    ) AS pending_transfer_count
+`
+
+type GetRegionDashboardStatsRow struct {
+	DistrictCount        int64
+	SchoolCount          int64
+	StudentCount         int64
+	MaleCount            int64
+	FemaleCount          int64
+	DisabilityCount      int64
+	PendingTransferCount int64
+}
+
+// Headline counts for a regional admin's dashboard.
+func (q *Queries) GetRegionDashboardStats(ctx context.Context, regionID int32) (GetRegionDashboardStatsRow, error) {
+	row := q.db.QueryRowContext(ctx, getRegionDashboardStats, regionID)
+	var i GetRegionDashboardStatsRow
+	err := row.Scan(
+		&i.DistrictCount,
+		&i.SchoolCount,
+		&i.StudentCount,
+		&i.MaleCount,
+		&i.FemaleCount,
+		&i.DisabilityCount,
+		&i.PendingTransferCount,
+	)
+	return i, err
+}
+
+const getRegionDistrictSummary = `-- name: GetRegionDistrictSummary :many
+SELECT
+    d.id,
+    d.name,
+    (SELECT COUNT(*) FROM schools sc WHERE sc.district_id = d.id) AS school_count,
+    (SELECT COUNT(*) FROM students s JOIN schools sc ON sc.id = s.school_id WHERE sc.district_id = d.id) AS student_count
+FROM districts d
+WHERE d.region_id = $1
+ORDER BY d.name
+`
+
+type GetRegionDistrictSummaryRow struct {
+	ID           int32
+	Name         string
+	SchoolCount  int64
+	StudentCount int64
+}
+
+// Districts in a region with their school and student counts.
+func (q *Queries) GetRegionDistrictSummary(ctx context.Context, regionID int32) ([]GetRegionDistrictSummaryRow, error) {
+	rows, err := q.db.QueryContext(ctx, getRegionDistrictSummary, regionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetRegionDistrictSummaryRow
+	for rows.Next() {
+		var i GetRegionDistrictSummaryRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.SchoolCount,
+			&i.StudentCount,
 		); err != nil {
 			return nil, err
 		}
@@ -1047,15 +1166,25 @@ func (q *Queries) GetOutgoingTransfers(ctx context.Context, fromSchool int32) ([
 const getSchoolDashboardStats = `-- name: GetSchoolDashboardStats :one
 SELECT
     (SELECT COUNT(*) FROM students s WHERE s.school_id = $1) AS student_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1 AND s.gender = 'Male') AS male_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1 AND s.gender = 'Female') AS female_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1 AND s.disability) AS disability_count,
     (SELECT COUNT(*) FROM transfers t WHERE t.to_school = $1) AS incoming_transfer_count,
     (SELECT COUNT(*) FROM transfers t WHERE t.from_school = $1) AS outgoing_transfer_count,
+    (SELECT COUNT(*) FROM transfers t WHERE t.to_school = $1 AND t.status = 'Pending') AS pending_incoming_count,
+    (SELECT COUNT(*) FROM transfers t WHERE t.from_school = $1 AND t.status = 'Pending') AS pending_outgoing_count,
     (SELECT COUNT(*) FROM exam_results e WHERE e.school_id = $1) AS exam_result_count
 `
 
 type GetSchoolDashboardStatsRow struct {
 	StudentCount          int64
+	MaleCount             int64
+	FemaleCount           int64
+	DisabilityCount       int64
 	IncomingTransferCount int64
 	OutgoingTransferCount int64
+	PendingIncomingCount  int64
+	PendingOutgoingCount  int64
 	ExamResultCount       int64
 }
 
@@ -1064,11 +1193,113 @@ func (q *Queries) GetSchoolDashboardStats(ctx context.Context, schoolID int32) (
 	var i GetSchoolDashboardStatsRow
 	err := row.Scan(
 		&i.StudentCount,
+		&i.MaleCount,
+		&i.FemaleCount,
+		&i.DisabilityCount,
 		&i.IncomingTransferCount,
 		&i.OutgoingTransferCount,
+		&i.PendingIncomingCount,
+		&i.PendingOutgoingCount,
 		&i.ExamResultCount,
 	)
 	return i, err
+}
+
+const getSchoolReport = `-- name: GetSchoolReport :many
+SELECT
+    sc.id,
+    sc.name,
+    sc.school_number,
+    d.id AS district_id,
+    d.name AS district_name,
+    r.id AS region_id,
+    r.name AS region_name,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = sc.id) AS student_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = sc.id AND s.gender = 'Male') AS male_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = sc.id AND s.gender = 'Female') AS female_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = sc.id AND s.disability) AS disability_count,
+    (SELECT COUNT(*) FROM transfers t WHERE t.to_school = sc.id) AS transfers_in,
+    (SELECT COUNT(*) FROM transfers t WHERE t.from_school = sc.id) AS transfers_out,
+    (SELECT COUNT(*) FROM transfers t WHERE t.to_school = sc.id AND t.status = 'Pending') AS pending_in,
+    e.jce_pass_rate,
+    e.msce_pass_rate
+FROM
+    schools sc
+    JOIN districts d ON d.id = sc.district_id
+    JOIN regions r ON r.id = d.region_id
+    LEFT JOIN exam_results e ON e.school_id = sc.id
+        AND e.academic_year_id = $1::int
+WHERE
+    ($2::int IS NULL OR r.id = $2::int)
+    AND ($3::int IS NULL OR d.id = $3::int)
+ORDER BY r.name, d.name, sc.name
+`
+
+type GetSchoolReportParams struct {
+	AcademicYearID sql.NullInt32
+	RegionID       sql.NullInt32
+	DistrictID     sql.NullInt32
+}
+
+type GetSchoolReportRow struct {
+	ID              int32
+	Name            string
+	SchoolNumber    string
+	DistrictID      int32
+	DistrictName    string
+	RegionID        int32
+	RegionName      string
+	StudentCount    int64
+	MaleCount       int64
+	FemaleCount     int64
+	DisabilityCount int64
+	TransfersIn     int64
+	TransfersOut    int64
+	PendingIn       int64
+	JcePassRate     sql.NullString
+	MscePassRate    sql.NullString
+}
+
+// One row per school for the admin reports page. Region and district filters are
+// optional; pass rates come from the given academic year and are NULL when not recorded.
+func (q *Queries) GetSchoolReport(ctx context.Context, arg GetSchoolReportParams) ([]GetSchoolReportRow, error) {
+	rows, err := q.db.QueryContext(ctx, getSchoolReport, arg.AcademicYearID, arg.RegionID, arg.DistrictID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetSchoolReportRow
+	for rows.Next() {
+		var i GetSchoolReportRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.SchoolNumber,
+			&i.DistrictID,
+			&i.DistrictName,
+			&i.RegionID,
+			&i.RegionName,
+			&i.StudentCount,
+			&i.MaleCount,
+			&i.FemaleCount,
+			&i.DisabilityCount,
+			&i.TransfersIn,
+			&i.TransfersOut,
+			&i.PendingIn,
+			&i.JcePassRate,
+			&i.MscePassRate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getStudentByID = `-- name: GetStudentByID :one
@@ -1394,29 +1625,44 @@ func (q *Queries) GetSubjectByID(ctx context.Context, id int32) (Subject, error)
 
 const getTransferByID = `-- name: GetTransferByID :one
 SELECT
-    id,
-    student_id,
-    from_school,
-    to_school,
-    status,
-    date_initiated,
-    date_accepted,
-    reason
+    t.id,
+    t.student_id,
+    t.from_school,
+    t.to_school,
+    t.status,
+    t.date_initiated,
+    t.date_accepted,
+    t.reason,
+    t.rejection_reason,
+    s.student_number,
+    s.first_name AS student_first_name,
+    s.last_name AS student_last_name,
+    fs.name AS from_school_name,
+    ts.name AS to_school_name
 FROM
-    transfers
+    transfers t
+    JOIN students s ON s.id = t.student_id
+    JOIN schools fs ON fs.id = t.from_school
+    JOIN schools ts ON ts.id = t.to_school
 WHERE
-    id = $1
+    t.id = $1
 `
 
 type GetTransferByIDRow struct {
-	ID            int32
-	StudentID     int32
-	FromSchool    int32
-	ToSchool      int32
-	Status        sql.NullString
-	DateInitiated sql.NullTime
-	DateAccepted  sql.NullTime
-	Reason        sql.NullString
+	ID               int32
+	StudentID        int32
+	FromSchool       int32
+	ToSchool         int32
+	Status           sql.NullString
+	DateInitiated    sql.NullTime
+	DateAccepted     sql.NullTime
+	Reason           sql.NullString
+	RejectionReason  sql.NullString
+	StudentNumber    string
+	StudentFirstName string
+	StudentLastName  string
+	FromSchoolName   string
+	ToSchoolName     string
 }
 
 func (q *Queries) GetTransferByID(ctx context.Context, id int32) (GetTransferByIDRow, error) {
@@ -1431,84 +1677,57 @@ func (q *Queries) GetTransferByID(ctx context.Context, id int32) (GetTransferByI
 		&i.DateInitiated,
 		&i.DateAccepted,
 		&i.Reason,
-	)
-	return i, err
-}
-
-const getTransferByIDForSchool = `-- name: GetTransferByIDForSchool :one
-SELECT
-    id,
-    student_id,
-    from_school,
-    to_school,
-    status,
-    date_initiated,
-    date_accepted,
-    reason
-FROM
-    transfers
-WHERE
-    id = $1
-    AND ($2 = from_school OR $2 = to_school)
-`
-
-type GetTransferByIDForSchoolParams struct {
-	ID         int32
-	FromSchool int32
-}
-
-type GetTransferByIDForSchoolRow struct {
-	ID            int32
-	StudentID     int32
-	FromSchool    int32
-	ToSchool      int32
-	Status        sql.NullString
-	DateInitiated sql.NullTime
-	DateAccepted  sql.NullTime
-	Reason        sql.NullString
-}
-
-func (q *Queries) GetTransferByIDForSchool(ctx context.Context, arg GetTransferByIDForSchoolParams) (GetTransferByIDForSchoolRow, error) {
-	row := q.db.QueryRowContext(ctx, getTransferByIDForSchool, arg.ID, arg.FromSchool)
-	var i GetTransferByIDForSchoolRow
-	err := row.Scan(
-		&i.ID,
-		&i.StudentID,
-		&i.FromSchool,
-		&i.ToSchool,
-		&i.Status,
-		&i.DateInitiated,
-		&i.DateAccepted,
-		&i.Reason,
+		&i.RejectionReason,
+		&i.StudentNumber,
+		&i.StudentFirstName,
+		&i.StudentLastName,
+		&i.FromSchoolName,
+		&i.ToSchoolName,
 	)
 	return i, err
 }
 
 const getTransfersByToSchoolID = `-- name: GetTransfersByToSchoolID :many
 SELECT
-    id,
-    student_id,
-    from_school,
-    to_school,
-    status,
-    date_initiated,
-    date_accepted,
-    reason
+    t.id,
+    t.student_id,
+    t.from_school,
+    t.to_school,
+    t.status,
+    t.date_initiated,
+    t.date_accepted,
+    t.reason,
+    t.rejection_reason,
+    s.student_number,
+    s.first_name AS student_first_name,
+    s.last_name AS student_last_name,
+    fs.name AS from_school_name,
+    ts.name AS to_school_name
 FROM
-    transfers
+    transfers t
+    JOIN students s ON s.id = t.student_id
+    JOIN schools fs ON fs.id = t.from_school
+    JOIN schools ts ON ts.id = t.to_school
 WHERE
-    to_school = $1
+    t.to_school = $1
+ORDER BY t.date_initiated DESC, t.id DESC
 `
 
 type GetTransfersByToSchoolIDRow struct {
-	ID            int32
-	StudentID     int32
-	FromSchool    int32
-	ToSchool      int32
-	Status        sql.NullString
-	DateInitiated sql.NullTime
-	DateAccepted  sql.NullTime
-	Reason        sql.NullString
+	ID               int32
+	StudentID        int32
+	FromSchool       int32
+	ToSchool         int32
+	Status           sql.NullString
+	DateInitiated    sql.NullTime
+	DateAccepted     sql.NullTime
+	Reason           sql.NullString
+	RejectionReason  sql.NullString
+	StudentNumber    string
+	StudentFirstName string
+	StudentLastName  string
+	FromSchoolName   string
+	ToSchoolName     string
 }
 
 func (q *Queries) GetTransfersByToSchoolID(ctx context.Context, toSchool int32) ([]GetTransfersByToSchoolIDRow, error) {
@@ -1529,6 +1748,12 @@ func (q *Queries) GetTransfersByToSchoolID(ctx context.Context, toSchool int32) 
 			&i.DateInitiated,
 			&i.DateAccepted,
 			&i.Reason,
+			&i.RejectionReason,
+			&i.StudentNumber,
+			&i.StudentFirstName,
+			&i.StudentLastName,
+			&i.FromSchoolName,
+			&i.ToSchoolName,
 		); err != nil {
 			return nil, err
 		}
@@ -1689,6 +1914,82 @@ func (q *Queries) ListExamResultsBySchoolID(ctx context.Context, schoolID int32)
 			&i.AcademicYearID,
 			&i.JcePassRate,
 			&i.MscePassRate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMarksForSchool = `-- name: ListMarksForSchool :many
+SELECT
+    m.id,
+    m.student_id,
+    m.subject_id,
+    m.academic_year_id,
+    m.term,
+    m.mark,
+    m.school_id,
+    m.updated_at
+FROM student_marks m
+JOIN students s ON s.id = m.student_id
+WHERE
+    s.school_id = $1
+    AND ($2::int IS NULL OR m.academic_year_id = $2::int)
+    AND ($3::int IS NULL OR m.term = $3::int)
+    AND ($4::int IS NULL OR m.student_id = $4::int)
+ORDER BY m.student_id, m.subject_id, m.academic_year_id, m.term
+`
+
+type ListMarksForSchoolParams struct {
+	SchoolID       int32
+	AcademicYearID sql.NullInt32
+	Term           sql.NullInt32
+	StudentID      sql.NullInt32
+}
+
+type ListMarksForSchoolRow struct {
+	ID             int32
+	StudentID      int32
+	SubjectID      int32
+	AcademicYearID int32
+	Term           int32
+	Mark           int32
+	SchoolID       int32
+	UpdatedAt      sql.NullTime
+}
+
+// Marks of the school's current students. Year, term and student filters are optional.
+func (q *Queries) ListMarksForSchool(ctx context.Context, arg ListMarksForSchoolParams) ([]ListMarksForSchoolRow, error) {
+	rows, err := q.db.QueryContext(ctx, listMarksForSchool,
+		arg.SchoolID,
+		arg.AcademicYearID,
+		arg.Term,
+		arg.StudentID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMarksForSchoolRow
+	for rows.Next() {
+		var i ListMarksForSchoolRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.StudentID,
+			&i.SubjectID,
+			&i.AcademicYearID,
+			&i.Term,
+			&i.Mark,
+			&i.SchoolID,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1978,6 +2279,127 @@ func (q *Queries) ListStudents(ctx context.Context, arg ListStudentsParams) ([]L
 	return items, nil
 }
 
+const listStudentsForRegion = `-- name: ListStudentsForRegion :many
+SELECT
+    s.id,
+    s.student_number,
+    s.first_name,
+    s.last_name,
+    s.gender,
+    s.form_level,
+    s.status,
+    sc.id AS school_id,
+    sc.name AS school_name,
+    d.id AS district_id,
+    d.name AS district_name
+FROM students s
+JOIN schools sc ON sc.id = s.school_id
+JOIN districts d ON d.id = sc.district_id
+WHERE
+    d.region_id = $1
+    AND ($2::int IS NULL OR d.id = $2::int)
+    AND ($3::int IS NULL OR sc.id = $3::int)
+ORDER BY d.name, sc.name, s.last_name, s.first_name
+`
+
+type ListStudentsForRegionParams struct {
+	RegionID   int32
+	DistrictID sql.NullInt32
+	SchoolID   sql.NullInt32
+}
+
+type ListStudentsForRegionRow struct {
+	ID            int32
+	StudentNumber string
+	FirstName     string
+	LastName      string
+	Gender        sql.NullString
+	FormLevel     sql.NullInt32
+	Status        sql.NullString
+	SchoolID      int32
+	SchoolName    string
+	DistrictID    int32
+	DistrictName  string
+}
+
+// Students enrolled at schools in a region; district and school filters are optional.
+func (q *Queries) ListStudentsForRegion(ctx context.Context, arg ListStudentsForRegionParams) ([]ListStudentsForRegionRow, error) {
+	rows, err := q.db.QueryContext(ctx, listStudentsForRegion, arg.RegionID, arg.DistrictID, arg.SchoolID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListStudentsForRegionRow
+	for rows.Next() {
+		var i ListStudentsForRegionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.StudentNumber,
+			&i.FirstName,
+			&i.LastName,
+			&i.Gender,
+			&i.FormLevel,
+			&i.Status,
+			&i.SchoolID,
+			&i.SchoolName,
+			&i.DistrictID,
+			&i.DistrictName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSubjectEnrolmentsForSchool = `-- name: ListSubjectEnrolmentsForSchool :many
+SELECT ss.student_id, ss.subject_id
+FROM student_subjects ss
+JOIN students s ON s.id = ss.student_id
+WHERE s.school_id = $1
+    AND ss.student_id = ANY($2::int[])
+`
+
+type ListSubjectEnrolmentsForSchoolParams struct {
+	SchoolID   int32
+	StudentIds []int32
+}
+
+type ListSubjectEnrolmentsForSchoolRow struct {
+	StudentID int32
+	SubjectID int32
+}
+
+// (student, subject) pairs for the given students, limited to the school's own students.
+func (q *Queries) ListSubjectEnrolmentsForSchool(ctx context.Context, arg ListSubjectEnrolmentsForSchoolParams) ([]ListSubjectEnrolmentsForSchoolRow, error) {
+	rows, err := q.db.QueryContext(ctx, listSubjectEnrolmentsForSchool, arg.SchoolID, pq.Array(arg.StudentIds))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSubjectEnrolmentsForSchoolRow
+	for rows.Next() {
+		var i ListSubjectEnrolmentsForSchoolRow
+		if err := rows.Scan(&i.StudentID, &i.SubjectID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSubjects = `-- name: ListSubjects :many
 SELECT
     id,
@@ -2008,6 +2430,90 @@ func (q *Queries) ListSubjects(ctx context.Context) ([]Subject, error) {
 			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTransfersForRegion = `-- name: ListTransfersForRegion :many
+SELECT
+    t.id,
+    t.student_id,
+    t.from_school,
+    t.to_school,
+    t.status,
+    t.date_initiated,
+    t.date_accepted,
+    t.reason,
+    t.rejection_reason,
+    s.student_number,
+    s.first_name AS student_first_name,
+    s.last_name AS student_last_name,
+    fs.name AS from_school_name,
+    ts.name AS to_school_name
+FROM
+    transfers t
+    JOIN students s ON s.id = t.student_id
+    JOIN schools fs ON fs.id = t.from_school
+    JOIN schools ts ON ts.id = t.to_school
+    JOIN districts fd ON fd.id = fs.district_id
+    JOIN districts td ON td.id = ts.district_id
+WHERE
+    fd.region_id = $1 OR td.region_id = $1
+ORDER BY t.date_initiated DESC, t.id DESC
+`
+
+type ListTransfersForRegionRow struct {
+	ID               int32
+	StudentID        int32
+	FromSchool       int32
+	ToSchool         int32
+	Status           sql.NullString
+	DateInitiated    sql.NullTime
+	DateAccepted     sql.NullTime
+	Reason           sql.NullString
+	RejectionReason  sql.NullString
+	StudentNumber    string
+	StudentFirstName string
+	StudentLastName  string
+	FromSchoolName   string
+	ToSchoolName     string
+}
+
+// Transfers into or out of any school in a region.
+func (q *Queries) ListTransfersForRegion(ctx context.Context, regionID int32) ([]ListTransfersForRegionRow, error) {
+	rows, err := q.db.QueryContext(ctx, listTransfersForRegion, regionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTransfersForRegionRow
+	for rows.Next() {
+		var i ListTransfersForRegionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.StudentID,
+			&i.FromSchool,
+			&i.ToSchool,
+			&i.Status,
+			&i.DateInitiated,
+			&i.DateAccepted,
+			&i.Reason,
+			&i.RejectionReason,
+			&i.StudentNumber,
+			&i.StudentFirstName,
+			&i.StudentLastName,
+			&i.FromSchoolName,
+			&i.ToSchoolName,
 		); err != nil {
 			return nil, err
 		}
@@ -2090,60 +2596,48 @@ const rejectTransfer = `-- name: RejectTransfer :one
 UPDATE transfers
 SET
     status = 'Rejected',
-    rejection_reason = $2,
-    date_accepted = NULL 
+    rejection_reason = $1
 WHERE
-    id = $1
-RETURNING id, status, rejection_reason
+    id = $2
+    AND status = 'Pending'
+RETURNING id
 `
 
 type RejectTransferParams struct {
-	ID              int32
 	RejectionReason sql.NullString
+	TransferID      int32
 }
 
-type RejectTransferRow struct {
-	ID              int32
-	Status          sql.NullString
-	RejectionReason sql.NullString
-}
-
-func (q *Queries) RejectTransfer(ctx context.Context, arg RejectTransferParams) (RejectTransferRow, error) {
-	row := q.db.QueryRowContext(ctx, rejectTransfer, arg.ID, arg.RejectionReason)
-	var i RejectTransferRow
-	err := row.Scan(&i.ID, &i.Status, &i.RejectionReason)
-	return i, err
+func (q *Queries) RejectTransfer(ctx context.Context, arg RejectTransferParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, rejectTransfer, arg.RejectionReason, arg.TransferID)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
 }
 
 const rejectTransferForSchool = `-- name: RejectTransferForSchool :one
 UPDATE transfers
 SET
     status = 'Rejected',
-    rejection_reason = $2,
-    date_accepted = NULL
+    rejection_reason = $1
 WHERE
-    id = $1
-    AND ($3 = from_school OR $3 = to_school)
-RETURNING id, status, rejection_reason
+    id = $2
+    AND to_school = $3
+    AND status = 'Pending'
+RETURNING id
 `
 
 type RejectTransferForSchoolParams struct {
-	ID              int32
 	RejectionReason sql.NullString
-	FromSchool      int32
+	TransferID      int32
+	SchoolID        int32
 }
 
-type RejectTransferForSchoolRow struct {
-	ID              int32
-	Status          sql.NullString
-	RejectionReason sql.NullString
-}
-
-func (q *Queries) RejectTransferForSchool(ctx context.Context, arg RejectTransferForSchoolParams) (RejectTransferForSchoolRow, error) {
-	row := q.db.QueryRowContext(ctx, rejectTransferForSchool, arg.ID, arg.RejectionReason, arg.FromSchool)
-	var i RejectTransferForSchoolRow
-	err := row.Scan(&i.ID, &i.Status, &i.RejectionReason)
-	return i, err
+func (q *Queries) RejectTransferForSchool(ctx context.Context, arg RejectTransferForSchoolParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, rejectTransferForSchool, arg.RejectionReason, arg.TransferID, arg.SchoolID)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
 }
 
 const updateAcademicYear = `-- name: UpdateAcademicYear :one
@@ -2752,5 +3246,47 @@ type UpdateUserPasswordParams struct {
 
 func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
 	_, err := q.db.ExecContext(ctx, updateUserPassword, arg.ID, arg.Password)
+	return err
+}
+
+const upsertMarks = `-- name: UpsertMarks :exec
+INSERT INTO student_marks (student_id, subject_id, academic_year_id, term, mark, school_id, recorded_by)
+SELECT
+    unnest($1::int[]),
+    unnest($2::int[]),
+    $3::int,
+    $4::int,
+    unnest($5::int[]),
+    $6::int,
+    $7::int
+ON CONFLICT (student_id, subject_id, academic_year_id, term) DO UPDATE
+SET
+    mark = EXCLUDED.mark,
+    school_id = EXCLUDED.school_id,
+    recorded_by = EXCLUDED.recorded_by,
+    updated_at = CURRENT_TIMESTAMP
+`
+
+type UpsertMarksParams struct {
+	StudentIds     []int32
+	SubjectIds     []int32
+	AcademicYearID int32
+	Term           int32
+	Marks          []int32
+	SchoolID       int32
+	RecordedBy     sql.NullInt32
+}
+
+// Saves a batch of marks for one academic year and term; the arrays are parallel.
+func (q *Queries) UpsertMarks(ctx context.Context, arg UpsertMarksParams) error {
+	_, err := q.db.ExecContext(ctx, upsertMarks,
+		pq.Array(arg.StudentIds),
+		pq.Array(arg.SubjectIds),
+		arg.AcademicYearID,
+		arg.Term,
+		pq.Array(arg.Marks),
+		arg.SchoolID,
+		arg.RecordedBy,
+	)
 	return err
 }

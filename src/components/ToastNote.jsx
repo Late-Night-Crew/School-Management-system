@@ -3,7 +3,7 @@ import { Toast, ToastContainer } from "react-bootstrap";
 
 export default function ToastNote({ show, onClose, message, variant = "success" }) {
     return (
-        <ToastContainer position="bottom-center" className="p-3" style={{ zIndex: 9999 }}>
+        <ToastContainer position="bottom-center" containerPosition="fixed" className="p-3" style={{ zIndex: 9999 }}>
             <Toast 
                 bg={variant} 
                 show={show} 

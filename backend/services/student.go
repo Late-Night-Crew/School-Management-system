@@ -32,9 +32,14 @@ func NewStudentService(queries *dbsqlc.Queries, logger logging.Logger) StudentSe
 	}
 }
 
+// maxStudentList caps the national student list (was 100, which silently hid students).
+const maxStudentList = 20000
+
 func (s *studentService) GetStudentList(ctx context.Context, req *schema.GetStudentListRequest) ([]*schema.Student, error) {
 	res := make([]*schema.Student, 0)
-	dbStudents, err := s.queries.ListStudents(ctx, dbsqlc.ListStudentsParams{Limit: 100, Offset: 0})
+	// The admin screen filters and pages in the browser, so it needs every student.
+	// TODO: add server-side paging and filtering before national-scale data.
+	dbStudents, err := s.queries.ListStudents(ctx, dbsqlc.ListStudentsParams{Limit: maxStudentList, Offset: 0})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list students: %w", err)
 	}

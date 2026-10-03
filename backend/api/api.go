@@ -22,6 +22,9 @@ type API struct {
 	TransferService     services.TransferService
 	SchoolAdminService  services.SchoolAdminService
 	SubjectService      services.SubjectService
+	ReportService       services.ReportService
+	RegionAdminService  services.RegionAdminService
+	MarksService        services.MarksService
 }
 
 func NewAPI(config *config.Config) *API {
@@ -41,6 +44,9 @@ func NewAPI(config *config.Config) *API {
 		TransferService:     services.NewTransferService(dbConn, logger),
 		SchoolAdminService:  services.NewSchoolAdminService(dbConn, logger),
 		SubjectService:      services.NewSubjectService(dbConn, logger),
+		ReportService:       services.NewReportService(dbConn, logger),
+		RegionAdminService:  services.NewRegionAdminService(dbConn, logger),
+		MarksService:        services.NewMarksService(dbConn, logger),
 	}
 }
 
@@ -49,6 +55,7 @@ func (api *API) registerRoutes() {
 	api.routes()
 	api.adminRoutes()
 	api.SchoolRoutes()
+	api.regionRoutes()
 }
 
 // Start runs the Fiber server
