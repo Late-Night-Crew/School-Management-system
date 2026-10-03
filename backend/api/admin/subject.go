@@ -57,7 +57,9 @@ func UpdateSubject(subjectService services.SubjectService, logger logging.Logger
 		if err != nil {
 			return problemdetail.BadRequest(ctx, "Invalid subject ID")
 		}
-		var req schema.UpdateSubjectRequest
+		// The ID comes from the path: set it before validation (it is required) and
+		// again after, in case the body sent a different one.
+		req := schema.UpdateSubjectRequest{ID: int32(subjectID)}
 		if _, err := common.ParseBodyThenValidate(ctx, &req); err != nil {
 			return problemdetail.BadRequest(ctx, err.Error())
 		}

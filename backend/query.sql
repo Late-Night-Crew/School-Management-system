@@ -579,8 +579,13 @@ WHERE
 -- name: GetSchoolDashboardStats :one
 SELECT
     (SELECT COUNT(*) FROM students s WHERE s.school_id = $1) AS student_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1 AND s.gender = 'Male') AS male_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1 AND s.gender = 'Female') AS female_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1 AND s.disability) AS disability_count,
     (SELECT COUNT(*) FROM transfers t WHERE t.to_school = $1) AS incoming_transfer_count,
     (SELECT COUNT(*) FROM transfers t WHERE t.from_school = $1) AS outgoing_transfer_count,
+    (SELECT COUNT(*) FROM transfers t WHERE t.to_school = $1 AND t.status = 'Pending') AS pending_incoming_count,
+    (SELECT COUNT(*) FROM transfers t WHERE t.from_school = $1 AND t.status = 'Pending') AS pending_outgoing_count,
     (SELECT COUNT(*) FROM exam_results e WHERE e.school_id = $1) AS exam_result_count;
 
 -- name: GetStudentCountBySchoolID :one
@@ -728,137 +733,169 @@ INSERT INTO transfers (
 )
 VALUES
     ($1, $2, $3, 'Pending', $4, $5)
-RETURNING id, student_id, from_school, to_school, status, date_initiated, reason;
+RETURNING id;
+
+-- name: CountPendingTransfersForStudent :one
+SELECT COUNT(*) AS count
+FROM transfers
+WHERE student_id = $1 AND status = 'Pending';
 
 -- name: GetTransfersByToSchoolID :many
 SELECT
-    id,
-    student_id,
-    from_school,
-    to_school,
-    status,
-    date_initiated,
-    date_accepted,
-    reason
+    t.id,
+    t.student_id,
+    t.from_school,
+    t.to_school,
+    t.status,
+    t.date_initiated,
+    t.date_accepted,
+    t.reason,
+    t.rejection_reason,
+    s.student_number,
+    s.first_name AS student_first_name,
+    s.last_name AS student_last_name,
+    fs.name AS from_school_name,
+    ts.name AS to_school_name
 FROM
-    transfers
+    transfers t
+    JOIN students s ON s.id = t.student_id
+    JOIN schools fs ON fs.id = t.from_school
+    JOIN schools ts ON ts.id = t.to_school
 WHERE
-    to_school = $1;
-
--- name: GetTransferByID :one
-SELECT
-    id,
-    student_id,
-    from_school,
-    to_school,
-    status,
-    date_initiated,
-    date_accepted,
-    reason
-FROM
-    transfers
-WHERE
-    id = $1;
-
--- name: GetTransferByIDForSchool :one
-SELECT
-    id,
-    student_id,
-    from_school,
-    to_school,
-    status,
-    date_initiated,
-    date_accepted,
-    reason
-FROM
-    transfers
-WHERE
-    id = $1
-    AND ($2 = from_school OR $2 = to_school);
-
--- name: ApproveTransfer :one
-WITH updated_student AS (
-    UPDATE students
-    SET school_id = sqlc.arg(new_school_id)
-    WHERE students.id = sqlc.arg(student_id)
-    RETURNING students.id
-)
-UPDATE transfers
-SET
-    status = 'Accepted',
-    date_accepted = CURRENT_TIMESTAMP
-WHERE
-    transfers.id = sqlc.arg(transfer_id)
-RETURNING transfers.id, status, date_accepted;
-
--- name: ApproveTransferForSchool :one
-WITH updated_student AS (
-    UPDATE students
-    SET school_id = sqlc.arg(new_school_id)
-    WHERE students.id = sqlc.arg(student_id)
-    RETURNING students.id
-)
-UPDATE transfers
-SET
-    status = 'Accepted',
-    date_accepted = CURRENT_TIMESTAMP
-WHERE
-    transfers.id = sqlc.arg(transfer_id)
-    AND transfers.to_school = sqlc.arg(school_id)
-RETURNING transfers.id, status, date_accepted;
-
--- name: FinalizeTransferForSchool :one
-UPDATE transfers
-SET
-    status = 'Completed'
-WHERE
-    transfers.id = $1
-    AND ($2 = from_school OR $2 = to_school)
-RETURNING transfers.id, status;
-
--- name: FinalizeTransfer :one
-UPDATE transfers
-SET
-    status = 'Completed'
-WHERE
-    transfers.id = $1
-RETURNING transfers.id, status;
-
--- name: RejectTransferForSchool :one
-UPDATE transfers
-SET
-    status = 'Rejected',
-    rejection_reason = $2,
-    date_accepted = NULL
-WHERE
-    id = $1
-    AND ($3 = from_school OR $3 = to_school)
-RETURNING id, status, rejection_reason;
+    t.to_school = $1
+ORDER BY t.date_initiated DESC, t.id DESC;
 
 -- name: GetOutgoingTransfers :many
 SELECT
-    id,
-    student_id,
-    from_school,
-    to_school,
-    status,
-    date_initiated,
-    date_accepted,
-    reason
+    t.id,
+    t.student_id,
+    t.from_school,
+    t.to_school,
+    t.status,
+    t.date_initiated,
+    t.date_accepted,
+    t.reason,
+    t.rejection_reason,
+    s.student_number,
+    s.first_name AS student_first_name,
+    s.last_name AS student_last_name,
+    fs.name AS from_school_name,
+    ts.name AS to_school_name
 FROM
-    transfers
+    transfers t
+    JOIN students s ON s.id = t.student_id
+    JOIN schools fs ON fs.id = t.from_school
+    JOIN schools ts ON ts.id = t.to_school
 WHERE
-    from_school = $1;
+    t.from_school = $1
+ORDER BY t.date_initiated DESC, t.id DESC;
+
+-- name: GetTransferByID :one
+SELECT
+    t.id,
+    t.student_id,
+    t.from_school,
+    t.to_school,
+    t.status,
+    t.date_initiated,
+    t.date_accepted,
+    t.reason,
+    t.rejection_reason,
+    s.student_number,
+    s.first_name AS student_first_name,
+    s.last_name AS student_last_name,
+    fs.name AS from_school_name,
+    ts.name AS to_school_name
+FROM
+    transfers t
+    JOIN students s ON s.id = t.student_id
+    JOIN schools fs ON fs.id = t.from_school
+    JOIN schools ts ON ts.id = t.to_school
+WHERE
+    t.id = $1;
+
+-- Approval marks the transfer Accepted and moves the student in one statement.
+-- The student is only moved when the transfer row actually matched (still Pending,
+-- and owned by the receiving school when school_id is given).
+
+-- name: ApproveTransfer :one
+WITH approved AS (
+    UPDATE transfers
+    SET
+        status = 'Accepted',
+        date_accepted = CURRENT_TIMESTAMP
+    WHERE
+        transfers.id = sqlc.arg(transfer_id)
+        AND transfers.status = 'Pending'
+    RETURNING transfers.id, transfers.student_id, transfers.to_school
+),
+moved AS (
+    UPDATE students
+    SET school_id = approved.to_school, updated_at = CURRENT_TIMESTAMP
+    FROM approved
+    WHERE students.id = approved.student_id
+    RETURNING students.id
+)
+SELECT approved.id FROM approved;
+
+-- name: ApproveTransferForSchool :one
+WITH approved AS (
+    UPDATE transfers
+    SET
+        status = 'Accepted',
+        date_accepted = CURRENT_TIMESTAMP
+    WHERE
+        transfers.id = sqlc.arg(transfer_id)
+        AND transfers.to_school = sqlc.arg(school_id)
+        AND transfers.status = 'Pending'
+    RETURNING transfers.id, transfers.student_id, transfers.to_school
+),
+moved AS (
+    UPDATE students
+    SET school_id = approved.to_school, updated_at = CURRENT_TIMESTAMP
+    FROM approved
+    WHERE students.id = approved.student_id
+    RETURNING students.id
+)
+SELECT approved.id FROM approved;
+
+-- name: FinalizeTransfer :one
+UPDATE transfers
+SET status = 'Completed'
+WHERE
+    id = $1
+    AND status = 'Accepted'
+RETURNING id;
+
+-- name: FinalizeTransferForSchool :one
+UPDATE transfers
+SET status = 'Completed'
+WHERE
+    id = sqlc.arg(transfer_id)
+    AND from_school = sqlc.arg(school_id)
+    AND status = 'Accepted'
+RETURNING id;
 
 -- name: RejectTransfer :one
 UPDATE transfers
 SET
     status = 'Rejected',
-    rejection_reason = $2,
-    date_accepted = NULL 
+    rejection_reason = sqlc.arg(rejection_reason)
 WHERE
-    id = $1
-RETURNING id, status, rejection_reason;
+    id = sqlc.arg(transfer_id)
+    AND status = 'Pending'
+RETURNING id;
+
+-- name: RejectTransferForSchool :one
+UPDATE transfers
+SET
+    status = 'Rejected',
+    rejection_reason = sqlc.arg(rejection_reason)
+WHERE
+    id = sqlc.arg(transfer_id)
+    AND to_school = sqlc.arg(school_id)
+    AND status = 'Pending'
+RETURNING id;
 
 -- name: CreateSubject :one
 INSERT INTO
@@ -918,3 +955,172 @@ DELETE FROM
     subjects
 WHERE
     id = $1;
+-- name: GetSchoolReport :many
+-- One row per school for the admin reports page. Region and district filters are
+-- optional; pass rates come from the given academic year and are NULL when not recorded.
+SELECT
+    sc.id,
+    sc.name,
+    sc.school_number,
+    d.id AS district_id,
+    d.name AS district_name,
+    r.id AS region_id,
+    r.name AS region_name,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = sc.id) AS student_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = sc.id AND s.gender = 'Male') AS male_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = sc.id AND s.gender = 'Female') AS female_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = sc.id AND s.disability) AS disability_count,
+    (SELECT COUNT(*) FROM transfers t WHERE t.to_school = sc.id) AS transfers_in,
+    (SELECT COUNT(*) FROM transfers t WHERE t.from_school = sc.id) AS transfers_out,
+    (SELECT COUNT(*) FROM transfers t WHERE t.to_school = sc.id AND t.status = 'Pending') AS pending_in,
+    e.jce_pass_rate,
+    e.msce_pass_rate
+FROM
+    schools sc
+    JOIN districts d ON d.id = sc.district_id
+    JOIN regions r ON r.id = d.region_id
+    LEFT JOIN exam_results e ON e.school_id = sc.id
+        AND e.academic_year_id = sqlc.narg(academic_year_id)::int
+WHERE
+    (sqlc.narg(region_id)::int IS NULL OR r.id = sqlc.narg(region_id)::int)
+    AND (sqlc.narg(district_id)::int IS NULL OR d.id = sqlc.narg(district_id)::int)
+ORDER BY r.name, d.name, sc.name;
+
+-- name: GetRegionDashboardStats :one
+-- Headline counts for a regional admin's dashboard.
+WITH region_schools AS (
+    SELECT sc.id
+    FROM schools sc
+    JOIN districts d ON d.id = sc.district_id
+    WHERE d.region_id = $1
+)
+SELECT
+    (SELECT COUNT(*) FROM districts d WHERE d.region_id = $1) AS district_count,
+    (SELECT COUNT(*) FROM region_schools) AS school_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools)) AS student_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools) AND s.gender = 'Male') AS male_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools) AND s.gender = 'Female') AS female_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools) AND s.disability) AS disability_count,
+    (SELECT COUNT(*) FROM transfers t
+        WHERE t.status = 'Pending'
+        AND (t.from_school IN (SELECT id FROM region_schools) OR t.to_school IN (SELECT id FROM region_schools))
+    ) AS pending_transfer_count;
+
+-- name: GetRegionDistrictSummary :many
+-- Districts in a region with their school and student counts.
+SELECT
+    d.id,
+    d.name,
+    (SELECT COUNT(*) FROM schools sc WHERE sc.district_id = d.id) AS school_count,
+    (SELECT COUNT(*) FROM students s JOIN schools sc ON sc.id = s.school_id WHERE sc.district_id = d.id) AS student_count
+FROM districts d
+WHERE d.region_id = $1
+ORDER BY d.name;
+
+-- name: ListStudentsForRegion :many
+-- Students enrolled at schools in a region; district and school filters are optional.
+SELECT
+    s.id,
+    s.student_number,
+    s.first_name,
+    s.last_name,
+    s.gender,
+    s.form_level,
+    s.status,
+    sc.id AS school_id,
+    sc.name AS school_name,
+    d.id AS district_id,
+    d.name AS district_name
+FROM students s
+JOIN schools sc ON sc.id = s.school_id
+JOIN districts d ON d.id = sc.district_id
+WHERE
+    d.region_id = sqlc.arg(region_id)
+    AND (sqlc.narg(district_id)::int IS NULL OR d.id = sqlc.narg(district_id)::int)
+    AND (sqlc.narg(school_id)::int IS NULL OR sc.id = sqlc.narg(school_id)::int)
+ORDER BY d.name, sc.name, s.last_name, s.first_name;
+
+-- name: ListTransfersForRegion :many
+-- Transfers into or out of any school in a region.
+SELECT
+    t.id,
+    t.student_id,
+    t.from_school,
+    t.to_school,
+    t.status,
+    t.date_initiated,
+    t.date_accepted,
+    t.reason,
+    t.rejection_reason,
+    s.student_number,
+    s.first_name AS student_first_name,
+    s.last_name AS student_last_name,
+    fs.name AS from_school_name,
+    ts.name AS to_school_name
+FROM
+    transfers t
+    JOIN students s ON s.id = t.student_id
+    JOIN schools fs ON fs.id = t.from_school
+    JOIN schools ts ON ts.id = t.to_school
+    JOIN districts fd ON fd.id = fs.district_id
+    JOIN districts td ON td.id = ts.district_id
+WHERE
+    fd.region_id = $1 OR td.region_id = $1
+ORDER BY t.date_initiated DESC, t.id DESC;
+
+-- name: ListMarksForSchool :many
+-- Marks of the school's current students. Year, term and student filters are optional.
+SELECT
+    m.id,
+    m.student_id,
+    m.subject_id,
+    m.academic_year_id,
+    m.term,
+    m.mark,
+    m.school_id,
+    m.updated_at
+FROM student_marks m
+JOIN students s ON s.id = m.student_id
+WHERE
+    s.school_id = sqlc.arg(school_id)
+    AND (sqlc.narg(academic_year_id)::int IS NULL OR m.academic_year_id = sqlc.narg(academic_year_id)::int)
+    AND (sqlc.narg(term)::int IS NULL OR m.term = sqlc.narg(term)::int)
+    AND (sqlc.narg(student_id)::int IS NULL OR m.student_id = sqlc.narg(student_id)::int)
+ORDER BY m.student_id, m.subject_id, m.academic_year_id, m.term;
+
+-- name: ListSubjectEnrolmentsForSchool :many
+-- (student, subject) pairs for the given students, limited to the school's own students.
+SELECT ss.student_id, ss.subject_id
+FROM student_subjects ss
+JOIN students s ON s.id = ss.student_id
+WHERE s.school_id = sqlc.arg(school_id)
+    AND ss.student_id = ANY(sqlc.arg(student_ids)::int[]);
+
+-- name: UpsertMarks :exec
+-- Saves a batch of marks for one academic year and term; the arrays are parallel.
+INSERT INTO student_marks (student_id, subject_id, academic_year_id, term, mark, school_id, recorded_by)
+SELECT
+    unnest(sqlc.arg(student_ids)::int[]),
+    unnest(sqlc.arg(subject_ids)::int[]),
+    sqlc.arg(academic_year_id)::int,
+    sqlc.arg(term)::int,
+    unnest(sqlc.arg(marks)::int[]),
+    sqlc.arg(school_id)::int,
+    sqlc.narg(recorded_by)::int
+ON CONFLICT (student_id, subject_id, academic_year_id, term) DO UPDATE
+SET
+    mark = EXCLUDED.mark,
+    school_id = EXCLUDED.school_id,
+    recorded_by = EXCLUDED.recorded_by,
+    updated_at = CURRENT_TIMESTAMP;
+
+-- name: DeleteMarks :exec
+-- Removes the marks for the given (student, subject) pairs in one academic year and term.
+DELETE FROM student_marks m
+USING (
+    SELECT unnest(sqlc.arg(student_ids)::int[]) AS student_id, unnest(sqlc.arg(subject_ids)::int[]) AS subject_id
+) AS cleared
+WHERE m.student_id = cleared.student_id
+    AND m.subject_id = cleared.subject_id
+    AND m.academic_year_id = sqlc.arg(academic_year_id)::int
+    AND m.term = sqlc.arg(term)::int;

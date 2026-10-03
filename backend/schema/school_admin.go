@@ -2,8 +2,13 @@ package schema
 
 type SchoolDashboardStats struct {
 	StudentCount          int64 `json:"student_count"`
+	MaleCount             int64 `json:"male_count"`
+	FemaleCount           int64 `json:"female_count"`
+	DisabilityCount       int64 `json:"disability_count"`
 	IncomingTransferCount int64 `json:"incoming_transfer_count"`
 	OutgoingTransferCount int64 `json:"outgoing_transfer_count"`
+	PendingIncomingCount  int64 `json:"pending_incoming_count"`
+	PendingOutgoingCount  int64 `json:"pending_outgoing_count"`
 	ExamResultCount       int64 `json:"exam_result_count"`
 }
 

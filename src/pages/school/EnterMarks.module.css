@@ -1,0 +1,59 @@
+/* Marks grid cells for EnterMarks */
+.studentCol {
+  min-width: 200px;
+}
+
+.subjectCol {
+  min-width: 96px;
+}
+
+.markCell {
+  text-align: center;
+}
+
+.markInput {
+  width: 72px;
+  padding: 6px 8px;
+  text-align: center;
+  font-family: var(--ui-mono);
+}
+
+/* A mark changed since the last save */
+.dirty {
+  border-color: var(--tone-amber-line);
+  background: var(--tone-amber-bg);
+}
+
+/* The student does not take this subject */
+.notTaken {
+  text-align: center;
+  color: #cbd5e1;
+  background: var(--ui-surface-muted);
+}
+
+.grade {
+  margin-top: 5px;
+}
+
+.average {
+  font: 700 13.5px var(--ui-mono);
+  color: var(--ui-text);
+  margin-bottom: 4px;
+}
+
+/* Five summary tiles in one row */
+.summaryTiles {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+@media (max-width: 1100px) {
+  .summaryTiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .summaryTiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

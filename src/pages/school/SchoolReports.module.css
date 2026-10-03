@@ -1,0 +1,8 @@
+/* Keeps both report tabs mounted (as the old Bootstrap tabs did) while showing one */
+.pane {
+  display: contents;
+}
+
+.pane[hidden] {
+  display: none;
+}

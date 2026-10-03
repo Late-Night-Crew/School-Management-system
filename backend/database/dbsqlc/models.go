@@ -70,6 +70,19 @@ type Student struct {
 	DisabilityDetails    sql.NullString
 }
 
+type StudentMark struct {
+	ID             int32
+	StudentID      int32
+	SubjectID      int32
+	AcademicYearID int32
+	Term           int32
+	Mark           int32
+	SchoolID       int32
+	RecordedBy     sql.NullInt32
+	CreatedAt      sql.NullTime
+	UpdatedAt      sql.NullTime
+}
+
 type StudentSubject struct {
 	ID        int32
 	StudentID int32

@@ -43,8 +43,13 @@ func (s *schoolAdminService) GetDashboardStats(ctx context.Context, schoolID int
 	}
 	return &schema.SchoolDashboardStats{
 		StudentCount:          stats.StudentCount,
+		MaleCount:             stats.MaleCount,
+		FemaleCount:           stats.FemaleCount,
+		DisabilityCount:       stats.DisabilityCount,
 		IncomingTransferCount: stats.IncomingTransferCount,
 		OutgoingTransferCount: stats.OutgoingTransferCount,
+		PendingIncomingCount:  stats.PendingIncomingCount,
+		PendingOutgoingCount:  stats.PendingOutgoingCount,
 		ExamResultCount:       stats.ExamResultCount,
 	}, nil
 }

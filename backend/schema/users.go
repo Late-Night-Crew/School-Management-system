@@ -72,3 +72,10 @@ type UpdateUserRequest struct {
 	Role        string `json:"role" validate:"required"`
 	Status      string `json:"status" validate:"required"`
 }
+
+// User roles, as stored in users.role and issued in the JWT "role" claim.
+const (
+	RoleSuperAdmin    = "SUPER_ADMIN"
+	RoleRegionalAdmin = "REGIONAL_ADMIN"
+	RoleSchoolManager = "SCHOOL_MANAGER"
+)

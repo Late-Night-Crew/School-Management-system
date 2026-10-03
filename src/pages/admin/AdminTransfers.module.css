@@ -1,0 +1,5 @@
+.confirmText {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ui-text-body);
+}

@@ -1,0 +1,177 @@
+/* Page-specific pieces of the enrollment form that ui.css does not cover */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* ── Gender radio pills ── */
+.pills {
+  display: flex;
+  gap: 8px;
+}
+
+.pill {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border-radius: 10px;
+  border: 1.5px solid var(--ui-border);
+  background: #f9fafb;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ui-text-muted);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.18s;
+}
+
+.pill input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pill:hover {
+  border-color: #93c5fd;
+  color: #1f2937;
+}
+
+.pill:focus-within {
+  box-shadow: var(--ui-focus);
+}
+
+.pillOn {
+  background: var(--tone-blue-bg);
+  border-color: var(--ui-blue);
+  color: var(--ui-navy);
+  font-weight: 700;
+}
+
+.dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pillOn .dot::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ui-blue);
+}
+
+/* ── Disability details ── */
+.disabilityDetail {
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: var(--tone-amber-bg);
+  border: 1.5px solid #fcd34d;
+  border-radius: 10px;
+}
+
+/* ── Subject chips ── */
+.subjects {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (max-width: 960px) {
+  .subjects {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .subjects {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.subject,
+.selectAll {
+  display: flex;
+  align-items: center;
+  border: 1.5px solid var(--ui-border);
+  background: #f9fafb;
+  color: var(--ui-text-muted);
+  font-family: var(--ui-font);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.18s;
+}
+
+.subject {
+  gap: 9px;
+  padding: 12px 14px;
+  border-radius: 11px;
+  font-size: 12.5px;
+  font-weight: 500;
+  text-align: left;
+}
+
+.subject:hover {
+  border-color: #93c5fd;
+  color: #1f2937;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.07);
+}
+
+.selectAll {
+  gap: 7px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.selectAll:hover {
+  color: var(--ui-text-body);
+  border-color: #d1d5db;
+}
+
+.subject.checked,
+.selectAll.checked {
+  background: var(--tone-amber-bg);
+  border-color: var(--tone-amber-line);
+  color: #92400e;
+}
+
+.subject.checked {
+  font-weight: 600;
+  box-shadow: 0 2px 10px rgba(217, 119, 6, 0.14);
+}
+
+.subjectName {
+  flex: 1;
+  line-height: 1.3;
+}
+
+.check {
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  border: 1.5px solid currentColor;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 9px;
+}
+
+.checked .check {
+  background: var(--tone-amber-line);
+  border-color: var(--tone-amber-line);
+  color: #fff;
+}

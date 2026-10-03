@@ -1,0 +1,9 @@
+.districtLink {
+  color: var(--ui-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.districtLink:hover {
+  color: var(--tone-blue);
+}

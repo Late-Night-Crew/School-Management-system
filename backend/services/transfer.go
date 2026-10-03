@@ -3,15 +3,24 @@ package services
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"time"
+
 	"nsms/database/dbsqlc"
 	"nsms/logging"
 	"nsms/schema"
 )
 
+// TransferService manages student transfers between schools.
+//
+// Lifecycle: the sending school creates a Pending request, the receiving school
+// approves it (Accepted, the student moves to the receiving school) or rejects it,
+// and the sending school finalizes an Accepted transfer (Completed).
+// The *ForSchool methods enforce those per-school roles; the others are for admins.
 type TransferService interface {
 	CreateTransferRequest(ctx context.Context, req *schema.CreateTransferRequest) (*schema.Transfer, error)
-	GetIncomingTransfersRequest(ctx context.Context, req *schema.GetIncomingTransfersRequest) ([]*schema.Transfer, error)
+	GetIncomingTransfers(ctx context.Context, schoolID int64) ([]*schema.Transfer, error)
 	GetOutgoingTransfers(ctx context.Context, schoolID int64) ([]*schema.Transfer, error)
 	GetTransferByID(ctx context.Context, transferID int64) (*schema.Transfer, error)
 	GetTransferByIDForSchool(ctx context.Context, transferID int64, schoolID int64) (*schema.Transfer, error)
@@ -35,272 +44,195 @@ func NewTransferService(queries *dbsqlc.Queries, logger logging.Logger) Transfer
 	}
 }
 
+const transferTimeFormat = "2006-01-02T15:04:05Z"
+
+func formatNullTime(t sql.NullTime) string {
+	if !t.Valid {
+		return ""
+	}
+	return t.Time.Format(transferTimeFormat)
+}
+
+func toTransfer(row dbsqlc.GetTransferByIDRow) *schema.Transfer {
+	return &schema.Transfer{
+		ID:              int64(row.ID),
+		StudentID:       int64(row.StudentID),
+		StudentNumber:   row.StudentNumber,
+		StudentName:     row.StudentFirstName + " " + row.StudentLastName,
+		FromSchoolID:    int64(row.FromSchool),
+		FromSchoolName:  row.FromSchoolName,
+		ToSchoolID:      int64(row.ToSchool),
+		ToSchoolName:    row.ToSchoolName,
+		Status:          row.Status.String,
+		DateInitiated:   formatNullTime(row.DateInitiated),
+		DateAccepted:    formatNullTime(row.DateAccepted),
+		Reason:          row.Reason.String,
+		RejectionReason: row.RejectionReason.String,
+	}
+}
+
 func (s *transferService) CreateTransferRequest(ctx context.Context, req *schema.CreateTransferRequest) (*schema.Transfer, error) {
-	dbTransfer, err := s.queries.CreateTransferRequest(ctx, dbsqlc.CreateTransferRequestParams{
+	if req.FromSchoolID == req.ToSchoolID {
+		return nil, ErrTransferSameSchool
+	}
+
+	_, err := s.queries.GetStudentByIDAndSchoolID(ctx, dbsqlc.GetStudentByIDAndSchoolIDParams{
+		ID:       int32(req.StudentID),
+		SchoolID: int32(req.FromSchoolID),
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrStudentNotInSchool
+		}
+		return nil, fmt.Errorf("failed to look up student %d: %w", req.StudentID, err)
+	}
+
+	pending, err := s.queries.CountPendingTransfersForStudent(ctx, int32(req.StudentID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to check pending transfers for student %d: %w", req.StudentID, err)
+	}
+	if pending > 0 {
+		return nil, ErrTransferAlreadyPending
+	}
+
+	dateInitiated := req.DateInitiated
+	if dateInitiated.IsZero() {
+		dateInitiated = time.Now()
+	}
+
+	transferID, err := s.queries.CreateTransferRequest(ctx, dbsqlc.CreateTransferRequestParams{
 		StudentID:     int32(req.StudentID),
 		FromSchool:    int32(req.FromSchoolID),
 		ToSchool:      int32(req.ToSchoolID),
-		DateInitiated: sql.NullTime{Time: req.DateInitiated, Valid: !req.DateInitiated.IsZero()},
+		DateInitiated: sql.NullTime{Time: dateInitiated, Valid: true},
 		Reason:        sql.NullString{String: req.Reason, Valid: req.Reason != ""},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create transfer request: %w", err)
 	}
 
-	transfer := &schema.Transfer{
-		ID:            int64(dbTransfer.ID),
-		Status:        dbTransfer.Status.String,
-		StudentID:     int64(dbTransfer.StudentID),
-		FromSchoolID:  int64(dbTransfer.FromSchool),
-		ToSchoolID:    int64(dbTransfer.ToSchool),
-		DateInitiated: dbTransfer.DateInitiated.Time.Format("2006-01-02T15:04:05Z"),
-		Reason:        dbTransfer.Reason.String,
-	}
-
-	return transfer, nil
+	return s.GetTransferByID(ctx, int64(transferID))
 }
 
-func (s *transferService) GetIncomingTransfersRequest(ctx context.Context, req *schema.GetIncomingTransfersRequest) ([]*schema.Transfer, error) {
-	res := make([]*schema.Transfer, 0)
-	dbTransfers, err := s.queries.GetTransfersByToSchoolID(ctx, int32(req.ToSchoolID))
+func (s *transferService) GetIncomingTransfers(ctx context.Context, schoolID int64) ([]*schema.Transfer, error) {
+	rows, err := s.queries.GetTransfersByToSchoolID(ctx, int32(schoolID))
 	if err != nil {
-		return nil, fmt.Errorf("failed to get incoming transfers for school %d: %w", req.ToSchoolID, err)
+		return nil, fmt.Errorf("failed to get incoming transfers for school %d: %w", schoolID, err)
 	}
-
-	for _, dbTransfer := range dbTransfers {
-		res = append(res, &schema.Transfer{
-			ID:            int64(dbTransfer.ID),
-			StudentID:     int64(dbTransfer.StudentID),
-			FromSchoolID:  int64(dbTransfer.FromSchool),
-			ToSchoolID:    int64(dbTransfer.ToSchool),
-			Status:        dbTransfer.Status.String,
-			DateInitiated: dbTransfer.DateInitiated.Time.Format("2006-01-02T15:04:05Z"),
-			DateAccepted: func() string {
-				if dbTransfer.DateAccepted.Valid {
-					return dbTransfer.DateAccepted.Time.Format("2006-01-02T15:04:05Z")
-				} else {
-					return ""
-				}
-			}(),
-			Reason: dbTransfer.Reason.String,
-		})
+	transfers := make([]*schema.Transfer, 0, len(rows))
+	for _, row := range rows {
+		transfers = append(transfers, toTransfer(dbsqlc.GetTransferByIDRow(row)))
 	}
-
-	return res, nil
+	return transfers, nil
 }
 
 func (s *transferService) GetOutgoingTransfers(ctx context.Context, schoolID int64) ([]*schema.Transfer, error) {
-	dbTransfers, err := s.queries.GetOutgoingTransfers(ctx, int32(schoolID))
+	rows, err := s.queries.GetOutgoingTransfers(ctx, int32(schoolID))
 	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve outgoing transfers: %w", err)
+		return nil, fmt.Errorf("failed to get outgoing transfers for school %d: %w", schoolID, err)
 	}
-	transfers := make([]*schema.Transfer, 0, len(dbTransfers))
-	for _, dbTransfer := range dbTransfers {
-		transfer := &schema.Transfer{
-			ID:            int64(dbTransfer.ID),
-			StudentID:     int64(dbTransfer.StudentID),
-			FromSchoolID:  int64(dbTransfer.FromSchool),
-			ToSchoolID:    int64(dbTransfer.ToSchool),
-			Status:        dbTransfer.Status.String,
-			DateInitiated: dbTransfer.DateInitiated.Time.Format("2006-01-02T15:04:05Z"),
-			Reason:        dbTransfer.Reason.String,
-			DateAccepted: func() string {
-				if dbTransfer.DateAccepted.Valid {
-					return dbTransfer.DateAccepted.Time.Format("2006-01-02T15:04:05Z")
-				}
-				return ""
-			}(),
-		}
-		transfers = append(transfers, transfer)
+	transfers := make([]*schema.Transfer, 0, len(rows))
+	for _, row := range rows {
+		transfers = append(transfers, toTransfer(dbsqlc.GetTransferByIDRow(row)))
 	}
-
 	return transfers, nil
 }
 
 func (s *transferService) GetTransferByID(ctx context.Context, transferID int64) (*schema.Transfer, error) {
-	// Call the sqlc function
-	dbTransfer, err := s.queries.GetTransferByID(ctx, int32(transferID))
+	row, err := s.queries.GetTransferByID(ctx, int32(transferID))
 	if err != nil {
-		// sql.ErrNoRows is the common error when a record is not found
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("transfer with ID %d not found", transferID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
 		}
-		return nil, fmt.Errorf("failed to retrieve transfer by ID: %w", err)
+		return nil, fmt.Errorf("failed to get transfer %d: %w", transferID, err)
 	}
-	return &schema.Transfer{
-		ID:            int64(dbTransfer.ID),
-		StudentID:     int64(dbTransfer.StudentID),
-		FromSchoolID:  int64(dbTransfer.FromSchool),
-		ToSchoolID:    int64(dbTransfer.ToSchool),
-		Status:        dbTransfer.Status.String,
-		DateInitiated: dbTransfer.DateInitiated.Time.Format("2006-01-02T15:04:05Z"),
-		DateAccepted: func() string {
-			if dbTransfer.DateAccepted.Valid {
-				return dbTransfer.DateAccepted.Time.Format("2006-01-02T15:04:05Z")
-			}
-			return ""
-		}(),
-		Reason: dbTransfer.Reason.String,
-	}, nil
+	return toTransfer(row), nil
 }
 
+// GetTransferByIDForSchool returns the transfer only if the school is its sender or receiver.
 func (s *transferService) GetTransferByIDForSchool(ctx context.Context, transferID int64, schoolID int64) (*schema.Transfer, error) {
-	dbTransfer, err := s.queries.GetTransferByIDForSchool(ctx, dbsqlc.GetTransferByIDForSchoolParams{ID: int32(transferID), FromSchool: int32(schoolID)})
+	transfer, err := s.GetTransferByID(ctx, transferID)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("transfer with ID %d not found for school %d", transferID, schoolID)
-		}
-		return nil, fmt.Errorf("failed to retrieve transfer for school %d: %w", schoolID, err)
+		return nil, err
 	}
-	return &schema.Transfer{
-		ID:            int64(dbTransfer.ID),
-		StudentID:     int64(dbTransfer.StudentID),
-		FromSchoolID:  int64(dbTransfer.FromSchool),
-		ToSchoolID:    int64(dbTransfer.ToSchool),
-		Status:        dbTransfer.Status.String,
-		DateInitiated: dbTransfer.DateInitiated.Time.Format("2006-01-02T15:04:05Z"),
-		DateAccepted: func() string {
-			if dbTransfer.DateAccepted.Valid {
-				return dbTransfer.DateAccepted.Time.Format("2006-01-02T15:04:05Z")
-			}
-			return ""
-		}(),
-		Reason: dbTransfer.Reason.String,
-	}, nil
+	if transfer.FromSchoolID != schoolID && transfer.ToSchoolID != schoolID {
+		return nil, ErrNotFound
+	}
+	return transfer, nil
 }
 
 func (s *transferService) ApproveTransfer(ctx context.Context, transferID int64) (*schema.Transfer, error) {
-	// 1. Fetch the existing transfer details
-	currentTransfer, err := s.queries.GetTransferByID(ctx, int32(transferID))
-	if err != nil {
-		return nil, fmt.Errorf("transfer ID %d not found: %w", transferID, err)
-	}
-
-	// 2. Prepare the parameters for the transaction (ApproveTransfer)
-	params := dbsqlc.ApproveTransferParams{
-		StudentID:   currentTransfer.StudentID,
-		NewSchoolID: currentTransfer.ToSchool,
-		TransferID:  int32(transferID),
-	}
-
-	// 3. Execute the transactional update
-	dbResult, err := s.queries.ApproveTransfer(ctx, params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute transfer approval transaction: %w", err)
-	}
-
-	// 4. Return the result (using the minimalist return mapping)
-	return &schema.Transfer{
-		ID:            int64(dbResult.ID),
-		Status:        dbResult.Status.String,
-		DateAccepted:  dbResult.DateAccepted.Time.Format("2006-01-02T15:04:05Z"),
-		StudentID:     int64(currentTransfer.StudentID),
-		FromSchoolID:  int64(currentTransfer.FromSchool),
-		ToSchoolID:    int64(currentTransfer.ToSchool),
-		DateInitiated: currentTransfer.DateInitiated.Time.Format("2006-01-02T15:04:05Z"),
-		Reason:        currentTransfer.Reason.String,
-	}, nil
+	_, err := s.queries.ApproveTransfer(ctx, int32(transferID))
+	return s.afterAction(ctx, err, transferID, 0, false)
 }
 
 func (s *transferService) ApproveTransferForSchool(ctx context.Context, transferID int64, schoolID int64) (*schema.Transfer, error) {
-	currentTransfer, err := s.queries.GetTransferByID(ctx, int32(transferID))
-	if err != nil {
-		return nil, fmt.Errorf("transfer ID %d not found: %w", transferID, err)
-	}
-
-	params := dbsqlc.ApproveTransferForSchoolParams{
-		StudentID:   currentTransfer.StudentID,
-		NewSchoolID: currentTransfer.ToSchool,
-		TransferID:  int32(transferID),
-		SchoolID:    int32(schoolID),
-	}
-
-	_, err = s.queries.ApproveTransferForSchool(ctx, params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to approve transfer for school %d: %w", schoolID, err)
-	}
-
-	return s.GetTransferByID(ctx, transferID)
-}
-
-func (s *transferService) FinalizeTransferForSchool(ctx context.Context, transferID int64, schoolID int64) (*schema.Transfer, error) {
-	dbResult, err := s.queries.FinalizeTransferForSchool(ctx, dbsqlc.FinalizeTransferForSchoolParams{ID: int32(transferID), FromSchool: int32(schoolID)})
-	if err != nil {
-		return nil, fmt.Errorf("failed to finalize transfer for school %d: %w", schoolID, err)
-	}
-
-	updatedTransfer, err := s.GetTransferByID(ctx, transferID)
-	if err != nil {
-		s.logger.Error("Finalized transfer, but failed to fetch complete record", "transferID", transferID, "error", err)
-		return &schema.Transfer{
-			ID:     int64(dbResult.ID),
-			Status: dbResult.Status.String,
-		}, nil
-	}
-	return updatedTransfer, nil
-}
-
-func (s *transferService) RejectTransferForSchool(ctx context.Context, transferID int64, schoolID int64, reason string) (*schema.Transfer, error) {
-	params := dbsqlc.RejectTransferForSchoolParams{
-		ID:              int32(transferID),
-		RejectionReason: sql.NullString{String: reason, Valid: true},
-		FromSchool:      int32(schoolID),
-	}
-
-	_, err := s.queries.RejectTransferForSchool(ctx, params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to reject transfer for school %d: %w", schoolID, err)
-	}
-
-	rejectedTransfer, err := s.GetTransferByID(ctx, transferID)
-	if err != nil {
-		s.logger.Error("Rejected transfer, but failed to fetch complete record", "transferID", transferID, "error", err)
-		return nil, fmt.Errorf("transfer rejected, but failed to fetch full response: %w", err)
-	}
-
-	return rejectedTransfer, nil
+	_, err := s.queries.ApproveTransferForSchool(ctx, dbsqlc.ApproveTransferForSchoolParams{
+		TransferID: int32(transferID),
+		SchoolID:   int32(schoolID),
+	})
+	return s.afterAction(ctx, err, transferID, schoolID, false)
 }
 
 func (s *transferService) FinalizeTransfer(ctx context.Context, transferID int64) (*schema.Transfer, error) {
-	dbResult, err := s.queries.FinalizeTransfer(ctx, int32(transferID))
-	if err != nil {
-		return nil, fmt.Errorf("failed to finalize transfer: %w", err)
-	}
+	_, err := s.queries.FinalizeTransfer(ctx, int32(transferID))
+	return s.afterAction(ctx, err, transferID, 0, true)
+}
 
-	// You would typically fetch the full record here for the response
-	updatedTransfer, err := s.GetTransferByID(ctx, transferID)
-	if err != nil {
-		// Log the failure, but return the successful update status
-		s.logger.Error("Finalized transfer, but failed to fetch complete record", "transferID", transferID, "error", err)
-		return &schema.Transfer{
-			ID:     int64(dbResult.ID),
-			Status: dbResult.Status.String,
-		}, nil
-	}
-	return updatedTransfer, nil
+func (s *transferService) FinalizeTransferForSchool(ctx context.Context, transferID int64, schoolID int64) (*schema.Transfer, error) {
+	_, err := s.queries.FinalizeTransferForSchool(ctx, dbsqlc.FinalizeTransferForSchoolParams{
+		TransferID: int32(transferID),
+		SchoolID:   int32(schoolID),
+	})
+	return s.afterAction(ctx, err, transferID, schoolID, true)
 }
 
 func (s *transferService) RejectTransfer(ctx context.Context, transferID int64, reason string) (*schema.Transfer, error) {
-	// 1. Prepare parameters for sqlc
-	params := dbsqlc.RejectTransferParams{
-		ID:              int32(transferID),
+	_, err := s.queries.RejectTransfer(ctx, dbsqlc.RejectTransferParams{
+		TransferID:      int32(transferID),
 		RejectionReason: sql.NullString{String: reason, Valid: true},
+	})
+	return s.afterAction(ctx, err, transferID, 0, false)
+}
+
+func (s *transferService) RejectTransferForSchool(ctx context.Context, transferID int64, schoolID int64, reason string) (*schema.Transfer, error) {
+	_, err := s.queries.RejectTransferForSchool(ctx, dbsqlc.RejectTransferForSchoolParams{
+		TransferID:      int32(transferID),
+		SchoolID:        int32(schoolID),
+		RejectionReason: sql.NullString{String: reason, Valid: true},
+	})
+	return s.afterAction(ctx, err, transferID, schoolID, false)
+}
+
+// afterAction turns the result of a guarded status update into a response.
+// The update queries match no rows when the transfer is missing, belongs to another
+// school, or is in the wrong status; in that case the transfer is reloaded to report
+// which one it was. schoolID is 0 for admin actions. senderAction is true when the
+// sending school performs the action (finalize) and false for the receiving school.
+func (s *transferService) afterAction(ctx context.Context, err error, transferID int64, schoolID int64, senderAction bool) (*schema.Transfer, error) {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("failed to update transfer %d: %w", transferID, err)
 	}
 
-	// 2. Execute the update
-	_, err := s.queries.RejectTransfer(ctx, params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute transfer rejection: %w", err)
+	transfer, getErr := s.GetTransferByID(ctx, transferID)
+	if getErr != nil {
+		return nil, getErr
+	}
+	if err == nil {
+		return transfer, nil
 	}
 
-	// 3. Fetch the full transfer record for a complete response
-	// (This ensures the response contains student_id, schools, etc.)
-	rejectedTransfer, err := s.GetTransferByID(ctx, transferID)
-	if err != nil {
-		// Log error but return status success if possible
-		s.logger.Error("Rejected transfer, but failed to fetch complete record", "transferID", transferID, "error", err)
-		return nil, fmt.Errorf("transfer rejected, but failed to fetch full response: %w", err)
+	if schoolID != 0 {
+		if transfer.FromSchoolID != schoolID && transfer.ToSchoolID != schoolID {
+			return nil, ErrNotFound
+		}
+		allowedSchoolID := transfer.ToSchoolID
+		if senderAction {
+			allowedSchoolID = transfer.FromSchoolID
+		}
+		if schoolID != allowedSchoolID {
+			return nil, ErrTransferWrongSchool
+		}
 	}
-
-	return rejectedTransfer, nil
+	return nil, ErrTransferInvalidState
 }

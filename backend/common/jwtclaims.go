@@ -2,6 +2,7 @@ package common
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -9,36 +10,76 @@ import (
 )
 
 var ErrSchoolIDMissing = errors.New("school_id claim missing")
+var ErrRegionIDMissing = errors.New("region_id claim missing")
+var ErrUserIDMissing = errors.New("user_id claim missing")
 
-func GetSchoolIDFromCtx(ctx *fiber.Ctx) (int64, error) {
+var ErrRoleMissing = errors.New("role claim missing")
+
+func claimsFromCtx(ctx *fiber.Ctx) (jwt.MapClaims, error) {
 	user := ctx.Locals("user")
 	if user == nil {
-		return 0, errors.New("token not found in context")
+		return nil, errors.New("token not found in context")
 	}
 
 	token, ok := user.(*jwt.Token)
 	if !ok {
-		return 0, errors.New("invalid token in context")
+		return nil, errors.New("invalid token in context")
 	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		return 0, errors.New("invalid token claims")
+		return nil, errors.New("invalid token claims")
+	}
+	return claims, nil
+}
+
+// GetRoleFromCtx returns the "role" claim of the authenticated user's token.
+func GetRoleFromCtx(ctx *fiber.Ctx) (string, error) {
+	claims, err := claimsFromCtx(ctx)
+	if err != nil {
+		return "", err
+	}
+	role, ok := claims["role"].(string)
+	if !ok || role == "" {
+		return "", ErrRoleMissing
+	}
+	return role, nil
+}
+
+func GetSchoolIDFromCtx(ctx *fiber.Ctx) (int64, error) {
+	return idClaimFromCtx(ctx, "school_id", ErrSchoolIDMissing)
+}
+
+// GetUserIDFromCtx returns the "user_id" claim of the authenticated user's token.
+func GetUserIDFromCtx(ctx *fiber.Ctx) (int64, error) {
+	return idClaimFromCtx(ctx, "user_id", ErrUserIDMissing)
+}
+
+// GetRegionIDFromCtx returns the "region_id" claim of the authenticated user's token.
+func GetRegionIDFromCtx(ctx *fiber.Ctx) (int64, error) {
+	return idClaimFromCtx(ctx, "region_id", ErrRegionIDMissing)
+}
+
+// idClaimFromCtx reads a numeric ID claim, returning errMissing when it is absent or empty.
+func idClaimFromCtx(ctx *fiber.Ctx, name string, errMissing error) (int64, error) {
+	claims, err := claimsFromCtx(ctx)
+	if err != nil {
+		return 0, err
 	}
 
-	rawSchoolID, ok := claims["school_id"]
-	if !ok || rawSchoolID == nil {
-		return 0, ErrSchoolIDMissing
+	raw, ok := claims[name]
+	if !ok || raw == nil {
+		return 0, errMissing
 	}
 
-	switch v := rawSchoolID.(type) {
+	switch v := raw.(type) {
 	case float64:
 		return int64(v), nil
 	case int64:
 		return v, nil
 	case string:
 		if v == "" {
-			return 0, ErrSchoolIDMissing
+			return 0, errMissing
 		}
 		parsed, err := strconv.ParseInt(v, 10, 64)
 		if err != nil {
@@ -46,6 +87,6 @@ func GetSchoolIDFromCtx(ctx *fiber.Ctx) (int64, error) {
 		}
 		return parsed, nil
 	default:
-		return 0, errors.New("invalid school_id claim type")
+		return 0, fmt.Errorf("invalid %s claim type", name)
 	}
 }
