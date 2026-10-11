@@ -1,6 +1,10 @@
 import { createHashRouter } from "react-router-dom";
 
 import UnifiedAppShell from "./layout/UnifiedAppShell";
+import ChangePasswordPage from "./pages/auth/ChangePasswordPage";
+import AccountsPage from "./pages/accounts/AccountsPage";
+import ContactsPage from "./pages/contacts/ContactsPage";
+import AdminSettings from "./pages/admin/AdminSettings";
 import LoginPage from "./pages/auth/LoginPage";
 
 // Super admin
@@ -41,6 +45,7 @@ import StudentEnroll from "./pages/school/StudentEnroll";
 // Sidebar links for each role are defined in layout/UnifiedSidebar.jsx.
 const router = createHashRouter([
   { path: "/login", element: <LoginPage /> },
+  { path: "/change-password", element: <ChangePasswordPage /> },
   {
     path: "/",
     element: <UnifiedAppShell />,
@@ -63,6 +68,9 @@ const router = createHashRouter([
           { path: "transfers", element: <AdminTransfers /> },
           { path: "reports", element: <AdminReports /> },
           { path: "notifications", element: <AdminNotifications /> },
+          { path: "contacts", element: <ContactsPage /> },
+          { path: "accounts", element: <AccountsPage /> },
+          { path: "settings", element: <AdminSettings /> },
         ],
       },
 
@@ -78,6 +86,8 @@ const router = createHashRouter([
           { path: "reports", element: <RegionalReports /> },
           { path: "settings", element: <RegionalSettings /> },
           { path: "notifications", element: <RegionalNotifications /> },
+          { path: "contacts", element: <ContactsPage /> },
+          { path: "accounts", element: <AccountsPage /> },
         ],
       },
 
@@ -94,6 +104,7 @@ const router = createHashRouter([
           { path: "reports", element: <SchoolReports /> },
           { path: "settings", element: <SchoolSettings /> },
           { path: "notifications", element: <SchoolNotifications /> },
+          { path: "contacts", element: <ContactsPage /> },
         ],
       },
     ],

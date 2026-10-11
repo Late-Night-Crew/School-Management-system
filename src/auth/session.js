@@ -10,6 +10,7 @@ const KEYS = {
   regionId: "regionId",
   districtId: "districtId",
   schoolId: "schoolId",
+  mustChangePassword: "mustChangePassword",
 };
 
 // Roles issued by the backend in the login response and the JWT "role" claim
@@ -36,6 +37,7 @@ export function saveSession(login) {
     regionId: login.region_id,
     districtId: login.district_id,
     schoolId: login.school_id,
+    mustChangePassword: login.must_change_password ? "true" : "",
   };
   Object.entries(values).forEach(([name, value]) => {
     localStorage.setItem(KEYS[name], value == null ? "" : String(value));
@@ -74,7 +76,13 @@ export function getSession() {
     regionId: read("regionId"),
     districtId: read("districtId"),
     schoolId: read("schoolId"),
+    mustChangePassword: read("mustChangePassword") === "true",
   };
+}
+
+// Records whether the account still has a temporary password that must be changed
+export function setMustChangePassword(value) {
+  localStorage.setItem(KEYS.mustChangePassword, value ? "true" : "");
 }
 
 // Landing page for the session's role, or null if the account cannot use the app

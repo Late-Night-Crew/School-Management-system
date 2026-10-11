@@ -8,6 +8,7 @@ import (
 	"nsms/common"
 	"nsms/pkg/problemdetail"
 	"nsms/schema"
+	"nsms/services"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -43,13 +44,43 @@ func (api *API) middleware() {
 	}))
 }
 
-// Protected protect routes
-func RequireAuthentication(signingKey []byte) fiber.Handler {
+// RequireAuthentication accepts a request with a valid token whose account is still
+// active. A deactivated account is refused at once, even with an unexpired token.
+// While an account has a temporary password, only reading the account and changing
+// the password are allowed.
+func RequireAuthentication(signingKey []byte, accounts services.AccountService) fiber.Handler {
 	return jwtware.New(jwtware.Config{
 		TokenLookup:  "header:Authorization,query:_auth,cookie:_qatarina_auth",
 		SigningKey:   signingKey,
 		ErrorHandler: jwtError,
+		SuccessHandler: func(ctx *fiber.Ctx) error {
+			userID, err := common.GetUserIDFromCtx(ctx)
+			if err != nil {
+				return problemdetail.Unauthorized(ctx, "Missing user in token")
+			}
+			active, mustChangePassword, err := accounts.AuthState(ctx.Context(), userID)
+			if err != nil {
+				return problemdetail.ServerErrorProblem(ctx, "Failed to check your account")
+			}
+			if !active {
+				return problemdetail.Unauthorized(ctx, "This account has been deactivated")
+			}
+			if mustChangePassword && !allowedWithTemporaryPassword(ctx) {
+				return ctx.Status(fiber.StatusForbidden).JSON(problemdetail.ProblemDetail{
+					Type:   "problemdetail.example.com/http/types/PasswordChangeRequired",
+					Title:  "Password change required",
+					Detail: services.ErrPasswordChangeOnly.Error(),
+				})
+			}
+			return ctx.Next()
+		},
 	})
+}
+
+func allowedWithTemporaryPassword(ctx *fiber.Ctx) bool {
+	path := ctx.Path()
+	return (ctx.Method() == fiber.MethodGet && path == "/account/me") ||
+		(ctx.Method() == fiber.MethodPost && path == "/account/password")
 }
 
 func jwtError(c *fiber.Ctx, err error) error {

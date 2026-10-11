@@ -35,6 +35,12 @@ export default function LoginPage() {
           return;
         }
 
+        // A temporary password must be replaced before anything else
+        if (getSession().mustChangePassword) {
+          navigate("/change-password");
+          return;
+        }
+
         setAlert({ tone: "green", message: "Login successful! Redirecting..." });
 
         // Redirect to the role's home page

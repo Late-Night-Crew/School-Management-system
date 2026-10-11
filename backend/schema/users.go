@@ -56,6 +56,10 @@ type LoginResponse struct {
 	IsSuperAdmin bool   `json:"is_super_admin"`
 	Token       string `json:"token"`
 	ExpiresAt   int64  `json:"expires_at"`
+
+	// MustChangePassword is true after an admin created the account or reset its
+	// password; every request except changing the password is refused until then.
+	MustChangePassword bool `json:"must_change_password"`
 }
 
 // ChangePasswordRequest request to change a password

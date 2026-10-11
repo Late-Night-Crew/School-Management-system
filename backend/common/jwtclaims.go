@@ -7,6 +7,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v4"
+	"nsms/schema"
 )
 
 var ErrSchoolIDMissing = errors.New("school_id claim missing")
@@ -89,4 +90,30 @@ func idClaimFromCtx(ctx *fiber.Ctx, name string, errMissing error) (int64, error
 	default:
 		return 0, fmt.Errorf("invalid %s claim type", name)
 	}
+}
+
+// GetActorFromCtx returns the signed-in user with the region or school they act for.
+func GetActorFromCtx(ctx *fiber.Ctx) (schema.Actor, error) {
+	role, err := GetRoleFromCtx(ctx)
+	if err != nil {
+		return schema.Actor{}, err
+	}
+	userID, err := GetUserIDFromCtx(ctx)
+	if err != nil {
+		return schema.Actor{}, err
+	}
+	actor := schema.Actor{UserID: userID, Role: role}
+	switch role {
+	case schema.RoleSuperAdmin:
+	case schema.RoleRegionalAdmin:
+		actor.RegionID, err = GetRegionIDFromCtx(ctx)
+	case schema.RoleSchoolManager:
+		actor.SchoolID, err = GetSchoolIDFromCtx(ctx)
+	default:
+		err = errors.New("unknown role")
+	}
+	if err == nil && actor.Party().Type != schema.PartySuperAdmin && actor.Party().ID < 1 {
+		err = errors.New("missing region or school in token")
+	}
+	return actor, err
 }

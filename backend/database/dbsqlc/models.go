@@ -19,6 +19,38 @@ type AcademicYear struct {
 	UpdatedAt sql.NullTime
 }
 
+type AuditLog struct {
+	ID            int32
+	EntityType    string
+	EntityID      sql.NullInt32
+	Action        string
+	ActorUserID   sql.NullInt32
+	ActorName     sql.NullString
+	ActorRole     sql.NullString
+	ActorSchoolID sql.NullInt32
+	Note          sql.NullString
+	CreatedAt     time.Time
+}
+
+type Conversation struct {
+	ID               int32
+	Subject          string
+	CreatedByUserID  sql.NullInt32
+	CreatedAt        time.Time
+	LastMessageAt    time.Time
+	ReportedAt       sql.NullTime
+	ReportedByUserID sql.NullInt32
+	ReportedByName   sql.NullString
+	ReportReason     sql.NullString
+}
+
+type ConversationParticipant struct {
+	ConversationID int32
+	PartyType      string
+	PartyID        int32
+	LastReadAt     sql.NullTime
+}
+
 type District struct {
 	ID       int32
 	Name     string
@@ -33,16 +65,68 @@ type ExamResult struct {
 	MscePassRate   sql.NullString
 }
 
+type Message struct {
+	ID              int32
+	ConversationID  int32
+	SenderUserID    sql.NullInt32
+	SenderName      sql.NullString
+	SenderRole      sql.NullString
+	SenderPartyType string
+	SenderPartyID   int32
+	Body            string
+	CreatedAt       time.Time
+}
+
+type Notice struct {
+	ID              int32
+	Kind            string
+	SenderUserID    sql.NullInt32
+	SenderName      sql.NullString
+	SenderRole      sql.NullString
+	SenderPartyType string
+	SenderPartyID   int32
+	Title           string
+	Body            string
+	Priority        string
+	DueDate         sql.NullTime
+	AudienceType    string
+	AudienceID      sql.NullInt32
+	ReminderOf      sql.NullInt32
+	WithdrawnAt     sql.NullTime
+	WithdrawnReason sql.NullString
+	CreatedAt       time.Time
+}
+
+type NoticeRecipient struct {
+	ID           int32
+	NoticeID     int32
+	PartyType    string
+	PartyID      int32
+	ReadAt       sql.NullTime
+	ReadByUserID sql.NullInt32
+	DoneAt       sql.NullTime
+	DoneByUserID sql.NullInt32
+}
+
 type Region struct {
-	ID   int32
-	Name string
+	ID              int32
+	Name            string
+	OfficePhone     sql.NullString
+	OfficeEmail     sql.NullString
+	PostalAddress   sql.NullString
+	PhysicalAddress sql.NullString
 }
 
 type School struct {
-	ID           int32
-	Name         string
-	SchoolNumber string
-	DistrictID   int32
+	ID               int32
+	Name             string
+	SchoolNumber     string
+	DistrictID       int32
+	Phone            sql.NullString
+	Email            sql.NullString
+	PostalAddress    sql.NullString
+	HeadTeacherName  sql.NullString
+	HeadTeacherPhone sql.NullString
 }
 
 type Student struct {
@@ -113,19 +197,22 @@ type Transfer struct {
 }
 
 type User struct {
-	ID           int32
-	Name         string
-	DisplayName  string
-	Email        string
-	Password     string
-	Role         string
-	RegionID     sql.NullInt32
-	DistrictID   sql.NullInt32
-	SchoolID     sql.NullInt32
-	LastLoginAt  sql.NullTime
-	IsSuperAdmin sql.NullBool
-	IsActivated  sql.NullBool
-	CreatedAt    sql.NullTime
-	UpdatedAt    sql.NullTime
-	DeletedAt    sql.NullTime
+	ID                 int32
+	Name               string
+	DisplayName        string
+	Email              string
+	Password           string
+	Role               string
+	RegionID           sql.NullInt32
+	DistrictID         sql.NullInt32
+	SchoolID           sql.NullInt32
+	LastLoginAt        sql.NullTime
+	IsSuperAdmin       sql.NullBool
+	IsActivated        sql.NullBool
+	CreatedAt          sql.NullTime
+	UpdatedAt          sql.NullTime
+	DeletedAt          sql.NullTime
+	Phone              sql.NullString
+	Whatsapp           sql.NullString
+	MustChangePassword bool
 }

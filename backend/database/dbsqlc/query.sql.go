@@ -31,15 +31,26 @@ moved AS (
     FROM approved
     WHERE students.id = approved.student_id
     RETURNING students.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'transfer', approved.id, 'Approved', u.id, u.name, u.role, u.school_id, $2::text
+    FROM approved LEFT JOIN users u ON u.id = $3::int
 )
 SELECT approved.id FROM approved
 `
 
+type ApproveTransferParams struct {
+	TransferID  int32
+	Note        sql.NullString
+	ActorUserID int32
+}
+
 // Approval marks the transfer Accepted and moves the student in one statement.
 // The student is only moved when the transfer row actually matched (still Pending,
 // and owned by the receiving school when school_id is given).
-func (q *Queries) ApproveTransfer(ctx context.Context, transferID int32) (int32, error) {
-	row := q.db.QueryRowContext(ctx, approveTransfer, transferID)
+func (q *Queries) ApproveTransfer(ctx context.Context, arg ApproveTransferParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, approveTransfer, arg.TransferID, arg.Note, arg.ActorUserID)
 	var id int32
 	err := row.Scan(&id)
 	return id, err
@@ -63,20 +74,107 @@ moved AS (
     FROM approved
     WHERE students.id = approved.student_id
     RETURNING students.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'transfer', approved.id, 'Approved', u.id, u.name, u.role, u.school_id, $3::text
+    FROM approved LEFT JOIN users u ON u.id = $4::int
 )
 SELECT approved.id FROM approved
 `
 
 type ApproveTransferForSchoolParams struct {
-	TransferID int32
-	SchoolID   int32
+	TransferID  int32
+	SchoolID    int32
+	Note        sql.NullString
+	ActorUserID int32
 }
 
 func (q *Queries) ApproveTransferForSchool(ctx context.Context, arg ApproveTransferForSchoolParams) (int32, error) {
-	row := q.db.QueryRowContext(ctx, approveTransferForSchool, arg.TransferID, arg.SchoolID)
+	row := q.db.QueryRowContext(ctx, approveTransferForSchool,
+		arg.TransferID,
+		arg.SchoolID,
+		arg.Note,
+		arg.ActorUserID,
+	)
 	var id int32
 	err := row.Scan(&id)
 	return id, err
+}
+
+const changeOwnPassword = `-- name: ChangeOwnPassword :exec
+WITH changed AS (
+    UPDATE users
+    SET password = $1::text, must_change_password = FALSE, updated_at = CURRENT_TIMESTAMP
+    WHERE users.id = $2
+    RETURNING users.id, users.name, users.role, users.school_id
+)
+INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id)
+SELECT 'user', changed.id, 'PasswordChanged', changed.id, changed.name, changed.role, changed.school_id FROM changed
+`
+
+type ChangeOwnPasswordParams struct {
+	PasswordHash string
+	UserID       int32
+}
+
+func (q *Queries) ChangeOwnPassword(ctx context.Context, arg ChangeOwnPasswordParams) error {
+	_, err := q.db.ExecContext(ctx, changeOwnPassword, arg.PasswordHash, arg.UserID)
+	return err
+}
+
+const countActiveRegionalAdmins = `-- name: CountActiveRegionalAdmins :one
+SELECT COUNT(*) FROM users
+WHERE role = 'REGIONAL_ADMIN' AND region_id = $1 AND COALESCE(is_activated, FALSE)
+    AND deleted_at IS NULL AND id <> $2::int
+`
+
+type CountActiveRegionalAdminsParams struct {
+	RegionID  sql.NullInt32
+	ExcludeID int32
+}
+
+func (q *Queries) CountActiveRegionalAdmins(ctx context.Context, arg CountActiveRegionalAdminsParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countActiveRegionalAdmins, arg.RegionID, arg.ExcludeID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countNoticeAudience = `-- name: CountNoticeAudience :one
+
+SELECT (
+    (SELECT COUNT(*) FROM regions rg
+     WHERE $1::text = 'REGIONAL_ADMINS'
+        OR ($1::text = 'REGIONAL_ADMIN' AND rg.id = $2::int))
+    +
+    (SELECT COUNT(*) FROM schools sc JOIN districts d ON d.id = sc.district_id
+     WHERE $1::text = 'SCHOOLS_ALL'
+        OR ($1::text = 'SCHOOLS_IN_REGION' AND d.region_id = $2::int)
+        OR ($1::text = 'SCHOOLS_IN_DISTRICT' AND d.id = $2::int)
+        OR ($1::text = 'SCHOOL' AND sc.id = $2::int))
+)::int AS count
+`
+
+type CountNoticeAudienceParams struct {
+	AudienceType string
+	AudienceID   sql.NullInt32
+}
+
+// ============================================================================
+// Communications: notices (one-way, many recipients) and conversations (two-party).
+// A party is 'SUPER_ADMIN' (id 0), 'REGION' (regions.id) or 'SCHOOL' (schools.id).
+// Recipients of a notice are chosen by audience_type:
+//
+//	REGIONAL_ADMINS, REGIONAL_ADMIN (audience_id = region), SCHOOLS_ALL,
+//	SCHOOLS_IN_REGION (region), SCHOOLS_IN_DISTRICT (district), SCHOOL (school).
+//
+// ============================================================================
+func (q *Queries) CountNoticeAudience(ctx context.Context, arg CountNoticeAudienceParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, countNoticeAudience, arg.AudienceType, arg.AudienceID)
+	var count int32
+	err := row.Scan(&count)
+	return count, err
 }
 
 const countPendingTransfersForStudent = `-- name: CountPendingTransfersForStudent :one
@@ -87,6 +185,127 @@ WHERE student_id = $1 AND status = 'Pending'
 
 func (q *Queries) CountPendingTransfersForStudent(ctx context.Context, studentID int32) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countPendingTransfersForStudent, studentID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countRecentConversationsByUser = `-- name: CountRecentConversationsByUser :one
+SELECT COUNT(*) FROM conversations
+WHERE created_by_user_id = $1 AND created_at > CURRENT_TIMESTAMP - INTERVAL '1 hour'
+`
+
+func (q *Queries) CountRecentConversationsByUser(ctx context.Context, userID sql.NullInt32) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countRecentConversationsByUser, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countRecentMessagesByUser = `-- name: CountRecentMessagesByUser :one
+SELECT COUNT(*) FROM messages
+WHERE sender_user_id = $1 AND created_at > CURRENT_TIMESTAMP - INTERVAL '1 minute'
+`
+
+func (q *Queries) CountRecentMessagesByUser(ctx context.Context, userID sql.NullInt32) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countRecentMessagesByUser, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countRecentNoticesByUser = `-- name: CountRecentNoticesByUser :one
+SELECT COUNT(*) FROM notices
+WHERE sender_user_id = $1 AND created_at > CURRENT_TIMESTAMP - INTERVAL '1 hour'
+`
+
+func (q *Queries) CountRecentNoticesByUser(ctx context.Context, userID sql.NullInt32) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countRecentNoticesByUser, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countTransfersByStatusForAdmin = `-- name: CountTransfersByStatusForAdmin :many
+
+SELECT t.status, COUNT(*) AS count
+FROM
+    transfers t
+    JOIN students s ON s.id = t.student_id
+    JOIN schools fs ON fs.id = t.from_school
+    JOIN schools ts ON ts.id = t.to_school
+    JOIN districts fd ON fd.id = fs.district_id
+    JOIN districts td ON td.id = ts.district_id
+WHERE
+    ($1::int IS NULL OR fd.region_id = $1::int OR td.region_id = $1::int)
+    AND ($2::int IS NULL OR fs.district_id = $2::int OR ts.district_id = $2::int)
+    AND ($3::int IS NULL OR t.from_school = $3::int OR t.to_school = $3::int)
+    AND ($4::date IS NULL OR t.date_initiated >= $4::date)
+    AND ($5::date IS NULL OR t.date_initiated < $5::date + 1)
+    AND (
+        $6::text IS NULL
+        OR s.student_number ILIKE '%' || $6::text || '%'
+        OR (s.first_name || ' ' || s.last_name) ILIKE '%' || $6::text || '%'
+    )
+GROUP BY t.status
+`
+
+type CountTransfersByStatusForAdminParams struct {
+	RegionID   sql.NullInt32
+	DistrictID sql.NullInt32
+	SchoolID   sql.NullInt32
+	DateFrom   sql.NullTime
+	DateTo     sql.NullTime
+	Search     sql.NullString
+}
+
+type CountTransfersByStatusForAdminRow struct {
+	Status sql.NullString
+	Count  int64
+}
+
+// Per-status totals for the same filters as ListTransfersForAdmin, minus status.
+func (q *Queries) CountTransfersByStatusForAdmin(ctx context.Context, arg CountTransfersByStatusForAdminParams) ([]CountTransfersByStatusForAdminRow, error) {
+	rows, err := q.db.QueryContext(ctx, countTransfersByStatusForAdmin,
+		arg.RegionID,
+		arg.DistrictID,
+		arg.SchoolID,
+		arg.DateFrom,
+		arg.DateTo,
+		arg.Search,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountTransfersByStatusForAdminRow
+	for rows.Next() {
+		var i CountTransfersByStatusForAdminRow
+		if err := rows.Scan(&i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countUsersWithEmail = `-- name: CountUsersWithEmail :one
+SELECT COUNT(*) FROM users WHERE lower(email) = lower($1::text) AND id <> $2::int
+`
+
+type CountUsersWithEmailParams struct {
+	Email     string
+	ExcludeID int32
+}
+
+func (q *Queries) CountUsersWithEmail(ctx context.Context, arg CountUsersWithEmailParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countUsersWithEmail, arg.Email, arg.ExcludeID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -131,6 +350,135 @@ func (q *Queries) CreateAcademicYear(ctx context.Context, arg CreateAcademicYear
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const createAccount = `-- name: CreateAccount :one
+WITH created AS (
+    INSERT INTO users (
+        name, display_name, email, password, role, region_id, district_id, school_id,
+        phone, whatsapp, is_super_admin, is_activated, must_change_password
+    )
+    VALUES (
+        $1::text, $1::text, $2::text, $3::text,
+        $4::text, $5::int, $6::int, $7::int,
+        $8::text, $9::text, FALSE, TRUE, TRUE
+    )
+    RETURNING id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'user', created.id, 'Created', a.id, a.name, a.role, a.school_id, $10::text
+    FROM created LEFT JOIN users a ON a.id = $11::int
+)
+SELECT created.id FROM created
+`
+
+type CreateAccountParams struct {
+	Name         string
+	Email        string
+	PasswordHash string
+	Role         string
+	RegionID     sql.NullInt32
+	DistrictID   sql.NullInt32
+	SchoolID     sql.NullInt32
+	Phone        sql.NullString
+	Whatsapp     sql.NullString
+	Note         string
+	ActorUserID  int32
+}
+
+func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, createAccount,
+		arg.Name,
+		arg.Email,
+		arg.PasswordHash,
+		arg.Role,
+		arg.RegionID,
+		arg.DistrictID,
+		arg.SchoolID,
+		arg.Phone,
+		arg.Whatsapp,
+		arg.Note,
+		arg.ActorUserID,
+	)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
+
+const createAuditLog = `-- name: CreateAuditLog :exec
+INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+SELECT $1, $2::int, $3, u.id, u.name, u.role, u.school_id, $4::text
+FROM (SELECT 1) AS one LEFT JOIN users u ON u.id = $5::int
+`
+
+type CreateAuditLogParams struct {
+	EntityType  string
+	EntityID    sql.NullInt32
+	Action      string
+	Note        sql.NullString
+	ActorUserID int32
+}
+
+func (q *Queries) CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) error {
+	_, err := q.db.ExecContext(ctx, createAuditLog,
+		arg.EntityType,
+		arg.EntityID,
+		arg.Action,
+		arg.Note,
+		arg.ActorUserID,
+	)
+	return err
+}
+
+const createConversation = `-- name: CreateConversation :one
+
+WITH c AS (
+    INSERT INTO conversations (subject, created_by_user_id)
+    VALUES ($1::text, NULLIF($2::int, 0))
+    RETURNING id, created_at
+),
+parts AS (
+    INSERT INTO conversation_participants (conversation_id, party_type, party_id, last_read_at)
+    SELECT c.id, $3::text, $4::int, c.created_at FROM c
+    UNION ALL
+    SELECT c.id, $5::text, $6::int, NULL::timestamp FROM c
+    RETURNING 1
+),
+first_message AS (
+    INSERT INTO messages (conversation_id, sender_user_id, sender_name, sender_role, sender_party_type, sender_party_id, body, created_at)
+    SELECT c.id, u.id, u.name, u.role, $3::text, $4::int, $7::text, c.created_at
+    FROM c LEFT JOIN users u ON u.id = $2::int
+    RETURNING 1
+)
+SELECT c.id FROM c
+`
+
+type CreateConversationParams struct {
+	Subject       string
+	SenderUserID  int32
+	FromPartyType string
+	FromPartyID   int32
+	ToPartyType   string
+	ToPartyID     int32
+	Body          string
+}
+
+// Starts a conversation: the thread, both participants and the first message.
+// The sender has read their own message, so only the other party sees it as unread.
+func (q *Queries) CreateConversation(ctx context.Context, arg CreateConversationParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, createConversation,
+		arg.Subject,
+		arg.SenderUserID,
+		arg.FromPartyType,
+		arg.FromPartyID,
+		arg.ToPartyType,
+		arg.ToPartyID,
+		arg.Body,
+	)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
 }
 
 const createDistrict = `-- name: CreateDistrict :one
@@ -195,6 +543,126 @@ func (q *Queries) CreateExamResult(ctx context.Context, arg CreateExamResultPara
 	return i, err
 }
 
+const createMessage = `-- name: CreateMessage :one
+WITH m AS (
+    INSERT INTO messages (conversation_id, sender_user_id, sender_name, sender_role, sender_party_type, sender_party_id, body)
+    SELECT $1::int, u.id, u.name, u.role, $2::text, $3::int, $4::text
+    FROM (SELECT 1) AS one LEFT JOIN users u ON u.id = $5::int
+    RETURNING id, conversation_id, created_at
+),
+touched AS (
+    UPDATE conversations SET last_message_at = m.created_at
+    FROM m WHERE conversations.id = m.conversation_id
+    RETURNING conversations.id
+),
+seen AS (
+    UPDATE conversation_participants SET last_read_at = m.created_at
+    FROM m
+    WHERE conversation_participants.conversation_id = m.conversation_id
+        AND conversation_participants.party_type = $2::text
+        AND conversation_participants.party_id = $3::int
+    RETURNING conversation_participants.conversation_id
+)
+SELECT m.id FROM m
+`
+
+type CreateMessageParams struct {
+	ConversationID int32
+	PartyType      string
+	PartyID        int32
+	Body           string
+	SenderUserID   int32
+}
+
+func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, createMessage,
+		arg.ConversationID,
+		arg.PartyType,
+		arg.PartyID,
+		arg.Body,
+		arg.SenderUserID,
+	)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
+
+const createNotice = `-- name: CreateNotice :one
+
+WITH n AS (
+    INSERT INTO notices (
+        kind, sender_user_id, sender_name, sender_role, sender_party_type, sender_party_id,
+        title, body, priority, due_date, audience_type, audience_id
+    )
+    SELECT
+        'NOTICE', u.id, u.name, u.role, $1::text, $2::int,
+        $3::text, $4::text, $5::text, $6::date,
+        $7::text, $8::int
+    FROM (SELECT 1) AS one LEFT JOIN users u ON u.id = $9::int
+    RETURNING id
+),
+audience AS (
+    SELECT 'REGION'::text AS party_type, rg.id AS party_id
+    FROM regions rg
+    WHERE $7::text = 'REGIONAL_ADMINS'
+        OR ($7::text = 'REGIONAL_ADMIN' AND rg.id = $8::int)
+    UNION ALL
+    SELECT 'SCHOOL'::text, sc.id
+    FROM schools sc JOIN districts d ON d.id = sc.district_id
+    WHERE $7::text = 'SCHOOLS_ALL'
+        OR ($7::text = 'SCHOOLS_IN_REGION' AND d.region_id = $8::int)
+        OR ($7::text = 'SCHOOLS_IN_DISTRICT' AND d.id = $8::int)
+        OR ($7::text = 'SCHOOL' AND sc.id = $8::int)
+),
+recipients AS (
+    INSERT INTO notice_recipients (notice_id, party_type, party_id)
+    SELECT n.id, audience.party_type, audience.party_id FROM n CROSS JOIN audience
+    RETURNING id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'notice', n.id, 'Sent', u.id, u.name, u.role, u.school_id, $3::text
+    FROM n LEFT JOIN users u ON u.id = $9::int
+)
+SELECT n.id, (SELECT COUNT(*) FROM recipients)::int AS recipient_count FROM n
+`
+
+type CreateNoticeParams struct {
+	SenderPartyType string
+	SenderPartyID   int32
+	Title           string
+	Body            string
+	Priority        string
+	DueDate         sql.NullTime
+	AudienceType    string
+	AudienceID      sql.NullInt32
+	SenderUserID    int32
+}
+
+type CreateNoticeRow struct {
+	ID             int32
+	RecipientCount int32
+}
+
+// Sends a notice: the notice, one recipient row per region or school in the audience,
+// and the audit entry, all in one statement.
+func (q *Queries) CreateNotice(ctx context.Context, arg CreateNoticeParams) (CreateNoticeRow, error) {
+	row := q.db.QueryRowContext(ctx, createNotice,
+		arg.SenderPartyType,
+		arg.SenderPartyID,
+		arg.Title,
+		arg.Body,
+		arg.Priority,
+		arg.DueDate,
+		arg.AudienceType,
+		arg.AudienceID,
+		arg.SenderUserID,
+	)
+	var i CreateNoticeRow
+	err := row.Scan(&i.ID, &i.RecipientCount)
+	return i, err
+}
+
 const createRegion = `-- name: CreateRegion :one
 INSERT INTO
     regions (name)
@@ -203,10 +671,71 @@ VALUES
     name
 `
 
-func (q *Queries) CreateRegion(ctx context.Context, name string) (Region, error) {
+type CreateRegionRow struct {
+	ID   int32
+	Name string
+}
+
+func (q *Queries) CreateRegion(ctx context.Context, name string) (CreateRegionRow, error) {
 	row := q.db.QueryRowContext(ctx, createRegion, name)
-	var i Region
+	var i CreateRegionRow
 	err := row.Scan(&i.ID, &i.Name)
+	return i, err
+}
+
+const createReminderNotice = `-- name: CreateReminderNotice :one
+
+WITH original AS (
+    SELECT id, kind, sender_user_id, sender_name, sender_role, sender_party_type, sender_party_id, title, body, priority, due_date, audience_type, audience_id, reminder_of, withdrawn_at, withdrawn_reason, created_at FROM notices
+    WHERE notices.id = $1 AND notices.kind = 'NOTICE' AND notices.withdrawn_at IS NULL
+),
+pending AS (
+    SELECT r.party_type, r.party_id
+    FROM notice_recipients r JOIN original o ON o.id = r.notice_id
+    WHERE (o.due_date IS NOT NULL AND r.done_at IS NULL) OR (o.due_date IS NULL AND r.read_at IS NULL)
+),
+n AS (
+    INSERT INTO notices (
+        kind, sender_user_id, sender_name, sender_role, sender_party_type, sender_party_id,
+        title, body, priority, due_date, audience_type, reminder_of
+    )
+    SELECT
+        'NOTICE', u.id, u.name, u.role, o.sender_party_type, o.sender_party_id,
+        CASE WHEN o.title LIKE 'Reminder: %' THEN o.title ELSE 'Reminder: ' || o.title END,
+        o.body, o.priority, o.due_date, 'PENDING_RECIPIENTS', COALESCE(o.reminder_of, o.id)
+    FROM original o LEFT JOIN users u ON u.id = $2::int
+    WHERE EXISTS (SELECT 1 FROM pending)
+    RETURNING id
+),
+recipients AS (
+    INSERT INTO notice_recipients (notice_id, party_type, party_id)
+    SELECT n.id, pending.party_type, pending.party_id FROM n CROSS JOIN pending
+    RETURNING id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'notice', n.id, 'Reminded', u.id, u.name, u.role, u.school_id, 'Reminder of notice ' || $1::int
+    FROM n LEFT JOIN users u ON u.id = $2::int
+)
+SELECT n.id, (SELECT COUNT(*) FROM recipients)::int AS recipient_count FROM n
+`
+
+type CreateReminderNoticeParams struct {
+	NoticeID     int32
+	SenderUserID int32
+}
+
+type CreateReminderNoticeRow struct {
+	ID             int32
+	RecipientCount int32
+}
+
+// Sends the notice again to the recipients who have not acted on it: not marked done
+// when it has a due date, otherwise not read. Returns no row when nobody is pending.
+func (q *Queries) CreateReminderNotice(ctx context.Context, arg CreateReminderNoticeParams) (CreateReminderNoticeRow, error) {
+	row := q.db.QueryRowContext(ctx, createReminderNotice, arg.NoticeID, arg.SenderUserID)
+	var i CreateReminderNoticeRow
+	err := row.Scan(&i.ID, &i.RecipientCount)
 	return i, err
 }
 
@@ -440,18 +969,50 @@ func (q *Queries) CreateSubject(ctx context.Context, arg CreateSubjectParams) (S
 	return i, err
 }
 
-const createTransferRequest = `-- name: CreateTransferRequest :one
-INSERT INTO transfers (
-    student_id,
-    from_school,
-    to_school,
-    status,
-    date_initiated,
-    reason
+const createSystemNotice = `-- name: CreateSystemNotice :exec
+
+WITH n AS (
+    INSERT INTO notices (kind, sender_party_type, sender_party_id, title, body, audience_type, audience_id)
+    VALUES ('SYSTEM', 'SYSTEM', 0, $2::text, $3::text, 'SCHOOL', $1::int)
+    RETURNING id
 )
-VALUES
-    ($1, $2, $3, 'Pending', $4, $5)
-RETURNING id
+INSERT INTO notice_recipients (notice_id, party_type, party_id)
+SELECT n.id, 'SCHOOL', $1::int FROM n
+`
+
+type CreateSystemNoticeParams struct {
+	SchoolID int32
+	Title    string
+	Body     string
+}
+
+// An automatic notice to one school, e.g. about a transfer.
+func (q *Queries) CreateSystemNotice(ctx context.Context, arg CreateSystemNoticeParams) error {
+	_, err := q.db.ExecContext(ctx, createSystemNotice, arg.SchoolID, arg.Title, arg.Body)
+	return err
+}
+
+const createTransferRequest = `-- name: CreateTransferRequest :one
+
+WITH created AS (
+    INSERT INTO transfers (
+        student_id,
+        from_school,
+        to_school,
+        status,
+        date_initiated,
+        reason
+    )
+    VALUES
+        ($1, $2, $3, 'Pending', $4, $5)
+    RETURNING id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'transfer', created.id, 'Created', u.id, u.name, u.role, u.school_id, $6::text
+    FROM created LEFT JOIN users u ON u.id = $7::int
+)
+SELECT created.id FROM created
 `
 
 type CreateTransferRequestParams struct {
@@ -460,8 +1021,13 @@ type CreateTransferRequestParams struct {
 	ToSchool      int32
 	DateInitiated sql.NullTime
 	Reason        sql.NullString
+	Note          sql.NullString
+	ActorUserID   int32
 }
 
+// Every transfer action (create, approve, finalize, reject) also writes its audit_logs row in the same statement,
+// so a status change is never saved without its audit entry (or the reverse).
+// The actor's name, role and school are copied from users at the time of the action.
 func (q *Queries) CreateTransferRequest(ctx context.Context, arg CreateTransferRequestParams) (int32, error) {
 	row := q.db.QueryRowContext(ctx, createTransferRequest,
 		arg.StudentID,
@@ -469,6 +1035,8 @@ func (q *Queries) CreateTransferRequest(ctx context.Context, arg CreateTransferR
 		arg.ToSchool,
 		arg.DateInitiated,
 		arg.Reason,
+		arg.Note,
+		arg.ActorUserID,
 	)
 	var id int32
 	err := row.Scan(&id)
@@ -704,37 +1272,67 @@ func (q *Queries) DeleteUser(ctx context.Context, id int32) error {
 }
 
 const finalizeTransfer = `-- name: FinalizeTransfer :one
-UPDATE transfers
-SET status = 'Completed'
-WHERE
-    id = $1
-    AND status = 'Accepted'
-RETURNING id
+WITH finalized AS (
+    UPDATE transfers
+    SET status = 'Completed'
+    WHERE
+        transfers.id = $1
+        AND transfers.status = 'Accepted'
+    RETURNING transfers.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'transfer', finalized.id, 'Completed', u.id, u.name, u.role, u.school_id, $2::text
+    FROM finalized LEFT JOIN users u ON u.id = $3::int
+)
+SELECT finalized.id FROM finalized
 `
 
-func (q *Queries) FinalizeTransfer(ctx context.Context, id int32) (int32, error) {
-	row := q.db.QueryRowContext(ctx, finalizeTransfer, id)
+type FinalizeTransferParams struct {
+	TransferID  int32
+	Note        sql.NullString
+	ActorUserID int32
+}
+
+func (q *Queries) FinalizeTransfer(ctx context.Context, arg FinalizeTransferParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, finalizeTransfer, arg.TransferID, arg.Note, arg.ActorUserID)
+	var id int32
 	err := row.Scan(&id)
 	return id, err
 }
 
 const finalizeTransferForSchool = `-- name: FinalizeTransferForSchool :one
-UPDATE transfers
-SET status = 'Completed'
-WHERE
-    id = $1
-    AND from_school = $2
-    AND status = 'Accepted'
-RETURNING id
+WITH finalized AS (
+    UPDATE transfers
+    SET status = 'Completed'
+    WHERE
+        transfers.id = $1
+        AND transfers.from_school = $2
+        AND transfers.status = 'Accepted'
+    RETURNING transfers.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'transfer', finalized.id, 'Completed', u.id, u.name, u.role, u.school_id, $3::text
+    FROM finalized LEFT JOIN users u ON u.id = $4::int
+)
+SELECT finalized.id FROM finalized
 `
 
 type FinalizeTransferForSchoolParams struct {
-	TransferID int32
-	SchoolID   int32
+	TransferID  int32
+	SchoolID    int32
+	Note        sql.NullString
+	ActorUserID int32
 }
 
 func (q *Queries) FinalizeTransferForSchool(ctx context.Context, arg FinalizeTransferForSchoolParams) (int32, error) {
-	row := q.db.QueryRowContext(ctx, finalizeTransferForSchool, arg.TransferID, arg.SchoolID)
+	row := q.db.QueryRowContext(ctx, finalizeTransferForSchool,
+		arg.TransferID,
+		arg.SchoolID,
+		arg.Note,
+		arg.ActorUserID,
+	)
 	var id int32
 	err := row.Scan(&id)
 	return id, err
@@ -768,9 +1366,14 @@ WHERE
     id = $1
 `
 
-func (q *Queries) FindRegionById(ctx context.Context, id int32) (Region, error) {
+type FindRegionByIdRow struct {
+	ID   int32
+	Name string
+}
+
+func (q *Queries) FindRegionById(ctx context.Context, id int32) (FindRegionByIdRow, error) {
 	row := q.db.QueryRowContext(ctx, findRegionById, id)
-	var i Region
+	var i FindRegionByIdRow
 	err := row.Scan(&i.ID, &i.Name)
 	return i, err
 }
@@ -863,7 +1466,8 @@ SELECT
     district_id,
     school_id,
     password,
-    last_login_at
+    last_login_at,
+    must_change_password
 FROM
     users
 WHERE
@@ -873,15 +1477,16 @@ WHERE
 `
 
 type FindUserLoginByEmailRow struct {
-	ID          int32
-	DisplayName string
-	Email       string
-	Role        string
-	RegionID    sql.NullInt32
-	DistrictID  sql.NullInt32
-	SchoolID    sql.NullInt32
-	Password    string
-	LastLoginAt sql.NullTime
+	ID                 int32
+	DisplayName        string
+	Email              string
+	Role               string
+	RegionID           sql.NullInt32
+	DistrictID         sql.NullInt32
+	SchoolID           sql.NullInt32
+	Password           string
+	LastLoginAt        sql.NullTime
+	MustChangePassword bool
 }
 
 func (q *Queries) FindUserLoginByEmail(ctx context.Context, email string) (FindUserLoginByEmailRow, error) {
@@ -897,6 +1502,7 @@ func (q *Queries) FindUserLoginByEmail(ctx context.Context, email string) (FindU
 		&i.SchoolID,
 		&i.Password,
 		&i.LastLoginAt,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
@@ -929,6 +1535,181 @@ func (q *Queries) GetAcademicYearByID(ctx context.Context, id int32) (AcademicYe
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getAccount = `-- name: GetAccount :one
+SELECT
+    u.id,
+    u.name,
+    u.email,
+    u.role,
+    u.phone,
+    u.whatsapp,
+    COALESCE(sd.region_id, u.region_id)::int AS region_id,
+    COALESCE(rg.name, '')::text AS region_name,
+    u.school_id,
+    COALESCE(sc.name, '')::text AS school_name,
+    COALESCE(sc.school_number, '')::text AS school_number,
+    COALESCE(sd.name, '')::text AS district_name,
+    COALESCE(u.is_activated, FALSE)::bool AS active,
+    u.must_change_password,
+    u.last_login_at,
+    u.created_at
+FROM
+    users u
+    LEFT JOIN schools sc ON sc.id = u.school_id
+    LEFT JOIN districts sd ON sd.id = sc.district_id
+    LEFT JOIN regions rg ON rg.id = COALESCE(sd.region_id, u.region_id)
+WHERE u.id = $1 AND u.deleted_at IS NULL
+`
+
+type GetAccountRow struct {
+	ID                 int32
+	Name               string
+	Email              string
+	Role               string
+	Phone              sql.NullString
+	Whatsapp           sql.NullString
+	RegionID           int32
+	RegionName         string
+	SchoolID           sql.NullInt32
+	SchoolName         string
+	SchoolNumber       string
+	DistrictName       string
+	Active             bool
+	MustChangePassword bool
+	LastLoginAt        sql.NullTime
+	CreatedAt          sql.NullTime
+}
+
+func (q *Queries) GetAccount(ctx context.Context, userID int32) (GetAccountRow, error) {
+	row := q.db.QueryRowContext(ctx, getAccount, userID)
+	var i GetAccountRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.Role,
+		&i.Phone,
+		&i.Whatsapp,
+		&i.RegionID,
+		&i.RegionName,
+		&i.SchoolID,
+		&i.SchoolName,
+		&i.SchoolNumber,
+		&i.DistrictName,
+		&i.Active,
+		&i.MustChangePassword,
+		&i.LastLoginAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getAuthUserState = `-- name: GetAuthUserState :one
+
+
+SELECT
+    (COALESCE(is_activated, FALSE) AND deleted_at IS NULL)::bool AS active,
+    must_change_password
+FROM users
+WHERE id = $1
+`
+
+type GetAuthUserStateRow struct {
+	Active             bool
+	MustChangePassword bool
+}
+
+// ============================================================================
+// Accounts and contacts. Account changes write an audit_logs row (entity 'user')
+// in the same statement; office edits do the same for 'region' and 'school'.
+// ============================================================================
+// Checked on every authenticated request, so a deactivated account stops working at
+// once and a temporary password must be changed before anything else.
+func (q *Queries) GetAuthUserState(ctx context.Context, userID int32) (GetAuthUserStateRow, error) {
+	row := q.db.QueryRowContext(ctx, getAuthUserState, userID)
+	var i GetAuthUserStateRow
+	err := row.Scan(&i.Active, &i.MustChangePassword)
+	return i, err
+}
+
+const getCommsSummary = `-- name: GetCommsSummary :one
+SELECT
+    (SELECT COUNT(*) FROM notice_recipients r JOIN notices n ON n.id = r.notice_id
+     WHERE r.party_type = $1::text AND r.party_id = $2::int
+        AND r.read_at IS NULL AND n.withdrawn_at IS NULL) AS unread_notices,
+    (SELECT COUNT(*) FROM notice_recipients r JOIN notices n ON n.id = r.notice_id
+     WHERE r.party_type = $1::text AND r.party_id = $2::int
+        AND n.due_date IS NOT NULL AND r.done_at IS NULL AND n.withdrawn_at IS NULL) AS open_tasks,
+    (SELECT COUNT(*) FROM conversation_participants p
+     WHERE p.party_type = $1::text AND p.party_id = $2::int
+        AND EXISTS (
+            SELECT 1 FROM messages m
+            WHERE m.conversation_id = p.conversation_id
+                AND NOT (m.sender_party_type = p.party_type AND m.sender_party_id = p.party_id)
+                AND m.created_at > COALESCE(p.last_read_at, '-infinity'::timestamp)
+        )) AS unread_conversations
+`
+
+type GetCommsSummaryParams struct {
+	PartyType string
+	PartyID   int32
+}
+
+type GetCommsSummaryRow struct {
+	UnreadNotices       int64
+	OpenTasks           int64
+	UnreadConversations int64
+}
+
+func (q *Queries) GetCommsSummary(ctx context.Context, arg GetCommsSummaryParams) (GetCommsSummaryRow, error) {
+	row := q.db.QueryRowContext(ctx, getCommsSummary, arg.PartyType, arg.PartyID)
+	var i GetCommsSummaryRow
+	err := row.Scan(&i.UnreadNotices, &i.OpenTasks, &i.UnreadConversations)
+	return i, err
+}
+
+const getConversation = `-- name: GetConversation :one
+SELECT id, subject, created_at, last_message_at, reported_at, reported_by_name, report_reason
+FROM conversations
+WHERE id = $1
+`
+
+type GetConversationRow struct {
+	ID             int32
+	Subject        string
+	CreatedAt      time.Time
+	LastMessageAt  time.Time
+	ReportedAt     sql.NullTime
+	ReportedByName sql.NullString
+	ReportReason   sql.NullString
+}
+
+func (q *Queries) GetConversation(ctx context.Context, conversationID int32) (GetConversationRow, error) {
+	row := q.db.QueryRowContext(ctx, getConversation, conversationID)
+	var i GetConversationRow
+	err := row.Scan(
+		&i.ID,
+		&i.Subject,
+		&i.CreatedAt,
+		&i.LastMessageAt,
+		&i.ReportedAt,
+		&i.ReportedByName,
+		&i.ReportReason,
+	)
+	return i, err
+}
+
+const getDistrictRegionID = `-- name: GetDistrictRegionID :one
+SELECT region_id FROM districts WHERE id = $1
+`
+
+func (q *Queries) GetDistrictRegionID(ctx context.Context, districtID int32) (int32, error) {
+	row := q.db.QueryRowContext(ctx, getDistrictRegionID, districtID)
+	var region_id int32
+	err := row.Scan(&region_id)
+	return region_id, err
 }
 
 const getExamResultBySchoolIDAndAcademicYear = `-- name: GetExamResultBySchoolIDAndAcademicYear :one
@@ -974,6 +1755,40 @@ func (q *Queries) GetIncomingTransferCountBySchoolID(ctx context.Context, toScho
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const getNoticeForSender = `-- name: GetNoticeForSender :one
+SELECT id, title, due_date, withdrawn_at
+FROM notices
+WHERE id = $1
+    AND kind = 'NOTICE'
+    AND sender_party_type = $2
+    AND sender_party_id = $3
+`
+
+type GetNoticeForSenderParams struct {
+	NoticeID        int32
+	SenderPartyType string
+	SenderPartyID   int32
+}
+
+type GetNoticeForSenderRow struct {
+	ID          int32
+	Title       string
+	DueDate     sql.NullTime
+	WithdrawnAt sql.NullTime
+}
+
+func (q *Queries) GetNoticeForSender(ctx context.Context, arg GetNoticeForSenderParams) (GetNoticeForSenderRow, error) {
+	row := q.db.QueryRowContext(ctx, getNoticeForSender, arg.NoticeID, arg.SenderPartyType, arg.SenderPartyID)
+	var i GetNoticeForSenderRow
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.DueDate,
+		&i.WithdrawnAt,
+	)
+	return i, err
 }
 
 const getOutgoingTransferCountBySchoolID = `-- name: GetOutgoingTransferCountBySchoolID :one
@@ -1163,6 +1978,17 @@ func (q *Queries) GetRegionDistrictSummary(ctx context.Context, regionID int32) 
 	return items, nil
 }
 
+const getRegionName = `-- name: GetRegionName :one
+SELECT name FROM regions WHERE id = $1
+`
+
+func (q *Queries) GetRegionName(ctx context.Context, regionID int32) (string, error) {
+	row := q.db.QueryRowContext(ctx, getRegionName, regionID)
+	var name string
+	err := row.Scan(&name)
+	return name, err
+}
+
 const getSchoolDashboardStats = `-- name: GetSchoolDashboardStats :one
 SELECT
     (SELECT COUNT(*) FROM students s WHERE s.school_id = $1) AS student_count,
@@ -1203,6 +2029,17 @@ func (q *Queries) GetSchoolDashboardStats(ctx context.Context, schoolID int32) (
 		&i.ExamResultCount,
 	)
 	return i, err
+}
+
+const getSchoolRegionID = `-- name: GetSchoolRegionID :one
+SELECT d.region_id FROM schools sc JOIN districts d ON d.id = sc.district_id WHERE sc.id = $1
+`
+
+func (q *Queries) GetSchoolRegionID(ctx context.Context, schoolID int32) (int32, error) {
+	row := q.db.QueryRowContext(ctx, getSchoolRegionID, schoolID)
+	var region_id int32
+	err := row.Scan(&region_id)
+	return region_id, err
 }
 
 const getSchoolReport = `-- name: GetSchoolReport :many
@@ -1300,6 +2137,31 @@ func (q *Queries) GetSchoolReport(ctx context.Context, arg GetSchoolReportParams
 		return nil, err
 	}
 	return items, nil
+}
+
+const getSchoolScope = `-- name: GetSchoolScope :one
+SELECT sc.id, sc.name, sc.district_id, d.region_id
+FROM schools sc JOIN districts d ON d.id = sc.district_id
+WHERE sc.id = $1
+`
+
+type GetSchoolScopeRow struct {
+	ID         int32
+	Name       string
+	DistrictID int32
+	RegionID   int32
+}
+
+func (q *Queries) GetSchoolScope(ctx context.Context, schoolID int32) (GetSchoolScopeRow, error) {
+	row := q.db.QueryRowContext(ctx, getSchoolScope, schoolID)
+	var i GetSchoolScopeRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.DistrictID,
+		&i.RegionID,
+	)
+	return i, err
 }
 
 const getStudentByID = `-- name: GetStudentByID :one
@@ -1768,6 +2630,17 @@ func (q *Queries) GetTransfersByToSchoolID(ctx context.Context, toSchool int32) 
 	return items, nil
 }
 
+const getUserPassword = `-- name: GetUserPassword :one
+SELECT password FROM users WHERE id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) GetUserPassword(ctx context.Context, userID int32) (string, error) {
+	row := q.db.QueryRowContext(ctx, getUserPassword, userID)
+	var password string
+	err := row.Scan(&password)
+	return password, err
+}
+
 const listAcademicYears = `-- name: ListAcademicYears :many
 SELECT
     id,
@@ -1800,6 +2673,581 @@ func (q *Queries) ListAcademicYears(ctx context.Context) ([]AcademicYear, error)
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAccounts = `-- name: ListAccounts :many
+
+SELECT
+    u.id,
+    u.name,
+    u.email,
+    u.role,
+    u.phone,
+    u.whatsapp,
+    COALESCE(sd.region_id, u.region_id)::int AS region_id,
+    COALESCE(rg.name, '')::text AS region_name,
+    u.school_id,
+    COALESCE(sc.name, '')::text AS school_name,
+    COALESCE(sc.school_number, '')::text AS school_number,
+    COALESCE(sd.name, '')::text AS district_name,
+    COALESCE(u.is_activated, FALSE)::bool AS active,
+    u.must_change_password,
+    u.last_login_at,
+    u.created_at
+FROM
+    users u
+    LEFT JOIN schools sc ON sc.id = u.school_id
+    LEFT JOIN districts sd ON sd.id = sc.district_id
+    LEFT JOIN regions rg ON rg.id = COALESCE(sd.region_id, u.region_id)
+WHERE
+    u.deleted_at IS NULL
+    AND u.role <> 'SUPER_ADMIN'
+    AND ($1::text IS NULL OR u.role = $1::text)
+    AND ($2::int IS NULL OR COALESCE(sd.region_id, u.region_id) = $2::int)
+ORDER BY rg.name, u.role, sc.name, u.name
+`
+
+type ListAccountsParams struct {
+	Role     sql.NullString
+	RegionID sql.NullInt32
+}
+
+type ListAccountsRow struct {
+	ID                 int32
+	Name               string
+	Email              string
+	Role               string
+	Phone              sql.NullString
+	Whatsapp           sql.NullString
+	RegionID           int32
+	RegionName         string
+	SchoolID           sql.NullInt32
+	SchoolName         string
+	SchoolNumber       string
+	DistrictName       string
+	Active             bool
+	MustChangePassword bool
+	LastLoginAt        sql.NullTime
+	CreatedAt          sql.NullTime
+}
+
+// Regional admins and school managers (never the super admin). region_id limits the
+// list to accounts in that region: its regional admin and its schools' managers.
+func (q *Queries) ListAccounts(ctx context.Context, arg ListAccountsParams) ([]ListAccountsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAccounts, arg.Role, arg.RegionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAccountsRow
+	for rows.Next() {
+		var i ListAccountsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Email,
+			&i.Role,
+			&i.Phone,
+			&i.Whatsapp,
+			&i.RegionID,
+			&i.RegionName,
+			&i.SchoolID,
+			&i.SchoolName,
+			&i.SchoolNumber,
+			&i.DistrictName,
+			&i.Active,
+			&i.MustChangePassword,
+			&i.LastLoginAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditLogsForEntity = `-- name: ListAuditLogsForEntity :many
+SELECT
+    a.id,
+    a.action,
+    a.actor_user_id,
+    a.actor_name,
+    a.actor_role,
+    sc.name AS actor_school_name,
+    a.note,
+    a.created_at
+FROM
+    audit_logs a
+    LEFT JOIN schools sc ON sc.id = a.actor_school_id
+WHERE
+    a.entity_type = $1
+    AND a.entity_id = $2
+ORDER BY a.created_at, a.id
+`
+
+type ListAuditLogsForEntityParams struct {
+	EntityType string
+	EntityID   sql.NullInt32
+}
+
+type ListAuditLogsForEntityRow struct {
+	ID              int32
+	Action          string
+	ActorUserID     sql.NullInt32
+	ActorName       sql.NullString
+	ActorRole       sql.NullString
+	ActorSchoolName sql.NullString
+	Note            sql.NullString
+	CreatedAt       time.Time
+}
+
+func (q *Queries) ListAuditLogsForEntity(ctx context.Context, arg ListAuditLogsForEntityParams) ([]ListAuditLogsForEntityRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAuditLogsForEntity, arg.EntityType, arg.EntityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAuditLogsForEntityRow
+	for rows.Next() {
+		var i ListAuditLogsForEntityRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Action,
+			&i.ActorUserID,
+			&i.ActorName,
+			&i.ActorRole,
+			&i.ActorSchoolName,
+			&i.Note,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listContactRegions = `-- name: ListContactRegions :many
+SELECT id, name FROM regions ORDER BY name
+`
+
+type ListContactRegionsRow struct {
+	ID   int32
+	Name string
+}
+
+func (q *Queries) ListContactRegions(ctx context.Context) ([]ListContactRegionsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listContactRegions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListContactRegionsRow
+	for rows.Next() {
+		var i ListContactRegionsRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listContactSchools = `-- name: ListContactSchools :many
+SELECT sc.id, sc.name, d.name AS district_name, d.region_id, rg.name AS region_name
+FROM schools sc
+    JOIN districts d ON d.id = sc.district_id
+    JOIN regions rg ON rg.id = d.region_id
+ORDER BY rg.name, d.name, sc.name
+`
+
+type ListContactSchoolsRow struct {
+	ID           int32
+	Name         string
+	DistrictName string
+	RegionID     int32
+	RegionName   string
+}
+
+func (q *Queries) ListContactSchools(ctx context.Context) ([]ListContactSchoolsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listContactSchools)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListContactSchoolsRow
+	for rows.Next() {
+		var i ListContactSchoolsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.DistrictName,
+			&i.RegionID,
+			&i.RegionName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listConversationParticipants = `-- name: ListConversationParticipants :many
+SELECT
+    p.conversation_id,
+    p.party_type,
+    p.party_id,
+    COALESCE(CASE p.party_type
+        WHEN 'SUPER_ADMIN' THEN 'Ministry Headquarters'
+        WHEN 'REGION' THEN rg.name || ' Regional Office'
+        WHEN 'SCHOOL' THEN sc.name
+    END, 'Unknown')::text AS label
+FROM
+    conversation_participants p
+    LEFT JOIN regions rg ON p.party_type = 'REGION' AND rg.id = p.party_id
+    LEFT JOIN schools sc ON p.party_type = 'SCHOOL' AND sc.id = p.party_id
+WHERE p.conversation_id = ANY($1::int[])
+ORDER BY p.conversation_id, p.party_type, p.party_id
+`
+
+type ListConversationParticipantsRow struct {
+	ConversationID int32
+	PartyType      string
+	PartyID        int32
+	Label          string
+}
+
+func (q *Queries) ListConversationParticipants(ctx context.Context, conversationIds []int32) ([]ListConversationParticipantsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listConversationParticipants, pq.Array(conversationIds))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListConversationParticipantsRow
+	for rows.Next() {
+		var i ListConversationParticipantsRow
+		if err := rows.Scan(
+			&i.ConversationID,
+			&i.PartyType,
+			&i.PartyID,
+			&i.Label,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listConversationsForParty = `-- name: ListConversationsForParty :many
+SELECT
+    c.id,
+    c.subject,
+    c.last_message_at,
+    c.reported_at,
+    other.party_type AS other_party_type,
+    other.party_id AS other_party_id,
+    COALESCE(CASE other.party_type
+        WHEN 'SUPER_ADMIN' THEN 'Ministry Headquarters'
+        WHEN 'REGION' THEN rg.name || ' Regional Office'
+        WHEN 'SCHOOL' THEN sc.name
+    END, 'Unknown')::text AS other_label,
+    lm.body AS last_body,
+    lm.sender_name AS last_sender_name,
+    COALESCE(lm.sender_party_type = me.party_type AND lm.sender_party_id = me.party_id, FALSE)::bool AS last_from_me,
+    EXISTS (
+        SELECT 1 FROM messages m
+        WHERE m.conversation_id = c.id
+            AND NOT (m.sender_party_type = me.party_type AND m.sender_party_id = me.party_id)
+            AND m.created_at > COALESCE(me.last_read_at, '-infinity'::timestamp)
+    ) AS unread
+FROM
+    conversation_participants me
+    JOIN conversations c ON c.id = me.conversation_id
+    JOIN conversation_participants other
+        ON other.conversation_id = c.id AND NOT (other.party_type = me.party_type AND other.party_id = me.party_id)
+    LEFT JOIN regions rg ON other.party_type = 'REGION' AND rg.id = other.party_id
+    LEFT JOIN schools sc ON other.party_type = 'SCHOOL' AND sc.id = other.party_id
+    LEFT JOIN messages lm ON lm.id = (
+        SELECT m.id FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC, m.id DESC LIMIT 1
+    )
+WHERE me.party_type = $1 AND me.party_id = $2
+ORDER BY c.last_message_at DESC, c.id DESC
+LIMIT 200
+`
+
+type ListConversationsForPartyParams struct {
+	PartyType string
+	PartyID   int32
+}
+
+type ListConversationsForPartyRow struct {
+	ID             int32
+	Subject        string
+	LastMessageAt  time.Time
+	ReportedAt     sql.NullTime
+	OtherPartyType string
+	OtherPartyID   int32
+	OtherLabel     string
+	LastBody       sql.NullString
+	LastSenderName sql.NullString
+	LastFromMe     bool
+	Unread         bool
+}
+
+func (q *Queries) ListConversationsForParty(ctx context.Context, arg ListConversationsForPartyParams) ([]ListConversationsForPartyRow, error) {
+	rows, err := q.db.QueryContext(ctx, listConversationsForParty, arg.PartyType, arg.PartyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListConversationsForPartyRow
+	for rows.Next() {
+		var i ListConversationsForPartyRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Subject,
+			&i.LastMessageAt,
+			&i.ReportedAt,
+			&i.OtherPartyType,
+			&i.OtherPartyID,
+			&i.OtherLabel,
+			&i.LastBody,
+			&i.LastSenderName,
+			&i.LastFromMe,
+			&i.Unread,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDirectoryPeople = `-- name: ListDirectoryPeople :many
+SELECT id, name, email, role, phone, whatsapp, school_id
+FROM users
+WHERE role IN ('SUPER_ADMIN', 'SCHOOL_MANAGER') AND COALESCE(is_activated, FALSE) AND deleted_at IS NULL
+ORDER BY name
+`
+
+type ListDirectoryPeopleRow struct {
+	ID       int32
+	Name     string
+	Email    string
+	Role     string
+	Phone    sql.NullString
+	Whatsapp sql.NullString
+	SchoolID sql.NullInt32
+}
+
+func (q *Queries) ListDirectoryPeople(ctx context.Context) ([]ListDirectoryPeopleRow, error) {
+	rows, err := q.db.QueryContext(ctx, listDirectoryPeople)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDirectoryPeopleRow
+	for rows.Next() {
+		var i ListDirectoryPeopleRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Email,
+			&i.Role,
+			&i.Phone,
+			&i.Whatsapp,
+			&i.SchoolID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDirectoryRegions = `-- name: ListDirectoryRegions :many
+SELECT
+    rg.id,
+    rg.name,
+    rg.office_phone,
+    rg.office_email,
+    rg.postal_address,
+    rg.physical_address,
+    a.id AS admin_id,
+    a.name AS admin_name,
+    COALESCE(a.email, '')::text AS admin_email,
+    a.phone AS admin_phone,
+    a.whatsapp AS admin_whatsapp
+FROM
+    regions rg
+    LEFT JOIN users a ON a.region_id = rg.id AND a.role = 'REGIONAL_ADMIN'
+        AND COALESCE(a.is_activated, FALSE) AND a.deleted_at IS NULL
+ORDER BY rg.name
+`
+
+type ListDirectoryRegionsRow struct {
+	ID              int32
+	Name            string
+	OfficePhone     sql.NullString
+	OfficeEmail     sql.NullString
+	PostalAddress   sql.NullString
+	PhysicalAddress sql.NullString
+	AdminID         sql.NullInt32
+	AdminName       sql.NullString
+	AdminEmail      string
+	AdminPhone      sql.NullString
+	AdminWhatsapp   sql.NullString
+}
+
+func (q *Queries) ListDirectoryRegions(ctx context.Context) ([]ListDirectoryRegionsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listDirectoryRegions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDirectoryRegionsRow
+	for rows.Next() {
+		var i ListDirectoryRegionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.OfficePhone,
+			&i.OfficeEmail,
+			&i.PostalAddress,
+			&i.PhysicalAddress,
+			&i.AdminID,
+			&i.AdminName,
+			&i.AdminEmail,
+			&i.AdminPhone,
+			&i.AdminWhatsapp,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDirectorySchools = `-- name: ListDirectorySchools :many
+SELECT
+    sc.id,
+    sc.name,
+    sc.school_number,
+    d.id AS district_id,
+    d.name AS district_name,
+    rg.id AS region_id,
+    rg.name AS region_name,
+    sc.phone,
+    sc.email,
+    sc.postal_address,
+    sc.head_teacher_name,
+    sc.head_teacher_phone
+FROM
+    schools sc
+    JOIN districts d ON d.id = sc.district_id
+    JOIN regions rg ON rg.id = d.region_id
+ORDER BY rg.name, d.name, sc.name
+`
+
+type ListDirectorySchoolsRow struct {
+	ID               int32
+	Name             string
+	SchoolNumber     string
+	DistrictID       int32
+	DistrictName     string
+	RegionID         int32
+	RegionName       string
+	Phone            sql.NullString
+	Email            sql.NullString
+	PostalAddress    sql.NullString
+	HeadTeacherName  sql.NullString
+	HeadTeacherPhone sql.NullString
+}
+
+func (q *Queries) ListDirectorySchools(ctx context.Context) ([]ListDirectorySchoolsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listDirectorySchools)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDirectorySchoolsRow
+	for rows.Next() {
+		var i ListDirectorySchoolsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.SchoolNumber,
+			&i.DistrictID,
+			&i.DistrictName,
+			&i.RegionID,
+			&i.RegionName,
+			&i.Phone,
+			&i.Email,
+			&i.PostalAddress,
+			&i.HeadTeacherName,
+			&i.HeadTeacherPhone,
 		); err != nil {
 			return nil, err
 		}
@@ -2004,6 +3452,207 @@ func (q *Queries) ListMarksForSchool(ctx context.Context, arg ListMarksForSchool
 	return items, nil
 }
 
+const listMessages = `-- name: ListMessages :many
+SELECT id, sender_name, sender_role, sender_party_type, sender_party_id, body, created_at
+FROM messages
+WHERE conversation_id = $1
+ORDER BY created_at, id
+`
+
+type ListMessagesRow struct {
+	ID              int32
+	SenderName      sql.NullString
+	SenderRole      sql.NullString
+	SenderPartyType string
+	SenderPartyID   int32
+	Body            string
+	CreatedAt       time.Time
+}
+
+func (q *Queries) ListMessages(ctx context.Context, conversationID int32) ([]ListMessagesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listMessages, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMessagesRow
+	for rows.Next() {
+		var i ListMessagesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SenderName,
+			&i.SenderRole,
+			&i.SenderPartyType,
+			&i.SenderPartyID,
+			&i.Body,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNoticeInbox = `-- name: ListNoticeInbox :many
+SELECT
+    n.id,
+    n.kind,
+    n.title,
+    n.body,
+    n.priority,
+    n.due_date,
+    n.sender_name,
+    COALESCE(CASE n.sender_party_type
+        WHEN 'SUPER_ADMIN' THEN 'Ministry Headquarters'
+        WHEN 'REGION' THEN rg.name || ' Regional Office'
+        WHEN 'SYSTEM' THEN 'NSMS (automatic)'
+    END, 'Unknown')::text AS sender_label,
+    n.created_at,
+    n.withdrawn_at,
+    n.withdrawn_reason,
+    r.read_at,
+    r.done_at,
+    du.name AS done_by_name
+FROM
+    notice_recipients r
+    JOIN notices n ON n.id = r.notice_id
+    LEFT JOIN regions rg ON n.sender_party_type = 'REGION' AND rg.id = n.sender_party_id
+    LEFT JOIN users du ON du.id = r.done_by_user_id
+WHERE r.party_type = $1 AND r.party_id = $2
+ORDER BY n.created_at DESC, n.id DESC
+LIMIT 200
+`
+
+type ListNoticeInboxParams struct {
+	PartyType string
+	PartyID   int32
+}
+
+type ListNoticeInboxRow struct {
+	ID              int32
+	Kind            string
+	Title           string
+	Body            string
+	Priority        string
+	DueDate         sql.NullTime
+	SenderName      sql.NullString
+	SenderLabel     string
+	CreatedAt       time.Time
+	WithdrawnAt     sql.NullTime
+	WithdrawnReason sql.NullString
+	ReadAt          sql.NullTime
+	DoneAt          sql.NullTime
+	DoneByName      sql.NullString
+}
+
+func (q *Queries) ListNoticeInbox(ctx context.Context, arg ListNoticeInboxParams) ([]ListNoticeInboxRow, error) {
+	rows, err := q.db.QueryContext(ctx, listNoticeInbox, arg.PartyType, arg.PartyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListNoticeInboxRow
+	for rows.Next() {
+		var i ListNoticeInboxRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.Title,
+			&i.Body,
+			&i.Priority,
+			&i.DueDate,
+			&i.SenderName,
+			&i.SenderLabel,
+			&i.CreatedAt,
+			&i.WithdrawnAt,
+			&i.WithdrawnReason,
+			&i.ReadAt,
+			&i.DoneAt,
+			&i.DoneByName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNoticeRecipients = `-- name: ListNoticeRecipients :many
+SELECT
+    r.party_type,
+    r.party_id,
+    COALESCE(CASE r.party_type
+        WHEN 'REGION' THEN rg.name || ' Regional Office'
+        WHEN 'SCHOOL' THEN sc.name
+    END, 'Unknown')::text AS label,
+    COALESCE(d.name, '')::text AS district_name,
+    r.read_at,
+    r.done_at,
+    du.name AS done_by_name
+FROM
+    notice_recipients r
+    LEFT JOIN regions rg ON r.party_type = 'REGION' AND rg.id = r.party_id
+    LEFT JOIN schools sc ON r.party_type = 'SCHOOL' AND sc.id = r.party_id
+    LEFT JOIN districts d ON d.id = sc.district_id
+    LEFT JOIN users du ON du.id = r.done_by_user_id
+WHERE r.notice_id = $1
+ORDER BY label
+`
+
+type ListNoticeRecipientsRow struct {
+	PartyType    string
+	PartyID      int32
+	Label        string
+	DistrictName string
+	ReadAt       sql.NullTime
+	DoneAt       sql.NullTime
+	DoneByName   sql.NullString
+}
+
+func (q *Queries) ListNoticeRecipients(ctx context.Context, noticeID int32) ([]ListNoticeRecipientsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listNoticeRecipients, noticeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListNoticeRecipientsRow
+	for rows.Next() {
+		var i ListNoticeRecipientsRow
+		if err := rows.Scan(
+			&i.PartyType,
+			&i.PartyID,
+			&i.Label,
+			&i.DistrictName,
+			&i.ReadAt,
+			&i.DoneAt,
+			&i.DoneByName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRegions = `-- name: ListRegions :many
 SELECT
     id,
@@ -2014,16 +3663,74 @@ ORDER BY
     name
 `
 
-func (q *Queries) ListRegions(ctx context.Context) ([]Region, error) {
+type ListRegionsRow struct {
+	ID   int32
+	Name string
+}
+
+func (q *Queries) ListRegions(ctx context.Context) ([]ListRegionsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listRegions)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Region
+	var items []ListRegionsRow
 	for rows.Next() {
-		var i Region
+		var i ListRegionsRow
 		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReportedConversations = `-- name: ListReportedConversations :many
+SELECT
+    c.id,
+    c.subject,
+    c.last_message_at,
+    c.reported_at,
+    c.reported_by_name,
+    c.report_reason
+FROM conversations c
+WHERE c.reported_at IS NOT NULL
+ORDER BY c.reported_at DESC, c.id DESC
+LIMIT 200
+`
+
+type ListReportedConversationsRow struct {
+	ID             int32
+	Subject        string
+	LastMessageAt  time.Time
+	ReportedAt     sql.NullTime
+	ReportedByName sql.NullString
+	ReportReason   sql.NullString
+}
+
+func (q *Queries) ListReportedConversations(ctx context.Context) ([]ListReportedConversationsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listReportedConversations)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListReportedConversationsRow
+	for rows.Next() {
+		var i ListReportedConversationsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Subject,
+			&i.LastMessageAt,
+			&i.ReportedAt,
+			&i.ReportedByName,
+			&i.ReportReason,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -2119,6 +3826,106 @@ func (q *Queries) ListSchoolsByDistrictId(ctx context.Context, districtID int32)
 			&i.SchoolNumber,
 			&i.Name,
 			&i.DistrictID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSentNotices = `-- name: ListSentNotices :many
+SELECT
+    n.id,
+    n.title,
+    n.body,
+    n.priority,
+    n.due_date,
+    n.audience_type,
+    COALESCE(CASE n.audience_type
+        WHEN 'REGIONAL_ADMINS' THEN 'All regional admins'
+        WHEN 'REGIONAL_ADMIN' THEN ar.name || ' regional admin'
+        WHEN 'SCHOOLS_ALL' THEN 'All schools'
+        WHEN 'SCHOOLS_IN_REGION' THEN 'All schools in ' || ar.name || ' region'
+        WHEN 'SCHOOLS_IN_DISTRICT' THEN 'All schools in ' || ad.name || ' district'
+        WHEN 'SCHOOL' THEN asch.name
+        WHEN 'PENDING_RECIPIENTS' THEN 'Recipients still pending'
+    END, 'Unknown')::text AS audience_label,
+    n.sender_name,
+    n.created_at,
+    n.withdrawn_at,
+    n.withdrawn_reason,
+    n.reminder_of,
+    (SELECT COUNT(*) FROM notice_recipients r WHERE r.notice_id = n.id) AS recipient_count,
+    (SELECT COUNT(*) FROM notice_recipients r WHERE r.notice_id = n.id AND r.read_at IS NOT NULL) AS read_count,
+    (SELECT COUNT(*) FROM notice_recipients r WHERE r.notice_id = n.id AND r.done_at IS NOT NULL) AS done_count
+FROM
+    notices n
+    LEFT JOIN regions ar ON n.audience_type IN ('REGIONAL_ADMIN', 'SCHOOLS_IN_REGION') AND ar.id = n.audience_id
+    LEFT JOIN districts ad ON n.audience_type = 'SCHOOLS_IN_DISTRICT' AND ad.id = n.audience_id
+    LEFT JOIN schools asch ON n.audience_type = 'SCHOOL' AND asch.id = n.audience_id
+WHERE
+    n.kind = 'NOTICE'
+    AND n.sender_party_type = $1
+    AND n.sender_party_id = $2
+ORDER BY n.created_at DESC, n.id DESC
+LIMIT 200
+`
+
+type ListSentNoticesParams struct {
+	SenderPartyType string
+	SenderPartyID   int32
+}
+
+type ListSentNoticesRow struct {
+	ID              int32
+	Title           string
+	Body            string
+	Priority        string
+	DueDate         sql.NullTime
+	AudienceType    string
+	AudienceLabel   string
+	SenderName      sql.NullString
+	CreatedAt       time.Time
+	WithdrawnAt     sql.NullTime
+	WithdrawnReason sql.NullString
+	ReminderOf      sql.NullInt32
+	RecipientCount  int64
+	ReadCount       int64
+	DoneCount       int64
+}
+
+func (q *Queries) ListSentNotices(ctx context.Context, arg ListSentNoticesParams) ([]ListSentNoticesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listSentNotices, arg.SenderPartyType, arg.SenderPartyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSentNoticesRow
+	for rows.Next() {
+		var i ListSentNoticesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Body,
+			&i.Priority,
+			&i.DueDate,
+			&i.AudienceType,
+			&i.AudienceLabel,
+			&i.SenderName,
+			&i.CreatedAt,
+			&i.WithdrawnAt,
+			&i.WithdrawnReason,
+			&i.ReminderOf,
+			&i.RecipientCount,
+			&i.ReadCount,
+			&i.DoneCount,
 		); err != nil {
 			return nil, err
 		}
@@ -2444,6 +4251,183 @@ func (q *Queries) ListSubjects(ctx context.Context) ([]Subject, error) {
 	return items, nil
 }
 
+const listTransfersForAdmin = `-- name: ListTransfersForAdmin :many
+
+SELECT
+    t.id,
+    t.student_id,
+    t.from_school,
+    t.to_school,
+    t.status,
+    t.date_initiated,
+    t.date_accepted,
+    t.reason,
+    t.rejection_reason,
+    s.student_number,
+    s.first_name AS student_first_name,
+    s.last_name AS student_last_name,
+    fs.name AS from_school_name,
+    ts.name AS to_school_name,
+    fd.name AS from_district_name,
+    td.name AS to_district_name,
+    fr.name AS from_region_name,
+    tr.name AS to_region_name,
+    decision.action AS decision_action,
+    decision.actor_name AS decision_actor_name,
+    decision.actor_role AS decision_actor_role,
+    decision.note AS decision_note,
+    decision.created_at AS decision_at,
+    completed.actor_name AS completed_actor_name,
+    completed.actor_role AS completed_actor_role,
+    completed.created_at AS completed_at,
+    COUNT(*) OVER () AS total_count
+FROM
+    transfers t
+    JOIN students s ON s.id = t.student_id
+    JOIN schools fs ON fs.id = t.from_school
+    JOIN schools ts ON ts.id = t.to_school
+    JOIN districts fd ON fd.id = fs.district_id
+    JOIN districts td ON td.id = ts.district_id
+    JOIN regions fr ON fr.id = fd.region_id
+    JOIN regions tr ON tr.id = td.region_id
+    LEFT JOIN audit_logs decision ON decision.id = (
+        SELECT a.id
+        FROM audit_logs a
+        WHERE a.entity_type = 'transfer' AND a.entity_id = t.id AND a.action IN ('Approved', 'Rejected')
+        ORDER BY a.created_at DESC, a.id DESC
+        LIMIT 1
+    )
+    LEFT JOIN audit_logs completed ON completed.id = (
+        SELECT a.id
+        FROM audit_logs a
+        WHERE a.entity_type = 'transfer' AND a.entity_id = t.id AND a.action = 'Completed'
+        ORDER BY a.created_at DESC, a.id DESC
+        LIMIT 1
+    )
+WHERE
+    ($1::text IS NULL OR t.status = $1::text)
+    AND ($2::int IS NULL OR fd.region_id = $2::int OR td.region_id = $2::int)
+    AND ($3::int IS NULL OR fs.district_id = $3::int OR ts.district_id = $3::int)
+    AND ($4::int IS NULL OR t.from_school = $4::int OR t.to_school = $4::int)
+    AND ($5::date IS NULL OR t.date_initiated >= $5::date)
+    AND ($6::date IS NULL OR t.date_initiated < $6::date + 1)
+    AND (
+        $7::text IS NULL
+        OR s.student_number ILIKE '%' || $7::text || '%'
+        OR (s.first_name || ' ' || s.last_name) ILIKE '%' || $7::text || '%'
+    )
+ORDER BY t.date_initiated DESC, t.id DESC
+LIMIT $9::int
+OFFSET $8::int
+`
+
+type ListTransfersForAdminParams struct {
+	Status     sql.NullString
+	RegionID   sql.NullInt32
+	DistrictID sql.NullInt32
+	SchoolID   sql.NullInt32
+	DateFrom   sql.NullTime
+	DateTo     sql.NullTime
+	Search     sql.NullString
+	RowOffset  int32
+	RowLimit   sql.NullInt32
+}
+
+type ListTransfersForAdminRow struct {
+	ID                 int32
+	StudentID          int32
+	FromSchool         int32
+	ToSchool           int32
+	Status             sql.NullString
+	DateInitiated      sql.NullTime
+	DateAccepted       sql.NullTime
+	Reason             sql.NullString
+	RejectionReason    sql.NullString
+	StudentNumber      string
+	StudentFirstName   string
+	StudentLastName    string
+	FromSchoolName     string
+	ToSchoolName       string
+	FromDistrictName   string
+	ToDistrictName     string
+	FromRegionName     string
+	ToRegionName       string
+	DecisionAction     sql.NullString
+	DecisionActorName  sql.NullString
+	DecisionActorRole  sql.NullString
+	DecisionNote       sql.NullString
+	DecisionAt         sql.NullTime
+	CompletedActorName sql.NullString
+	CompletedActorRole sql.NullString
+	CompletedAt        sql.NullTime
+	TotalCount         int64
+}
+
+// Transfer history for the super admin. Every filter is optional; a school, district
+// or region matches when it is on either side of the transfer. date_from/date_to are
+// inclusive days on date_initiated. row_limit NULL returns every row (used by the export).
+// decision is the latest Approved or Rejected entry; completed is the Completed entry.
+func (q *Queries) ListTransfersForAdmin(ctx context.Context, arg ListTransfersForAdminParams) ([]ListTransfersForAdminRow, error) {
+	rows, err := q.db.QueryContext(ctx, listTransfersForAdmin,
+		arg.Status,
+		arg.RegionID,
+		arg.DistrictID,
+		arg.SchoolID,
+		arg.DateFrom,
+		arg.DateTo,
+		arg.Search,
+		arg.RowOffset,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTransfersForAdminRow
+	for rows.Next() {
+		var i ListTransfersForAdminRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.StudentID,
+			&i.FromSchool,
+			&i.ToSchool,
+			&i.Status,
+			&i.DateInitiated,
+			&i.DateAccepted,
+			&i.Reason,
+			&i.RejectionReason,
+			&i.StudentNumber,
+			&i.StudentFirstName,
+			&i.StudentLastName,
+			&i.FromSchoolName,
+			&i.ToSchoolName,
+			&i.FromDistrictName,
+			&i.ToDistrictName,
+			&i.FromRegionName,
+			&i.ToRegionName,
+			&i.DecisionAction,
+			&i.DecisionActorName,
+			&i.DecisionActorRole,
+			&i.DecisionNote,
+			&i.DecisionAt,
+			&i.CompletedActorName,
+			&i.CompletedActorRole,
+			&i.CompletedAt,
+			&i.TotalCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTransfersForRegion = `-- name: ListTransfersForRegion :many
 SELECT
     t.id,
@@ -2592,49 +4576,263 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 	return items, nil
 }
 
-const rejectTransfer = `-- name: RejectTransfer :one
-UPDATE transfers
+const markConversationRead = `-- name: MarkConversationRead :exec
+UPDATE conversation_participants
+SET last_read_at = CURRENT_TIMESTAMP
+WHERE conversation_id = $1 AND party_type = $2 AND party_id = $3
+`
+
+type MarkConversationReadParams struct {
+	ConversationID int32
+	PartyType      string
+	PartyID        int32
+}
+
+func (q *Queries) MarkConversationRead(ctx context.Context, arg MarkConversationReadParams) error {
+	_, err := q.db.ExecContext(ctx, markConversationRead, arg.ConversationID, arg.PartyType, arg.PartyID)
+	return err
+}
+
+const markNoticeDone = `-- name: MarkNoticeDone :one
+UPDATE notice_recipients
 SET
-    status = 'Rejected',
-    rejection_reason = $1
+    done_at = COALESCE(notice_recipients.done_at, CURRENT_TIMESTAMP),
+    done_by_user_id = COALESCE(notice_recipients.done_by_user_id, NULLIF($1::int, 0)),
+    read_at = COALESCE(notice_recipients.read_at, CURRENT_TIMESTAMP),
+    read_by_user_id = COALESCE(notice_recipients.read_by_user_id, NULLIF($1::int, 0))
+FROM notices n
 WHERE
-    id = $2
-    AND status = 'Pending'
+    n.id = notice_recipients.notice_id
+    AND n.withdrawn_at IS NULL
+    AND notice_recipients.notice_id = $2
+    AND notice_recipients.party_type = $3
+    AND notice_recipients.party_id = $4
+RETURNING notice_recipients.id
+`
+
+type MarkNoticeDoneParams struct {
+	UserID    int32
+	NoticeID  int32
+	PartyType string
+	PartyID   int32
+}
+
+func (q *Queries) MarkNoticeDone(ctx context.Context, arg MarkNoticeDoneParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, markNoticeDone,
+		arg.UserID,
+		arg.NoticeID,
+		arg.PartyType,
+		arg.PartyID,
+	)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
+
+const markNoticeRead = `-- name: MarkNoticeRead :one
+UPDATE notice_recipients
+SET
+    read_at = COALESCE(read_at, CURRENT_TIMESTAMP),
+    read_by_user_id = COALESCE(read_by_user_id, NULLIF($1::int, 0))
+WHERE notice_id = $2 AND party_type = $3 AND party_id = $4
 RETURNING id
+`
+
+type MarkNoticeReadParams struct {
+	UserID    int32
+	NoticeID  int32
+	PartyType string
+	PartyID   int32
+}
+
+func (q *Queries) MarkNoticeRead(ctx context.Context, arg MarkNoticeReadParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, markNoticeRead,
+		arg.UserID,
+		arg.NoticeID,
+		arg.PartyType,
+		arg.PartyID,
+	)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
+
+const recordLogin = `-- name: RecordLogin :exec
+UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1
+`
+
+func (q *Queries) RecordLogin(ctx context.Context, userID int32) error {
+	_, err := q.db.ExecContext(ctx, recordLogin, userID)
+	return err
+}
+
+const rejectTransfer = `-- name: RejectTransfer :one
+WITH rejected AS (
+    UPDATE transfers
+    SET
+        status = 'Rejected',
+        rejection_reason = $1
+    WHERE
+        transfers.id = $2
+        AND transfers.status = 'Pending'
+    RETURNING transfers.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'transfer', rejected.id, 'Rejected', u.id, u.name, u.role, u.school_id, $1::text
+    FROM rejected LEFT JOIN users u ON u.id = $3::int
+)
+SELECT rejected.id FROM rejected
 `
 
 type RejectTransferParams struct {
 	RejectionReason sql.NullString
 	TransferID      int32
+	ActorUserID     int32
 }
 
 func (q *Queries) RejectTransfer(ctx context.Context, arg RejectTransferParams) (int32, error) {
-	row := q.db.QueryRowContext(ctx, rejectTransfer, arg.RejectionReason, arg.TransferID)
+	row := q.db.QueryRowContext(ctx, rejectTransfer, arg.RejectionReason, arg.TransferID, arg.ActorUserID)
 	var id int32
 	err := row.Scan(&id)
 	return id, err
 }
 
 const rejectTransferForSchool = `-- name: RejectTransferForSchool :one
-UPDATE transfers
-SET
-    status = 'Rejected',
-    rejection_reason = $1
-WHERE
-    id = $2
-    AND to_school = $3
-    AND status = 'Pending'
-RETURNING id
+WITH rejected AS (
+    UPDATE transfers
+    SET
+        status = 'Rejected',
+        rejection_reason = $1
+    WHERE
+        transfers.id = $2
+        AND transfers.to_school = $3
+        AND transfers.status = 'Pending'
+    RETURNING transfers.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'transfer', rejected.id, 'Rejected', u.id, u.name, u.role, u.school_id, $1::text
+    FROM rejected LEFT JOIN users u ON u.id = $4::int
+)
+SELECT rejected.id FROM rejected
 `
 
 type RejectTransferForSchoolParams struct {
 	RejectionReason sql.NullString
 	TransferID      int32
 	SchoolID        int32
+	ActorUserID     int32
 }
 
 func (q *Queries) RejectTransferForSchool(ctx context.Context, arg RejectTransferForSchoolParams) (int32, error) {
-	row := q.db.QueryRowContext(ctx, rejectTransferForSchool, arg.RejectionReason, arg.TransferID, arg.SchoolID)
+	row := q.db.QueryRowContext(ctx, rejectTransferForSchool,
+		arg.RejectionReason,
+		arg.TransferID,
+		arg.SchoolID,
+		arg.ActorUserID,
+	)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
+
+const reportConversation = `-- name: ReportConversation :one
+WITH reported AS (
+    UPDATE conversations
+    SET
+        reported_at = CURRENT_TIMESTAMP,
+        reported_by_user_id = NULLIF($1::int, 0),
+        reported_by_name = (SELECT u.name FROM users u WHERE u.id = $1::int),
+        report_reason = $2::text
+    WHERE conversations.id = $3 AND conversations.reported_at IS NULL
+    RETURNING conversations.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'conversation', reported.id, 'Reported', u.id, u.name, u.role, u.school_id, $2::text
+    FROM reported LEFT JOIN users u ON u.id = $1::int
+)
+SELECT reported.id FROM reported
+`
+
+type ReportConversationParams struct {
+	UserID         int32
+	Reason         string
+	ConversationID int32
+}
+
+func (q *Queries) ReportConversation(ctx context.Context, arg ReportConversationParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, reportConversation, arg.UserID, arg.Reason, arg.ConversationID)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
+
+const resetAccountPassword = `-- name: ResetAccountPassword :one
+WITH reset AS (
+    UPDATE users
+    SET password = $1::text, must_change_password = TRUE, updated_at = CURRENT_TIMESTAMP
+    WHERE users.id = $2 AND users.deleted_at IS NULL AND users.role <> 'SUPER_ADMIN'
+    RETURNING users.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'user', reset.id, 'PasswordReset', a.id, a.name, a.role, a.school_id, $3::text
+    FROM reset LEFT JOIN users a ON a.id = $4::int
+)
+SELECT reset.id FROM reset
+`
+
+type ResetAccountPasswordParams struct {
+	PasswordHash string
+	UserID       int32
+	Note         string
+	ActorUserID  int32
+}
+
+func (q *Queries) ResetAccountPassword(ctx context.Context, arg ResetAccountPasswordParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, resetAccountPassword,
+		arg.PasswordHash,
+		arg.UserID,
+		arg.Note,
+		arg.ActorUserID,
+	)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
+
+const setAccountActive = `-- name: SetAccountActive :one
+WITH changed AS (
+    UPDATE users
+    SET is_activated = $1::bool, updated_at = CURRENT_TIMESTAMP
+    WHERE users.id = $2 AND users.deleted_at IS NULL AND users.role <> 'SUPER_ADMIN'
+    RETURNING users.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'user', changed.id, CASE WHEN $1::bool THEN 'Activated' ELSE 'Deactivated' END,
+        a.id, a.name, a.role, a.school_id, $3::text
+    FROM changed LEFT JOIN users a ON a.id = $4::int
+)
+SELECT changed.id FROM changed
+`
+
+type SetAccountActiveParams struct {
+	Active      bool
+	UserID      int32
+	Note        string
+	ActorUserID int32
+}
+
+func (q *Queries) SetAccountActive(ctx context.Context, arg SetAccountActiveParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, setAccountActive,
+		arg.Active,
+		arg.UserID,
+		arg.Note,
+		arg.ActorUserID,
+	)
 	var id int32
 	err := row.Scan(&id)
 	return id, err
@@ -2686,6 +4884,52 @@ func (q *Queries) UpdateAcademicYear(ctx context.Context, arg UpdateAcademicYear
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const updateAccount = `-- name: UpdateAccount :one
+WITH updated AS (
+    UPDATE users
+    SET
+        name = $1::text,
+        display_name = $1::text,
+        email = $2::text,
+        phone = $3::text,
+        whatsapp = $4::text,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE users.id = $5 AND users.deleted_at IS NULL AND users.role <> 'SUPER_ADMIN'
+    RETURNING users.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'user', updated.id, 'Updated', a.id, a.name, a.role, a.school_id, $6::text
+    FROM updated LEFT JOIN users a ON a.id = $7::int
+)
+SELECT updated.id FROM updated
+`
+
+type UpdateAccountParams struct {
+	Name        string
+	Email       string
+	Phone       sql.NullString
+	Whatsapp    sql.NullString
+	UserID      int32
+	Note        string
+	ActorUserID int32
+}
+
+func (q *Queries) UpdateAccount(ctx context.Context, arg UpdateAccountParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, updateAccount,
+		arg.Name,
+		arg.Email,
+		arg.Phone,
+		arg.Whatsapp,
+		arg.UserID,
+		arg.Note,
+		arg.ActorUserID,
+	)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
 }
 
 const updateDistrict = `-- name: UpdateDistrict :one
@@ -2746,6 +4990,26 @@ func (q *Queries) UpdateExamResult(ctx context.Context, arg UpdateExamResultPara
 	return i, err
 }
 
+const updateOwnContact = `-- name: UpdateOwnContact :one
+UPDATE users
+SET phone = $1, whatsapp = $2, updated_at = CURRENT_TIMESTAMP
+WHERE id = $3 AND deleted_at IS NULL
+RETURNING id
+`
+
+type UpdateOwnContactParams struct {
+	Phone    sql.NullString
+	Whatsapp sql.NullString
+	UserID   int32
+}
+
+func (q *Queries) UpdateOwnContact(ctx context.Context, arg UpdateOwnContactParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, updateOwnContact, arg.Phone, arg.Whatsapp, arg.UserID)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
+
 const updateRegion = `-- name: UpdateRegion :one
 UPDATE
     regions
@@ -2761,11 +5025,58 @@ type UpdateRegionParams struct {
 	Name string
 }
 
-func (q *Queries) UpdateRegion(ctx context.Context, arg UpdateRegionParams) (Region, error) {
+type UpdateRegionRow struct {
+	ID   int32
+	Name string
+}
+
+func (q *Queries) UpdateRegion(ctx context.Context, arg UpdateRegionParams) (UpdateRegionRow, error) {
 	row := q.db.QueryRowContext(ctx, updateRegion, arg.ID, arg.Name)
-	var i Region
+	var i UpdateRegionRow
 	err := row.Scan(&i.ID, &i.Name)
 	return i, err
+}
+
+const updateRegionOffice = `-- name: UpdateRegionOffice :one
+WITH updated AS (
+    UPDATE regions
+    SET
+        office_phone = $1::text,
+        office_email = $2::text,
+        postal_address = $3::text,
+        physical_address = $4::text
+    WHERE regions.id = $5
+    RETURNING regions.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id)
+    SELECT 'region', updated.id, 'OfficeUpdated', a.id, a.name, a.role, a.school_id
+    FROM updated LEFT JOIN users a ON a.id = $6::int
+)
+SELECT updated.id FROM updated
+`
+
+type UpdateRegionOfficeParams struct {
+	OfficePhone     sql.NullString
+	OfficeEmail     sql.NullString
+	PostalAddress   sql.NullString
+	PhysicalAddress sql.NullString
+	RegionID        int32
+	ActorUserID     int32
+}
+
+func (q *Queries) UpdateRegionOffice(ctx context.Context, arg UpdateRegionOfficeParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, updateRegionOffice,
+		arg.OfficePhone,
+		arg.OfficeEmail,
+		arg.PostalAddress,
+		arg.PhysicalAddress,
+		arg.RegionID,
+		arg.ActorUserID,
+	)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
 }
 
 const updateSchool = `-- name: UpdateSchool :one
@@ -2811,6 +5122,51 @@ func (q *Queries) UpdateSchool(ctx context.Context, arg UpdateSchoolParams) (Upd
 		&i.DistrictID,
 	)
 	return i, err
+}
+
+const updateSchoolOffice = `-- name: UpdateSchoolOffice :one
+WITH updated AS (
+    UPDATE schools
+    SET
+        phone = $1::text,
+        email = $2::text,
+        postal_address = $3::text,
+        head_teacher_name = $4::text,
+        head_teacher_phone = $5::text
+    WHERE schools.id = $6
+    RETURNING schools.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id)
+    SELECT 'school', updated.id, 'OfficeUpdated', a.id, a.name, a.role, a.school_id
+    FROM updated LEFT JOIN users a ON a.id = $7::int
+)
+SELECT updated.id FROM updated
+`
+
+type UpdateSchoolOfficeParams struct {
+	Phone            sql.NullString
+	Email            sql.NullString
+	PostalAddress    sql.NullString
+	HeadTeacherName  sql.NullString
+	HeadTeacherPhone sql.NullString
+	SchoolID         int32
+	ActorUserID      int32
+}
+
+func (q *Queries) UpdateSchoolOffice(ctx context.Context, arg UpdateSchoolOfficeParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, updateSchoolOffice,
+		arg.Phone,
+		arg.Email,
+		arg.PostalAddress,
+		arg.HeadTeacherName,
+		arg.HeadTeacherPhone,
+		arg.SchoolID,
+		arg.ActorUserID,
+	)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
 }
 
 const updateStudent = `-- name: UpdateStudent :one
@@ -3289,4 +5645,44 @@ func (q *Queries) UpsertMarks(ctx context.Context, arg UpsertMarksParams) error 
 		arg.RecordedBy,
 	)
 	return err
+}
+
+const withdrawNotice = `-- name: WithdrawNotice :one
+WITH withdrawn AS (
+    UPDATE notices
+    SET withdrawn_at = CURRENT_TIMESTAMP, withdrawn_reason = $1::text
+    WHERE notices.id = $2
+        AND notices.kind = 'NOTICE'
+        AND notices.sender_party_type = $3::text
+        AND notices.sender_party_id = $4::int
+        AND notices.withdrawn_at IS NULL
+    RETURNING notices.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'notice', withdrawn.id, 'Withdrawn', u.id, u.name, u.role, u.school_id, $1::text
+    FROM withdrawn LEFT JOIN users u ON u.id = $5::int
+)
+SELECT withdrawn.id FROM withdrawn
+`
+
+type WithdrawNoticeParams struct {
+	Reason          string
+	NoticeID        int32
+	SenderPartyType string
+	SenderPartyID   int32
+	UserID          int32
+}
+
+func (q *Queries) WithdrawNotice(ctx context.Context, arg WithdrawNoticeParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, withdrawNotice,
+		arg.Reason,
+		arg.NoticeID,
+		arg.SenderPartyType,
+		arg.SenderPartyID,
+		arg.UserID,
+	)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
 }

@@ -67,6 +67,76 @@
 }
 .unified-sidebar-link.active .unified-sidebar-icon { background: var(--tone-blue-bg); color: var(--ui-blue); }
 
+/* Collapsible group, e.g. Manage */
+.unified-sidebar-group { width: 100%; border: none; background: transparent; text-align: left; font-family: inherit; }
+.unified-sidebar-group:focus-visible,
+.unified-sidebar-link:focus-visible,
+.unified-sidebar-sublink:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.7); outline-offset: 2px; }
+.unified-sidebar-group.has-active { background: rgba(255, 255, 255, 0.14); color: #fff; }
+.unified-sidebar-chevron { font-size: 12px; opacity: 0.7; transition: transform 0.2s ease; }
+.unified-sidebar-chevron.open { transform: rotate(180deg); }
+
+/* Slides open by animating the row height from 0 to its content */
+.unified-sidebar-sub { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.22s ease; }
+.unified-sidebar-sub.open { grid-template-rows: 1fr; }
+.unified-sidebar-sublist {
+  min-height: 0;
+  overflow: hidden;
+  list-style: none;
+  margin: -4px 0 0 29px;
+  padding: 0 0 0 12px;
+  border-left: 1px solid rgba(255, 255, 255, 0.16);
+}
+.unified-sidebar-sub.open .unified-sidebar-sublist { padding-bottom: 8px; }
+.unified-sidebar-sublink {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 1px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.unified-sidebar-sublink i { font-size: 0.85rem; opacity: 0.8; }
+.unified-sidebar-sublink:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.unified-sidebar-sublink.active { background: #fff; color: var(--ui-navy); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18); }
+.unified-sidebar-sublink.active i { color: var(--ui-blue); opacity: 1; }
+
+/* Short screens (e.g. 1366x768 laptops): tighter spacing so the menu fits without scrolling */
+@media (max-height: 920px) {
+  .unified-sidebar-header { padding-top: 16px !important; padding-bottom: 12px !important; }
+  .unified-brand-meta { margin-top: 10px; padding: 6px 12px; }
+  .unified-sidebar-link { margin-bottom: 4px !important; padding-top: 5px !important; padding-bottom: 5px !important; }
+  .unified-sidebar-icon { width: 30px; height: 30px; }
+  .unified-sidebar-sublink { padding: 5px 12px; }
+  .unified-sidebar-footer { padding: 8px 24px 10px; }
+}
+
+/* Very short screens: drop the name box and footer; the top bar still shows the user's initials */
+@media (max-height: 740px) {
+  .unified-brand-meta,
+  .unified-sidebar-footer { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .unified-sidebar-sub,
+  .unified-sidebar-chevron { transition: none; }
+}
+/* Unread count, e.g. on Notifications */
+.unified-sidebar-badge {
+  min-width: 22px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--tone-red-line);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .unified-logout {
   width: 100%;
   display: flex;

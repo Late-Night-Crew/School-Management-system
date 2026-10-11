@@ -72,3 +72,14 @@ dropdb nsms && createdb nsms
 ./nsms migrate
 ./nsms seed
 ```
+
+## Demo contact details
+
+The seed also fills in contact details so the Contacts page has something to show:
+division offices, school offices, head teachers and every demo account's mobile number.
+**All of these numbers are fictional** and follow a pattern (`+265 1 000 1xx` for
+offices, `+265 999 000 xxx` / `+265 888 000 xxx` for people). Do not call them, and do not
+use the Call or WhatsApp links during a demo expecting someone to answer.
+
+Demo accounts do not need to change their password. Accounts created from the
+Accounts page get a temporary password that must be changed at first sign-in.

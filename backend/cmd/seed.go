@@ -132,6 +132,18 @@ func seedDemoData(ctx context.Context, dbConn *sqlx.DB, password string) error {
 		}
 	}
 
+	// The transfers' audit entries, notices, conversations and contacts use the demo users,
+	// so they load after them
+	for _, file := range []string{"seeds/demo_audit.sql", "seeds/demo_comms.sql", "seeds/demo_contacts.sql"} {
+		extraSQL, err := db.SeedsFS.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, string(extraSQL)); err != nil {
+			return fmt.Errorf("failed to load %s: %w", file, err)
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return err
 	}

@@ -1,5 +1,5 @@
-import NotificationsPlaceholder from "../../components/NotificationsPlaceholder";
+import Communications from "../communications/Communications";
 
 export default function AdminNotifications() {
-  return <NotificationsPlaceholder hint="Check the Transfers page for pending requests." />;
+  return <Communications />;
 }

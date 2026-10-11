@@ -8,7 +8,8 @@ SELECT
     district_id,
     school_id,
     password,
-    last_login_at
+    last_login_at,
+    must_change_password
 FROM
     users
 WHERE
@@ -722,18 +723,30 @@ WHERE
     id = $1;
 
 
+-- Every transfer action (create, approve, finalize, reject) also writes its audit_logs row in the same statement,
+-- so a status change is never saved without its audit entry (or the reverse).
+-- The actor's name, role and school are copied from users at the time of the action.
+
 -- name: CreateTransferRequest :one
-INSERT INTO transfers (
-    student_id,
-    from_school,
-    to_school,
-    status,
-    date_initiated,
-    reason
+WITH created AS (
+    INSERT INTO transfers (
+        student_id,
+        from_school,
+        to_school,
+        status,
+        date_initiated,
+        reason
+    )
+    VALUES
+        (sqlc.arg(student_id), sqlc.arg(from_school), sqlc.arg(to_school), 'Pending', sqlc.arg(date_initiated), sqlc.arg(reason))
+    RETURNING id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'transfer', created.id, 'Created', u.id, u.name, u.role, u.school_id, sqlc.narg(note)::text
+    FROM created LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int
 )
-VALUES
-    ($1, $2, $3, 'Pending', $4, $5)
-RETURNING id;
+SELECT created.id FROM created;
 
 -- name: CountPendingTransfersForStudent :one
 SELECT COUNT(*) AS count
@@ -835,6 +848,11 @@ moved AS (
     FROM approved
     WHERE students.id = approved.student_id
     RETURNING students.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'transfer', approved.id, 'Approved', u.id, u.name, u.role, u.school_id, sqlc.narg(note)::text
+    FROM approved LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int
 )
 SELECT approved.id FROM approved;
 
@@ -856,46 +874,203 @@ moved AS (
     FROM approved
     WHERE students.id = approved.student_id
     RETURNING students.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'transfer', approved.id, 'Approved', u.id, u.name, u.role, u.school_id, sqlc.narg(note)::text
+    FROM approved LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int
 )
 SELECT approved.id FROM approved;
 
 -- name: FinalizeTransfer :one
-UPDATE transfers
-SET status = 'Completed'
-WHERE
-    id = $1
-    AND status = 'Accepted'
-RETURNING id;
+WITH finalized AS (
+    UPDATE transfers
+    SET status = 'Completed'
+    WHERE
+        transfers.id = sqlc.arg(transfer_id)
+        AND transfers.status = 'Accepted'
+    RETURNING transfers.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'transfer', finalized.id, 'Completed', u.id, u.name, u.role, u.school_id, sqlc.narg(note)::text
+    FROM finalized LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int
+)
+SELECT finalized.id FROM finalized;
 
 -- name: FinalizeTransferForSchool :one
-UPDATE transfers
-SET status = 'Completed'
-WHERE
-    id = sqlc.arg(transfer_id)
-    AND from_school = sqlc.arg(school_id)
-    AND status = 'Accepted'
-RETURNING id;
+WITH finalized AS (
+    UPDATE transfers
+    SET status = 'Completed'
+    WHERE
+        transfers.id = sqlc.arg(transfer_id)
+        AND transfers.from_school = sqlc.arg(school_id)
+        AND transfers.status = 'Accepted'
+    RETURNING transfers.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'transfer', finalized.id, 'Completed', u.id, u.name, u.role, u.school_id, sqlc.narg(note)::text
+    FROM finalized LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int
+)
+SELECT finalized.id FROM finalized;
 
 -- name: RejectTransfer :one
-UPDATE transfers
-SET
-    status = 'Rejected',
-    rejection_reason = sqlc.arg(rejection_reason)
-WHERE
-    id = sqlc.arg(transfer_id)
-    AND status = 'Pending'
-RETURNING id;
+WITH rejected AS (
+    UPDATE transfers
+    SET
+        status = 'Rejected',
+        rejection_reason = sqlc.arg(rejection_reason)
+    WHERE
+        transfers.id = sqlc.arg(transfer_id)
+        AND transfers.status = 'Pending'
+    RETURNING transfers.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'transfer', rejected.id, 'Rejected', u.id, u.name, u.role, u.school_id, sqlc.arg(rejection_reason)::text
+    FROM rejected LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int
+)
+SELECT rejected.id FROM rejected;
 
 -- name: RejectTransferForSchool :one
-UPDATE transfers
-SET
-    status = 'Rejected',
-    rejection_reason = sqlc.arg(rejection_reason)
+WITH rejected AS (
+    UPDATE transfers
+    SET
+        status = 'Rejected',
+        rejection_reason = sqlc.arg(rejection_reason)
+    WHERE
+        transfers.id = sqlc.arg(transfer_id)
+        AND transfers.to_school = sqlc.arg(school_id)
+        AND transfers.status = 'Pending'
+    RETURNING transfers.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'transfer', rejected.id, 'Rejected', u.id, u.name, u.role, u.school_id, sqlc.arg(rejection_reason)::text
+    FROM rejected LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int
+)
+SELECT rejected.id FROM rejected;
+
+-- Transfer history for the super admin. Every filter is optional; a school, district
+-- or region matches when it is on either side of the transfer. date_from/date_to are
+-- inclusive days on date_initiated. row_limit NULL returns every row (used by the export).
+-- decision is the latest Approved or Rejected entry; completed is the Completed entry.
+
+-- name: ListTransfersForAdmin :many
+SELECT
+    t.id,
+    t.student_id,
+    t.from_school,
+    t.to_school,
+    t.status,
+    t.date_initiated,
+    t.date_accepted,
+    t.reason,
+    t.rejection_reason,
+    s.student_number,
+    s.first_name AS student_first_name,
+    s.last_name AS student_last_name,
+    fs.name AS from_school_name,
+    ts.name AS to_school_name,
+    fd.name AS from_district_name,
+    td.name AS to_district_name,
+    fr.name AS from_region_name,
+    tr.name AS to_region_name,
+    decision.action AS decision_action,
+    decision.actor_name AS decision_actor_name,
+    decision.actor_role AS decision_actor_role,
+    decision.note AS decision_note,
+    decision.created_at AS decision_at,
+    completed.actor_name AS completed_actor_name,
+    completed.actor_role AS completed_actor_role,
+    completed.created_at AS completed_at,
+    COUNT(*) OVER () AS total_count
+FROM
+    transfers t
+    JOIN students s ON s.id = t.student_id
+    JOIN schools fs ON fs.id = t.from_school
+    JOIN schools ts ON ts.id = t.to_school
+    JOIN districts fd ON fd.id = fs.district_id
+    JOIN districts td ON td.id = ts.district_id
+    JOIN regions fr ON fr.id = fd.region_id
+    JOIN regions tr ON tr.id = td.region_id
+    LEFT JOIN audit_logs decision ON decision.id = (
+        SELECT a.id
+        FROM audit_logs a
+        WHERE a.entity_type = 'transfer' AND a.entity_id = t.id AND a.action IN ('Approved', 'Rejected')
+        ORDER BY a.created_at DESC, a.id DESC
+        LIMIT 1
+    )
+    LEFT JOIN audit_logs completed ON completed.id = (
+        SELECT a.id
+        FROM audit_logs a
+        WHERE a.entity_type = 'transfer' AND a.entity_id = t.id AND a.action = 'Completed'
+        ORDER BY a.created_at DESC, a.id DESC
+        LIMIT 1
+    )
 WHERE
-    id = sqlc.arg(transfer_id)
-    AND to_school = sqlc.arg(school_id)
-    AND status = 'Pending'
-RETURNING id;
+    (sqlc.narg(status)::text IS NULL OR t.status = sqlc.narg(status)::text)
+    AND (sqlc.narg(region_id)::int IS NULL OR fd.region_id = sqlc.narg(region_id)::int OR td.region_id = sqlc.narg(region_id)::int)
+    AND (sqlc.narg(district_id)::int IS NULL OR fs.district_id = sqlc.narg(district_id)::int OR ts.district_id = sqlc.narg(district_id)::int)
+    AND (sqlc.narg(school_id)::int IS NULL OR t.from_school = sqlc.narg(school_id)::int OR t.to_school = sqlc.narg(school_id)::int)
+    AND (sqlc.narg(date_from)::date IS NULL OR t.date_initiated >= sqlc.narg(date_from)::date)
+    AND (sqlc.narg(date_to)::date IS NULL OR t.date_initiated < sqlc.narg(date_to)::date + 1)
+    AND (
+        sqlc.narg(search)::text IS NULL
+        OR s.student_number ILIKE '%' || sqlc.narg(search)::text || '%'
+        OR (s.first_name || ' ' || s.last_name) ILIKE '%' || sqlc.narg(search)::text || '%'
+    )
+ORDER BY t.date_initiated DESC, t.id DESC
+LIMIT sqlc.narg(row_limit)::int
+OFFSET sqlc.arg(row_offset)::int;
+
+-- Per-status totals for the same filters as ListTransfersForAdmin, minus status.
+
+-- name: CountTransfersByStatusForAdmin :many
+SELECT t.status, COUNT(*) AS count
+FROM
+    transfers t
+    JOIN students s ON s.id = t.student_id
+    JOIN schools fs ON fs.id = t.from_school
+    JOIN schools ts ON ts.id = t.to_school
+    JOIN districts fd ON fd.id = fs.district_id
+    JOIN districts td ON td.id = ts.district_id
+WHERE
+    (sqlc.narg(region_id)::int IS NULL OR fd.region_id = sqlc.narg(region_id)::int OR td.region_id = sqlc.narg(region_id)::int)
+    AND (sqlc.narg(district_id)::int IS NULL OR fs.district_id = sqlc.narg(district_id)::int OR ts.district_id = sqlc.narg(district_id)::int)
+    AND (sqlc.narg(school_id)::int IS NULL OR t.from_school = sqlc.narg(school_id)::int OR t.to_school = sqlc.narg(school_id)::int)
+    AND (sqlc.narg(date_from)::date IS NULL OR t.date_initiated >= sqlc.narg(date_from)::date)
+    AND (sqlc.narg(date_to)::date IS NULL OR t.date_initiated < sqlc.narg(date_to)::date + 1)
+    AND (
+        sqlc.narg(search)::text IS NULL
+        OR s.student_number ILIKE '%' || sqlc.narg(search)::text || '%'
+        OR (s.first_name || ' ' || s.last_name) ILIKE '%' || sqlc.narg(search)::text || '%'
+    )
+GROUP BY t.status;
+
+-- name: ListAuditLogsForEntity :many
+SELECT
+    a.id,
+    a.action,
+    a.actor_user_id,
+    a.actor_name,
+    a.actor_role,
+    sc.name AS actor_school_name,
+    a.note,
+    a.created_at
+FROM
+    audit_logs a
+    LEFT JOIN schools sc ON sc.id = a.actor_school_id
+WHERE
+    a.entity_type = sqlc.arg(entity_type)
+    AND a.entity_id = sqlc.arg(entity_id)
+ORDER BY a.created_at, a.id;
+
+-- name: CreateAuditLog :exec
+INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+SELECT sqlc.arg(entity_type), sqlc.narg(entity_id)::int, sqlc.arg(action), u.id, u.name, u.role, u.school_id, sqlc.narg(note)::text
+FROM (SELECT 1) AS one LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int;
 
 -- name: CreateSubject :one
 INSERT INTO
@@ -1124,3 +1299,704 @@ WHERE m.student_id = cleared.student_id
     AND m.subject_id = cleared.subject_id
     AND m.academic_year_id = sqlc.arg(academic_year_id)::int
     AND m.term = sqlc.arg(term)::int;
+
+-- ============================================================================
+-- Communications: notices (one-way, many recipients) and conversations (two-party).
+-- A party is 'SUPER_ADMIN' (id 0), 'REGION' (regions.id) or 'SCHOOL' (schools.id).
+-- Recipients of a notice are chosen by audience_type:
+--   REGIONAL_ADMINS, REGIONAL_ADMIN (audience_id = region), SCHOOLS_ALL,
+--   SCHOOLS_IN_REGION (region), SCHOOLS_IN_DISTRICT (district), SCHOOL (school).
+-- ============================================================================
+
+-- name: CountNoticeAudience :one
+SELECT (
+    (SELECT COUNT(*) FROM regions rg
+     WHERE sqlc.arg(audience_type)::text = 'REGIONAL_ADMINS'
+        OR (sqlc.arg(audience_type)::text = 'REGIONAL_ADMIN' AND rg.id = sqlc.narg(audience_id)::int))
+    +
+    (SELECT COUNT(*) FROM schools sc JOIN districts d ON d.id = sc.district_id
+     WHERE sqlc.arg(audience_type)::text = 'SCHOOLS_ALL'
+        OR (sqlc.arg(audience_type)::text = 'SCHOOLS_IN_REGION' AND d.region_id = sqlc.narg(audience_id)::int)
+        OR (sqlc.arg(audience_type)::text = 'SCHOOLS_IN_DISTRICT' AND d.id = sqlc.narg(audience_id)::int)
+        OR (sqlc.arg(audience_type)::text = 'SCHOOL' AND sc.id = sqlc.narg(audience_id)::int))
+)::int AS count;
+
+-- Sends a notice: the notice, one recipient row per region or school in the audience,
+-- and the audit entry, all in one statement.
+
+-- name: CreateNotice :one
+WITH n AS (
+    INSERT INTO notices (
+        kind, sender_user_id, sender_name, sender_role, sender_party_type, sender_party_id,
+        title, body, priority, due_date, audience_type, audience_id
+    )
+    SELECT
+        'NOTICE', u.id, u.name, u.role, sqlc.arg(sender_party_type)::text, sqlc.arg(sender_party_id)::int,
+        sqlc.arg(title)::text, sqlc.arg(body)::text, sqlc.arg(priority)::text, sqlc.narg(due_date)::date,
+        sqlc.arg(audience_type)::text, sqlc.narg(audience_id)::int
+    FROM (SELECT 1) AS one LEFT JOIN users u ON u.id = sqlc.arg(sender_user_id)::int
+    RETURNING id
+),
+audience AS (
+    SELECT 'REGION'::text AS party_type, rg.id AS party_id
+    FROM regions rg
+    WHERE sqlc.arg(audience_type)::text = 'REGIONAL_ADMINS'
+        OR (sqlc.arg(audience_type)::text = 'REGIONAL_ADMIN' AND rg.id = sqlc.narg(audience_id)::int)
+    UNION ALL
+    SELECT 'SCHOOL'::text, sc.id
+    FROM schools sc JOIN districts d ON d.id = sc.district_id
+    WHERE sqlc.arg(audience_type)::text = 'SCHOOLS_ALL'
+        OR (sqlc.arg(audience_type)::text = 'SCHOOLS_IN_REGION' AND d.region_id = sqlc.narg(audience_id)::int)
+        OR (sqlc.arg(audience_type)::text = 'SCHOOLS_IN_DISTRICT' AND d.id = sqlc.narg(audience_id)::int)
+        OR (sqlc.arg(audience_type)::text = 'SCHOOL' AND sc.id = sqlc.narg(audience_id)::int)
+),
+recipients AS (
+    INSERT INTO notice_recipients (notice_id, party_type, party_id)
+    SELECT n.id, audience.party_type, audience.party_id FROM n CROSS JOIN audience
+    RETURNING id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'notice', n.id, 'Sent', u.id, u.name, u.role, u.school_id, sqlc.arg(title)::text
+    FROM n LEFT JOIN users u ON u.id = sqlc.arg(sender_user_id)::int
+)
+SELECT n.id, (SELECT COUNT(*) FROM recipients)::int AS recipient_count FROM n;
+
+-- name: GetNoticeForSender :one
+SELECT id, title, due_date, withdrawn_at
+FROM notices
+WHERE id = sqlc.arg(notice_id)
+    AND kind = 'NOTICE'
+    AND sender_party_type = sqlc.arg(sender_party_type)
+    AND sender_party_id = sqlc.arg(sender_party_id);
+
+-- Sends the notice again to the recipients who have not acted on it: not marked done
+-- when it has a due date, otherwise not read. Returns no row when nobody is pending.
+
+-- name: CreateReminderNotice :one
+WITH original AS (
+    SELECT * FROM notices
+    WHERE notices.id = sqlc.arg(notice_id) AND notices.kind = 'NOTICE' AND notices.withdrawn_at IS NULL
+),
+pending AS (
+    SELECT r.party_type, r.party_id
+    FROM notice_recipients r JOIN original o ON o.id = r.notice_id
+    WHERE (o.due_date IS NOT NULL AND r.done_at IS NULL) OR (o.due_date IS NULL AND r.read_at IS NULL)
+),
+n AS (
+    INSERT INTO notices (
+        kind, sender_user_id, sender_name, sender_role, sender_party_type, sender_party_id,
+        title, body, priority, due_date, audience_type, reminder_of
+    )
+    SELECT
+        'NOTICE', u.id, u.name, u.role, o.sender_party_type, o.sender_party_id,
+        CASE WHEN o.title LIKE 'Reminder: %' THEN o.title ELSE 'Reminder: ' || o.title END,
+        o.body, o.priority, o.due_date, 'PENDING_RECIPIENTS', COALESCE(o.reminder_of, o.id)
+    FROM original o LEFT JOIN users u ON u.id = sqlc.arg(sender_user_id)::int
+    WHERE EXISTS (SELECT 1 FROM pending)
+    RETURNING id
+),
+recipients AS (
+    INSERT INTO notice_recipients (notice_id, party_type, party_id)
+    SELECT n.id, pending.party_type, pending.party_id FROM n CROSS JOIN pending
+    RETURNING id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'notice', n.id, 'Reminded', u.id, u.name, u.role, u.school_id, 'Reminder of notice ' || sqlc.arg(notice_id)::int
+    FROM n LEFT JOIN users u ON u.id = sqlc.arg(sender_user_id)::int
+)
+SELECT n.id, (SELECT COUNT(*) FROM recipients)::int AS recipient_count FROM n;
+
+-- name: WithdrawNotice :one
+WITH withdrawn AS (
+    UPDATE notices
+    SET withdrawn_at = CURRENT_TIMESTAMP, withdrawn_reason = sqlc.arg(reason)::text
+    WHERE notices.id = sqlc.arg(notice_id)
+        AND notices.kind = 'NOTICE'
+        AND notices.sender_party_type = sqlc.arg(sender_party_type)::text
+        AND notices.sender_party_id = sqlc.arg(sender_party_id)::int
+        AND notices.withdrawn_at IS NULL
+    RETURNING notices.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'notice', withdrawn.id, 'Withdrawn', u.id, u.name, u.role, u.school_id, sqlc.arg(reason)::text
+    FROM withdrawn LEFT JOIN users u ON u.id = sqlc.arg(user_id)::int
+)
+SELECT withdrawn.id FROM withdrawn;
+
+-- An automatic notice to one school, e.g. about a transfer.
+
+-- name: CreateSystemNotice :exec
+WITH n AS (
+    INSERT INTO notices (kind, sender_party_type, sender_party_id, title, body, audience_type, audience_id)
+    VALUES ('SYSTEM', 'SYSTEM', 0, sqlc.arg(title)::text, sqlc.arg(body)::text, 'SCHOOL', sqlc.arg(school_id)::int)
+    RETURNING id
+)
+INSERT INTO notice_recipients (notice_id, party_type, party_id)
+SELECT n.id, 'SCHOOL', sqlc.arg(school_id)::int FROM n;
+
+-- name: ListNoticeInbox :many
+SELECT
+    n.id,
+    n.kind,
+    n.title,
+    n.body,
+    n.priority,
+    n.due_date,
+    n.sender_name,
+    COALESCE(CASE n.sender_party_type
+        WHEN 'SUPER_ADMIN' THEN 'Ministry Headquarters'
+        WHEN 'REGION' THEN rg.name || ' Regional Office'
+        WHEN 'SYSTEM' THEN 'NSMS (automatic)'
+    END, 'Unknown')::text AS sender_label,
+    n.created_at,
+    n.withdrawn_at,
+    n.withdrawn_reason,
+    r.read_at,
+    r.done_at,
+    du.name AS done_by_name
+FROM
+    notice_recipients r
+    JOIN notices n ON n.id = r.notice_id
+    LEFT JOIN regions rg ON n.sender_party_type = 'REGION' AND rg.id = n.sender_party_id
+    LEFT JOIN users du ON du.id = r.done_by_user_id
+WHERE r.party_type = sqlc.arg(party_type) AND r.party_id = sqlc.arg(party_id)
+ORDER BY n.created_at DESC, n.id DESC
+LIMIT 200;
+
+-- name: ListSentNotices :many
+SELECT
+    n.id,
+    n.title,
+    n.body,
+    n.priority,
+    n.due_date,
+    n.audience_type,
+    COALESCE(CASE n.audience_type
+        WHEN 'REGIONAL_ADMINS' THEN 'All regional admins'
+        WHEN 'REGIONAL_ADMIN' THEN ar.name || ' regional admin'
+        WHEN 'SCHOOLS_ALL' THEN 'All schools'
+        WHEN 'SCHOOLS_IN_REGION' THEN 'All schools in ' || ar.name || ' region'
+        WHEN 'SCHOOLS_IN_DISTRICT' THEN 'All schools in ' || ad.name || ' district'
+        WHEN 'SCHOOL' THEN asch.name
+        WHEN 'PENDING_RECIPIENTS' THEN 'Recipients still pending'
+    END, 'Unknown')::text AS audience_label,
+    n.sender_name,
+    n.created_at,
+    n.withdrawn_at,
+    n.withdrawn_reason,
+    n.reminder_of,
+    (SELECT COUNT(*) FROM notice_recipients r WHERE r.notice_id = n.id) AS recipient_count,
+    (SELECT COUNT(*) FROM notice_recipients r WHERE r.notice_id = n.id AND r.read_at IS NOT NULL) AS read_count,
+    (SELECT COUNT(*) FROM notice_recipients r WHERE r.notice_id = n.id AND r.done_at IS NOT NULL) AS done_count
+FROM
+    notices n
+    LEFT JOIN regions ar ON n.audience_type IN ('REGIONAL_ADMIN', 'SCHOOLS_IN_REGION') AND ar.id = n.audience_id
+    LEFT JOIN districts ad ON n.audience_type = 'SCHOOLS_IN_DISTRICT' AND ad.id = n.audience_id
+    LEFT JOIN schools asch ON n.audience_type = 'SCHOOL' AND asch.id = n.audience_id
+WHERE
+    n.kind = 'NOTICE'
+    AND n.sender_party_type = sqlc.arg(sender_party_type)
+    AND n.sender_party_id = sqlc.arg(sender_party_id)
+ORDER BY n.created_at DESC, n.id DESC
+LIMIT 200;
+
+-- name: ListNoticeRecipients :many
+SELECT
+    r.party_type,
+    r.party_id,
+    COALESCE(CASE r.party_type
+        WHEN 'REGION' THEN rg.name || ' Regional Office'
+        WHEN 'SCHOOL' THEN sc.name
+    END, 'Unknown')::text AS label,
+    COALESCE(d.name, '')::text AS district_name,
+    r.read_at,
+    r.done_at,
+    du.name AS done_by_name
+FROM
+    notice_recipients r
+    LEFT JOIN regions rg ON r.party_type = 'REGION' AND rg.id = r.party_id
+    LEFT JOIN schools sc ON r.party_type = 'SCHOOL' AND sc.id = r.party_id
+    LEFT JOIN districts d ON d.id = sc.district_id
+    LEFT JOIN users du ON du.id = r.done_by_user_id
+WHERE r.notice_id = sqlc.arg(notice_id)
+ORDER BY label;
+
+-- name: MarkNoticeRead :one
+UPDATE notice_recipients
+SET
+    read_at = COALESCE(read_at, CURRENT_TIMESTAMP),
+    read_by_user_id = COALESCE(read_by_user_id, NULLIF(sqlc.arg(user_id)::int, 0))
+WHERE notice_id = sqlc.arg(notice_id) AND party_type = sqlc.arg(party_type) AND party_id = sqlc.arg(party_id)
+RETURNING id;
+
+-- name: MarkNoticeDone :one
+UPDATE notice_recipients
+SET
+    done_at = COALESCE(notice_recipients.done_at, CURRENT_TIMESTAMP),
+    done_by_user_id = COALESCE(notice_recipients.done_by_user_id, NULLIF(sqlc.arg(user_id)::int, 0)),
+    read_at = COALESCE(notice_recipients.read_at, CURRENT_TIMESTAMP),
+    read_by_user_id = COALESCE(notice_recipients.read_by_user_id, NULLIF(sqlc.arg(user_id)::int, 0))
+FROM notices n
+WHERE
+    n.id = notice_recipients.notice_id
+    AND n.withdrawn_at IS NULL
+    AND notice_recipients.notice_id = sqlc.arg(notice_id)
+    AND notice_recipients.party_type = sqlc.arg(party_type)
+    AND notice_recipients.party_id = sqlc.arg(party_id)
+RETURNING notice_recipients.id;
+
+-- name: GetCommsSummary :one
+SELECT
+    (SELECT COUNT(*) FROM notice_recipients r JOIN notices n ON n.id = r.notice_id
+     WHERE r.party_type = sqlc.arg(party_type)::text AND r.party_id = sqlc.arg(party_id)::int
+        AND r.read_at IS NULL AND n.withdrawn_at IS NULL) AS unread_notices,
+    (SELECT COUNT(*) FROM notice_recipients r JOIN notices n ON n.id = r.notice_id
+     WHERE r.party_type = sqlc.arg(party_type)::text AND r.party_id = sqlc.arg(party_id)::int
+        AND n.due_date IS NOT NULL AND r.done_at IS NULL AND n.withdrawn_at IS NULL) AS open_tasks,
+    (SELECT COUNT(*) FROM conversation_participants p
+     WHERE p.party_type = sqlc.arg(party_type)::text AND p.party_id = sqlc.arg(party_id)::int
+        AND EXISTS (
+            SELECT 1 FROM messages m
+            WHERE m.conversation_id = p.conversation_id
+                AND NOT (m.sender_party_type = p.party_type AND m.sender_party_id = p.party_id)
+                AND m.created_at > COALESCE(p.last_read_at, '-infinity'::timestamp)
+        )) AS unread_conversations;
+
+-- name: CountRecentNoticesByUser :one
+SELECT COUNT(*) FROM notices
+WHERE sender_user_id = sqlc.arg(user_id) AND created_at > CURRENT_TIMESTAMP - INTERVAL '1 hour';
+
+-- name: CountRecentConversationsByUser :one
+SELECT COUNT(*) FROM conversations
+WHERE created_by_user_id = sqlc.arg(user_id) AND created_at > CURRENT_TIMESTAMP - INTERVAL '1 hour';
+
+-- name: CountRecentMessagesByUser :one
+SELECT COUNT(*) FROM messages
+WHERE sender_user_id = sqlc.arg(user_id) AND created_at > CURRENT_TIMESTAMP - INTERVAL '1 minute';
+
+-- Starts a conversation: the thread, both participants and the first message.
+-- The sender has read their own message, so only the other party sees it as unread.
+
+-- name: CreateConversation :one
+WITH c AS (
+    INSERT INTO conversations (subject, created_by_user_id)
+    VALUES (sqlc.arg(subject)::text, NULLIF(sqlc.arg(sender_user_id)::int, 0))
+    RETURNING id, created_at
+),
+parts AS (
+    INSERT INTO conversation_participants (conversation_id, party_type, party_id, last_read_at)
+    SELECT c.id, sqlc.arg(from_party_type)::text, sqlc.arg(from_party_id)::int, c.created_at FROM c
+    UNION ALL
+    SELECT c.id, sqlc.arg(to_party_type)::text, sqlc.arg(to_party_id)::int, NULL::timestamp FROM c
+    RETURNING 1
+),
+first_message AS (
+    INSERT INTO messages (conversation_id, sender_user_id, sender_name, sender_role, sender_party_type, sender_party_id, body, created_at)
+    SELECT c.id, u.id, u.name, u.role, sqlc.arg(from_party_type)::text, sqlc.arg(from_party_id)::int, sqlc.arg(body)::text, c.created_at
+    FROM c LEFT JOIN users u ON u.id = sqlc.arg(sender_user_id)::int
+    RETURNING 1
+)
+SELECT c.id FROM c;
+
+-- name: ListConversationsForParty :many
+SELECT
+    c.id,
+    c.subject,
+    c.last_message_at,
+    c.reported_at,
+    other.party_type AS other_party_type,
+    other.party_id AS other_party_id,
+    COALESCE(CASE other.party_type
+        WHEN 'SUPER_ADMIN' THEN 'Ministry Headquarters'
+        WHEN 'REGION' THEN rg.name || ' Regional Office'
+        WHEN 'SCHOOL' THEN sc.name
+    END, 'Unknown')::text AS other_label,
+    lm.body AS last_body,
+    lm.sender_name AS last_sender_name,
+    COALESCE(lm.sender_party_type = me.party_type AND lm.sender_party_id = me.party_id, FALSE)::bool AS last_from_me,
+    EXISTS (
+        SELECT 1 FROM messages m
+        WHERE m.conversation_id = c.id
+            AND NOT (m.sender_party_type = me.party_type AND m.sender_party_id = me.party_id)
+            AND m.created_at > COALESCE(me.last_read_at, '-infinity'::timestamp)
+    ) AS unread
+FROM
+    conversation_participants me
+    JOIN conversations c ON c.id = me.conversation_id
+    JOIN conversation_participants other
+        ON other.conversation_id = c.id AND NOT (other.party_type = me.party_type AND other.party_id = me.party_id)
+    LEFT JOIN regions rg ON other.party_type = 'REGION' AND rg.id = other.party_id
+    LEFT JOIN schools sc ON other.party_type = 'SCHOOL' AND sc.id = other.party_id
+    LEFT JOIN messages lm ON lm.id = (
+        SELECT m.id FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC, m.id DESC LIMIT 1
+    )
+WHERE me.party_type = sqlc.arg(party_type) AND me.party_id = sqlc.arg(party_id)
+ORDER BY c.last_message_at DESC, c.id DESC
+LIMIT 200;
+
+-- name: ListReportedConversations :many
+SELECT
+    c.id,
+    c.subject,
+    c.last_message_at,
+    c.reported_at,
+    c.reported_by_name,
+    c.report_reason
+FROM conversations c
+WHERE c.reported_at IS NOT NULL
+ORDER BY c.reported_at DESC, c.id DESC
+LIMIT 200;
+
+-- name: GetConversation :one
+SELECT id, subject, created_at, last_message_at, reported_at, reported_by_name, report_reason
+FROM conversations
+WHERE id = sqlc.arg(conversation_id);
+
+-- name: ListConversationParticipants :many
+SELECT
+    p.conversation_id,
+    p.party_type,
+    p.party_id,
+    COALESCE(CASE p.party_type
+        WHEN 'SUPER_ADMIN' THEN 'Ministry Headquarters'
+        WHEN 'REGION' THEN rg.name || ' Regional Office'
+        WHEN 'SCHOOL' THEN sc.name
+    END, 'Unknown')::text AS label
+FROM
+    conversation_participants p
+    LEFT JOIN regions rg ON p.party_type = 'REGION' AND rg.id = p.party_id
+    LEFT JOIN schools sc ON p.party_type = 'SCHOOL' AND sc.id = p.party_id
+WHERE p.conversation_id = ANY(sqlc.arg(conversation_ids)::int[])
+ORDER BY p.conversation_id, p.party_type, p.party_id;
+
+-- name: ListMessages :many
+SELECT id, sender_name, sender_role, sender_party_type, sender_party_id, body, created_at
+FROM messages
+WHERE conversation_id = sqlc.arg(conversation_id)
+ORDER BY created_at, id;
+
+-- name: MarkConversationRead :exec
+UPDATE conversation_participants
+SET last_read_at = CURRENT_TIMESTAMP
+WHERE conversation_id = sqlc.arg(conversation_id) AND party_type = sqlc.arg(party_type) AND party_id = sqlc.arg(party_id);
+
+-- name: CreateMessage :one
+WITH m AS (
+    INSERT INTO messages (conversation_id, sender_user_id, sender_name, sender_role, sender_party_type, sender_party_id, body)
+    SELECT sqlc.arg(conversation_id)::int, u.id, u.name, u.role, sqlc.arg(party_type)::text, sqlc.arg(party_id)::int, sqlc.arg(body)::text
+    FROM (SELECT 1) AS one LEFT JOIN users u ON u.id = sqlc.arg(sender_user_id)::int
+    RETURNING id, conversation_id, created_at
+),
+touched AS (
+    UPDATE conversations SET last_message_at = m.created_at
+    FROM m WHERE conversations.id = m.conversation_id
+    RETURNING conversations.id
+),
+seen AS (
+    UPDATE conversation_participants SET last_read_at = m.created_at
+    FROM m
+    WHERE conversation_participants.conversation_id = m.conversation_id
+        AND conversation_participants.party_type = sqlc.arg(party_type)::text
+        AND conversation_participants.party_id = sqlc.arg(party_id)::int
+    RETURNING conversation_participants.conversation_id
+)
+SELECT m.id FROM m;
+
+-- name: ReportConversation :one
+WITH reported AS (
+    UPDATE conversations
+    SET
+        reported_at = CURRENT_TIMESTAMP,
+        reported_by_user_id = NULLIF(sqlc.arg(user_id)::int, 0),
+        reported_by_name = (SELECT u.name FROM users u WHERE u.id = sqlc.arg(user_id)::int),
+        report_reason = sqlc.arg(reason)::text
+    WHERE conversations.id = sqlc.arg(conversation_id) AND conversations.reported_at IS NULL
+    RETURNING conversations.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'conversation', reported.id, 'Reported', u.id, u.name, u.role, u.school_id, sqlc.arg(reason)::text
+    FROM reported LEFT JOIN users u ON u.id = sqlc.arg(user_id)::int
+)
+SELECT reported.id FROM reported;
+
+-- name: ListContactSchools :many
+SELECT sc.id, sc.name, d.name AS district_name, d.region_id, rg.name AS region_name
+FROM schools sc
+    JOIN districts d ON d.id = sc.district_id
+    JOIN regions rg ON rg.id = d.region_id
+ORDER BY rg.name, d.name, sc.name;
+
+-- name: ListContactRegions :many
+SELECT id, name FROM regions ORDER BY name;
+
+-- name: GetSchoolRegionID :one
+SELECT d.region_id FROM schools sc JOIN districts d ON d.id = sc.district_id WHERE sc.id = sqlc.arg(school_id);
+
+-- name: GetDistrictRegionID :one
+SELECT region_id FROM districts WHERE id = sqlc.arg(district_id);
+
+-- ============================================================================
+-- Accounts and contacts. Account changes write an audit_logs row (entity 'user')
+-- in the same statement; office edits do the same for 'region' and 'school'.
+-- ============================================================================
+
+-- Checked on every authenticated request, so a deactivated account stops working at
+-- once and a temporary password must be changed before anything else.
+
+-- name: GetAuthUserState :one
+SELECT
+    (COALESCE(is_activated, FALSE) AND deleted_at IS NULL)::bool AS active,
+    must_change_password
+FROM users
+WHERE id = sqlc.arg(user_id);
+
+-- name: RecordLogin :exec
+UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = sqlc.arg(user_id);
+
+-- name: GetUserPassword :one
+SELECT password FROM users WHERE id = sqlc.arg(user_id) AND deleted_at IS NULL;
+
+-- name: ChangeOwnPassword :exec
+WITH changed AS (
+    UPDATE users
+    SET password = sqlc.arg(password_hash)::text, must_change_password = FALSE, updated_at = CURRENT_TIMESTAMP
+    WHERE users.id = sqlc.arg(user_id)
+    RETURNING users.id, users.name, users.role, users.school_id
+)
+INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id)
+SELECT 'user', changed.id, 'PasswordChanged', changed.id, changed.name, changed.role, changed.school_id FROM changed;
+
+-- name: UpdateOwnContact :one
+UPDATE users
+SET phone = sqlc.narg(phone), whatsapp = sqlc.narg(whatsapp), updated_at = CURRENT_TIMESTAMP
+WHERE id = sqlc.arg(user_id) AND deleted_at IS NULL
+RETURNING id;
+
+-- name: GetAccount :one
+SELECT
+    u.id,
+    u.name,
+    u.email,
+    u.role,
+    u.phone,
+    u.whatsapp,
+    COALESCE(sd.region_id, u.region_id)::int AS region_id,
+    COALESCE(rg.name, '')::text AS region_name,
+    u.school_id,
+    COALESCE(sc.name, '')::text AS school_name,
+    COALESCE(sc.school_number, '')::text AS school_number,
+    COALESCE(sd.name, '')::text AS district_name,
+    COALESCE(u.is_activated, FALSE)::bool AS active,
+    u.must_change_password,
+    u.last_login_at,
+    u.created_at
+FROM
+    users u
+    LEFT JOIN schools sc ON sc.id = u.school_id
+    LEFT JOIN districts sd ON sd.id = sc.district_id
+    LEFT JOIN regions rg ON rg.id = COALESCE(sd.region_id, u.region_id)
+WHERE u.id = sqlc.arg(user_id) AND u.deleted_at IS NULL;
+
+-- Regional admins and school managers (never the super admin). region_id limits the
+-- list to accounts in that region: its regional admin and its schools' managers.
+
+-- name: ListAccounts :many
+SELECT
+    u.id,
+    u.name,
+    u.email,
+    u.role,
+    u.phone,
+    u.whatsapp,
+    COALESCE(sd.region_id, u.region_id)::int AS region_id,
+    COALESCE(rg.name, '')::text AS region_name,
+    u.school_id,
+    COALESCE(sc.name, '')::text AS school_name,
+    COALESCE(sc.school_number, '')::text AS school_number,
+    COALESCE(sd.name, '')::text AS district_name,
+    COALESCE(u.is_activated, FALSE)::bool AS active,
+    u.must_change_password,
+    u.last_login_at,
+    u.created_at
+FROM
+    users u
+    LEFT JOIN schools sc ON sc.id = u.school_id
+    LEFT JOIN districts sd ON sd.id = sc.district_id
+    LEFT JOIN regions rg ON rg.id = COALESCE(sd.region_id, u.region_id)
+WHERE
+    u.deleted_at IS NULL
+    AND u.role <> 'SUPER_ADMIN'
+    AND (sqlc.narg(role)::text IS NULL OR u.role = sqlc.narg(role)::text)
+    AND (sqlc.narg(region_id)::int IS NULL OR COALESCE(sd.region_id, u.region_id) = sqlc.narg(region_id)::int)
+ORDER BY rg.name, u.role, sc.name, u.name;
+
+-- name: CountUsersWithEmail :one
+SELECT COUNT(*) FROM users WHERE lower(email) = lower(sqlc.arg(email)::text) AND id <> sqlc.arg(exclude_id)::int;
+
+-- name: CountActiveRegionalAdmins :one
+SELECT COUNT(*) FROM users
+WHERE role = 'REGIONAL_ADMIN' AND region_id = sqlc.arg(region_id) AND COALESCE(is_activated, FALSE)
+    AND deleted_at IS NULL AND id <> sqlc.arg(exclude_id)::int;
+
+-- name: GetSchoolScope :one
+SELECT sc.id, sc.name, sc.district_id, d.region_id
+FROM schools sc JOIN districts d ON d.id = sc.district_id
+WHERE sc.id = sqlc.arg(school_id);
+
+-- name: GetRegionName :one
+SELECT name FROM regions WHERE id = sqlc.arg(region_id);
+
+-- name: CreateAccount :one
+WITH created AS (
+    INSERT INTO users (
+        name, display_name, email, password, role, region_id, district_id, school_id,
+        phone, whatsapp, is_super_admin, is_activated, must_change_password
+    )
+    VALUES (
+        sqlc.arg(name)::text, sqlc.arg(name)::text, sqlc.arg(email)::text, sqlc.arg(password_hash)::text,
+        sqlc.arg(role)::text, sqlc.narg(region_id)::int, sqlc.narg(district_id)::int, sqlc.narg(school_id)::int,
+        sqlc.narg(phone)::text, sqlc.narg(whatsapp)::text, FALSE, TRUE, TRUE
+    )
+    RETURNING id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'user', created.id, 'Created', a.id, a.name, a.role, a.school_id, sqlc.arg(note)::text
+    FROM created LEFT JOIN users a ON a.id = sqlc.arg(actor_user_id)::int
+)
+SELECT created.id FROM created;
+
+-- name: UpdateAccount :one
+WITH updated AS (
+    UPDATE users
+    SET
+        name = sqlc.arg(name)::text,
+        display_name = sqlc.arg(name)::text,
+        email = sqlc.arg(email)::text,
+        phone = sqlc.narg(phone)::text,
+        whatsapp = sqlc.narg(whatsapp)::text,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE users.id = sqlc.arg(user_id) AND users.deleted_at IS NULL AND users.role <> 'SUPER_ADMIN'
+    RETURNING users.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'user', updated.id, 'Updated', a.id, a.name, a.role, a.school_id, sqlc.arg(note)::text
+    FROM updated LEFT JOIN users a ON a.id = sqlc.arg(actor_user_id)::int
+)
+SELECT updated.id FROM updated;
+
+-- name: SetAccountActive :one
+WITH changed AS (
+    UPDATE users
+    SET is_activated = sqlc.arg(active)::bool, updated_at = CURRENT_TIMESTAMP
+    WHERE users.id = sqlc.arg(user_id) AND users.deleted_at IS NULL AND users.role <> 'SUPER_ADMIN'
+    RETURNING users.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'user', changed.id, CASE WHEN sqlc.arg(active)::bool THEN 'Activated' ELSE 'Deactivated' END,
+        a.id, a.name, a.role, a.school_id, sqlc.arg(note)::text
+    FROM changed LEFT JOIN users a ON a.id = sqlc.arg(actor_user_id)::int
+)
+SELECT changed.id FROM changed;
+
+-- name: ResetAccountPassword :one
+WITH reset AS (
+    UPDATE users
+    SET password = sqlc.arg(password_hash)::text, must_change_password = TRUE, updated_at = CURRENT_TIMESTAMP
+    WHERE users.id = sqlc.arg(user_id) AND users.deleted_at IS NULL AND users.role <> 'SUPER_ADMIN'
+    RETURNING users.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'user', reset.id, 'PasswordReset', a.id, a.name, a.role, a.school_id, sqlc.arg(note)::text
+    FROM reset LEFT JOIN users a ON a.id = sqlc.arg(actor_user_id)::int
+)
+SELECT reset.id FROM reset;
+
+-- name: ListDirectoryRegions :many
+SELECT
+    rg.id,
+    rg.name,
+    rg.office_phone,
+    rg.office_email,
+    rg.postal_address,
+    rg.physical_address,
+    a.id AS admin_id,
+    a.name AS admin_name,
+    COALESCE(a.email, '')::text AS admin_email,
+    a.phone AS admin_phone,
+    a.whatsapp AS admin_whatsapp
+FROM
+    regions rg
+    LEFT JOIN users a ON a.region_id = rg.id AND a.role = 'REGIONAL_ADMIN'
+        AND COALESCE(a.is_activated, FALSE) AND a.deleted_at IS NULL
+ORDER BY rg.name;
+
+-- name: ListDirectorySchools :many
+SELECT
+    sc.id,
+    sc.name,
+    sc.school_number,
+    d.id AS district_id,
+    d.name AS district_name,
+    rg.id AS region_id,
+    rg.name AS region_name,
+    sc.phone,
+    sc.email,
+    sc.postal_address,
+    sc.head_teacher_name,
+    sc.head_teacher_phone
+FROM
+    schools sc
+    JOIN districts d ON d.id = sc.district_id
+    JOIN regions rg ON rg.id = d.region_id
+ORDER BY rg.name, d.name, sc.name;
+
+-- name: ListDirectoryPeople :many
+SELECT id, name, email, role, phone, whatsapp, school_id
+FROM users
+WHERE role IN ('SUPER_ADMIN', 'SCHOOL_MANAGER') AND COALESCE(is_activated, FALSE) AND deleted_at IS NULL
+ORDER BY name;
+
+-- name: UpdateRegionOffice :one
+WITH updated AS (
+    UPDATE regions
+    SET
+        office_phone = sqlc.narg(office_phone)::text,
+        office_email = sqlc.narg(office_email)::text,
+        postal_address = sqlc.narg(postal_address)::text,
+        physical_address = sqlc.narg(physical_address)::text
+    WHERE regions.id = sqlc.arg(region_id)
+    RETURNING regions.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id)
+    SELECT 'region', updated.id, 'OfficeUpdated', a.id, a.name, a.role, a.school_id
+    FROM updated LEFT JOIN users a ON a.id = sqlc.arg(actor_user_id)::int
+)
+SELECT updated.id FROM updated;
+
+-- name: UpdateSchoolOffice :one
+WITH updated AS (
+    UPDATE schools
+    SET
+        phone = sqlc.narg(phone)::text,
+        email = sqlc.narg(email)::text,
+        postal_address = sqlc.narg(postal_address)::text,
+        head_teacher_name = sqlc.narg(head_teacher_name)::text,
+        head_teacher_phone = sqlc.narg(head_teacher_phone)::text
+    WHERE schools.id = sqlc.arg(school_id)
+    RETURNING schools.id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id)
+    SELECT 'school', updated.id, 'OfficeUpdated', a.id, a.name, a.role, a.school_id
+    FROM updated LEFT JOIN users a ON a.id = sqlc.arg(actor_user_id)::int
+)
+SELECT updated.id FROM updated;
