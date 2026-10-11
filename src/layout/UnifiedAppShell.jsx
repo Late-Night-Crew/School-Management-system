@@ -67,6 +67,9 @@ export default function UnifiedAppShell() {
   if (!home) {
     return <Navigate to="/login" replace />;
   }
+  if (session.mustChangePassword) {
+    return <Navigate to="/change-password" replace />;
+  }
   if (!canAccess(location.pathname, session)) {
     return <Navigate to={home} replace />;
   }

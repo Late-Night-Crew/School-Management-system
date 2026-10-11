@@ -1,11 +1,14 @@
 package api
 
 import (
+	"nsms/api/accounts"
 	"nsms/api/admin"
+	"nsms/api/comms"
 	"nsms/api/region"
 	"nsms/api/school"
 	"nsms/schema"
 
+	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/limiter"
 )
 
@@ -17,11 +20,17 @@ func (api *API) routes() {
 
 }
 
+// authenticated checks the token and that the account is still active (see
+// RequireAuthentication).
+func (api *API) authenticated() fiber.Handler {
+	return RequireAuthentication([]byte(api.Config.Auth.JwtSecretKey), api.AccountService)
+}
+
 func (api *API) adminRoutes() {
 	// Every /admin route needs a valid token. Reference data that the school screens
 	// also use (regions, districts, schools, academic years, subjects) can be read by
 	// any role; everything else is restricted to super admins.
-	adminApi := api.app.Group("/admin", RequireAuthentication([]byte(api.Config.Auth.JwtSecretKey)))
+	adminApi := api.app.Group("/admin", api.authenticated())
 
 	superAdmin := RequireRole(schema.RoleSuperAdmin)
 
@@ -62,9 +71,10 @@ func (api *API) adminRoutes() {
 	adminApi.Delete("/subjects/:id", superAdmin, admin.DeleteSubject(api.SubjectService, api.logger))
 
 	adminApi.Post("/transfers", superAdmin, admin.CreateTransfer(api.TransferService, api.logger))
-	adminApi.Get("/transfers/incoming", superAdmin, admin.GetIncomingTransfers(api.TransferService, api.logger))
-	adminApi.Get("/transfers/outgoing", superAdmin, admin.GetOutgoingTransfers(api.TransferService, api.logger))
+	adminApi.Get("/transfers", superAdmin, admin.ListTransferHistory(api.TransferService, api.logger))
+	adminApi.Get("/transfers/export", superAdmin, admin.ExportTransferHistory(api.TransferService, api.logger))
 	adminApi.Get("/transfers/:id", superAdmin, admin.GetTransferByID(api.TransferService, api.logger))
+	adminApi.Get("/transfers/:id/audit", superAdmin, admin.GetTransferAuditLog(api.TransferService, api.logger))
 	adminApi.Put("/transfers/:id/approve", superAdmin, admin.ApproveTransfer(api.TransferService, api.logger))
 	adminApi.Patch("/transfers/:id/finalize", superAdmin, admin.FinalizeTransfer(api.TransferService, api.logger))
 	adminApi.Patch("/transfers/:id/reject", superAdmin, admin.RejectTransfer(api.TransferService, api.logger))
@@ -74,7 +84,7 @@ func (api *API) adminRoutes() {
 
 func (api *API) SchoolRoutes() {
 	// School routes are only for the school manager of that school.
-	schoolAdminApi := api.app.Group("/school/:school_id", RequireAuthentication([]byte(api.Config.Auth.JwtSecretKey)))
+	schoolAdminApi := api.app.Group("/school/:school_id", api.authenticated())
 	schoolAccess := RequireSchoolAccess()
 
 	// School admin student management
@@ -107,7 +117,7 @@ func (api *API) SchoolRoutes() {
 
 func (api *API) regionRoutes() {
 	// Read-only region views, only for the regional admin of that region.
-	regionApi := api.app.Group("/region/:region_id", RequireAuthentication([]byte(api.Config.Auth.JwtSecretKey)))
+	regionApi := api.app.Group("/region/:region_id", api.authenticated())
 	regionAccess := RequireRegionAccess()
 
 	regionApi.Get("/dashboard", regionAccess, region.GetDashboard(api.RegionAdminService, api.logger))
@@ -115,4 +125,59 @@ func (api *API) regionRoutes() {
 	regionApi.Get("/schools", regionAccess, region.ListSchools(api.ReportService, api.logger))
 	regionApi.Get("/students", regionAccess, region.ListStudents(api.RegionAdminService, api.logger))
 	regionApi.Get("/transfers", regionAccess, region.ListTransfers(api.RegionAdminService, api.logger))
+}
+
+func (api *API) commsRoutes() {
+	// Notices and conversations for every role. The caller's party (ministry, regional
+	// office or school) comes from their token; the service enforces who may reach whom.
+	commsApi := api.app.Group("/comms", api.authenticated())
+	senders := RequireRole(schema.RoleSuperAdmin, schema.RoleRegionalAdmin)
+	superAdmin := RequireRole(schema.RoleSuperAdmin)
+	service := api.CommsService
+
+	commsApi.Get("/summary", comms.GetSummary(service, api.logger))
+
+	commsApi.Get("/notices/inbox", comms.ListInbox(service, api.logger))
+	commsApi.Post("/notices/:id/read", comms.MarkNoticeRead(service, api.logger))
+	commsApi.Post("/notices/:id/done", comms.MarkNoticeDone(service, api.logger))
+	commsApi.Get("/notices/sent", senders, comms.ListSent(service, api.logger))
+	commsApi.Get("/notices/audience", senders, comms.PreviewAudience(service, api.logger))
+	commsApi.Post("/notices", senders, comms.SendNotice(service, api.logger))
+	commsApi.Get("/notices/:id/recipients", senders, comms.ListRecipients(service, api.logger))
+	commsApi.Post("/notices/:id/remind", senders, comms.RemindPending(service, api.logger))
+	commsApi.Post("/notices/:id/withdraw", senders, comms.WithdrawNotice(service, api.logger))
+
+	commsApi.Get("/contacts", comms.ListContacts(service, api.logger))
+	commsApi.Get("/conversations", comms.ListConversations(service, api.logger))
+	commsApi.Get("/conversations/reported", superAdmin, comms.ListReportedConversations(service, api.logger))
+	commsApi.Post("/conversations", comms.StartConversation(service, api.logger))
+	commsApi.Get("/conversations/:id", comms.GetConversation(service, api.logger))
+	commsApi.Post("/conversations/:id/messages", comms.SendMessage(service, api.logger))
+	commsApi.Post("/conversations/:id/report", comms.ReportConversation(service, api.logger))
+}
+
+func (api *API) accountRoutes() {
+	// The signed-in user's own account. These two are the only routes allowed while
+	// the account still has a temporary password.
+	accountApi := api.app.Group("/account", api.authenticated())
+	accountApi.Get("/me", accounts.GetOwnAccount(api.AccountService, api.logger))
+	accountApi.Put("/me/contact", accounts.UpdateOwnContact(api.AccountService, api.logger))
+	accountApi.Post("/password", accounts.ChangeOwnPassword(api.AccountService, api.logger))
+
+	// Managing other accounts: the super admin manages regional admins and school
+	// managers; a regional admin manages the school managers in their region.
+	managers := RequireRole(schema.RoleSuperAdmin, schema.RoleRegionalAdmin)
+	accountsApi := api.app.Group("/accounts", api.authenticated(), managers)
+	accountsApi.Get("", accounts.ListAccounts(api.AccountService, api.logger))
+	accountsApi.Post("", accounts.CreateAccount(api.AccountService, api.logger))
+	accountsApi.Put("/:id", accounts.UpdateAccount(api.AccountService, api.logger))
+	accountsApi.Post("/:id/deactivate", accounts.SetAccountActive(api.AccountService, api.logger, false))
+	accountsApi.Post("/:id/activate", accounts.SetAccountActive(api.AccountService, api.logger, true))
+	accountsApi.Post("/:id/reset-password", accounts.ResetPassword(api.AccountService, api.logger))
+
+	// The contact directory for every role; who may edit what is checked by the service.
+	contactsApi := api.app.Group("/contacts", api.authenticated())
+	contactsApi.Get("/directory", accounts.GetDirectory(api.ContactService, api.logger))
+	contactsApi.Put("/regions/:id/office", accounts.UpdateRegionOffice(api.ContactService, api.logger))
+	contactsApi.Put("/schools/:id/office", accounts.UpdateSchoolOffice(api.ContactService, api.logger))
 }

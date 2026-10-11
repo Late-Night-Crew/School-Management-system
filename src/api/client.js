@@ -1,5 +1,5 @@
 import axios from "axios";
-import { clearSession, getToken } from "../auth/session";
+import { clearSession, getToken, setMustChangePassword } from "../auth/session";
 
 // Error thrown by every API call; `message` is safe to show to the user.
 export class ApiError extends Error {
@@ -31,10 +31,16 @@ client.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error.response?.status;
-    // An expired or rejected token ends the session (but a failed login does not)
+    // An expired or rejected token, or a deactivated account, ends the session
+    // (but a failed login does not)
     if (status === 401 && error.config?.url !== "/login") {
       clearSession();
       window.location.hash = "#/login";
+    }
+    // A temporary password must be changed before anything else
+    if (status === 403 && error.response.data?.type?.endsWith("/PasswordChangeRequired")) {
+      setMustChangePassword(true);
+      window.location.hash = "#/change-password";
     }
     return Promise.reject(new ApiError(errorMessage(error), status));
   }

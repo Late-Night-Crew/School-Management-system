@@ -1,5 +1,5 @@
-import NotificationsPlaceholder from "../../components/NotificationsPlaceholder";
+import Communications from "../communications/Communications";
 
 export default function RegionalNotifications() {
-  return <NotificationsPlaceholder hint="Check the Transfer Requests page for pending activity." />;
+  return <Communications />;
 }

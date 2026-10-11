@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -55,19 +56,19 @@ func generateJWTToken(res *schema.LoginResponse, expireAfter int64) *jwt.Token {
 }
 
 func (a authServiceImpl) SignIn(request *schema.LoginRequest) (*schema.LoginResponse, error) {
-	user, err := a.queries.FindUserLoginByEmail(context.Background(), request.Email)
+	email := strings.ToLower(strings.TrimSpace(request.Email))
+	user, err := a.queries.FindUserLoginByEmail(context.Background(), email)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			a.logger.Debug("auth-service", "failed to find user from login request", "email", request.Email)
+			a.logger.Debug("auth-service", "failed to find user from login request", "email", email)
 			return nil, ErrInvalidCredentials
 		}
 		a.logger.Error("auth-service", "failed to process the login request", "error", err)
 		return nil, err
 	}
-	a.logger.Info("auth-service", "handling request data", "user", user, "request", request)
 
 	if !common.CheckPasswordHash(request.Password, user.Password) {
-		a.logger.Debug("auth-service", "invalid password provided", "email", request.Email, "error", err)
+		a.logger.Debug("auth-service", "invalid password provided", "email", email)
 		return nil, ErrInvalidCredentials
 	}
 
@@ -95,6 +96,11 @@ func (a authServiceImpl) SignIn(request *schema.LoginRequest) (*schema.LoginResp
 		DistrictID:  districtID,
 		SchoolID:    schoolID,
 		ExpiresAt:   0,
+
+		MustChangePassword: user.MustChangePassword,
+	}
+	if err := a.queries.RecordLogin(context.Background(), user.ID); err != nil {
+		a.logger.Error("auth-service", "failed to record login", "user_id", user.ID, "error", err)
 	}
 
 	token := generateJWTToken(res, time.Now().Add(time.Hour*6).Unix())

@@ -66,7 +66,8 @@ func CreateTransferRequest(transferService services.TransferService, logger logg
 		}
 		req.FromSchoolID = schoolID
 
-		transfer, err := transferService.CreateTransferRequest(ctx.Context(), &req)
+		userID, _ := common.GetUserIDFromCtx(ctx)
+		transfer, err := transferService.CreateTransferRequest(ctx.Context(), &req, userID)
 		if err != nil {
 			return transferErrorResponse(ctx, logger, err, "Failed to create transfer request")
 		}
@@ -137,7 +138,8 @@ func ApproveTransfer(transferService services.TransferService, logger logging.Lo
 			return problemdetail.BadRequest(ctx, "Invalid transfer ID")
 		}
 
-		transfer, err := transferService.ApproveTransferForSchool(ctx.Context(), transferID, schoolID)
+		userID, _ := common.GetUserIDFromCtx(ctx)
+		transfer, err := transferService.ApproveTransferForSchool(ctx.Context(), transferID, schoolID, userID)
 		if err != nil {
 			return transferErrorResponse(ctx, logger, err, "Failed to approve transfer")
 		}
@@ -158,7 +160,8 @@ func FinalizeTransfer(transferService services.TransferService, logger logging.L
 			return problemdetail.BadRequest(ctx, "Invalid transfer ID")
 		}
 
-		transfer, err := transferService.FinalizeTransferForSchool(ctx.Context(), transferID, schoolID)
+		userID, _ := common.GetUserIDFromCtx(ctx)
+		transfer, err := transferService.FinalizeTransferForSchool(ctx.Context(), transferID, schoolID, userID)
 		if err != nil {
 			return transferErrorResponse(ctx, logger, err, "Failed to finalize transfer")
 		}
@@ -184,7 +187,8 @@ func RejectTransfer(transferService services.TransferService, logger logging.Log
 			return problemdetail.BadRequest(ctx, "A rejection reason is required")
 		}
 
-		transfer, err := transferService.RejectTransferForSchool(ctx.Context(), transferID, schoolID, req.Reason)
+		userID, _ := common.GetUserIDFromCtx(ctx)
+		transfer, err := transferService.RejectTransferForSchool(ctx.Context(), transferID, schoolID, userID, req.Reason)
 		if err != nil {
 			return transferErrorResponse(ctx, logger, err, "Failed to reject transfer")
 		}

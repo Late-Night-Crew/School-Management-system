@@ -27,3 +27,16 @@ export const initials = (name = "") =>
     .slice(0, 2)
     .join("")
     .toUpperCase();
+
+// "+265991234567" -> "+265 99 123 4567"; landlines "+2651789123" -> "+265 1 789 123"
+export function formatPhone(phone) {
+  if (!phone) return "";
+  const local = phone.replace(/^\+265/, "");
+  if (local === phone) return phone;
+  if (local.length === 9) return `+265 ${local.slice(0, 2)} ${local.slice(2, 5)} ${local.slice(5)}`;
+  if (local.length === 7) return `+265 ${local[0]} ${local.slice(1, 4)} ${local.slice(4)}`;
+  return phone;
+}
+
+// Link that opens a WhatsApp chat with the number
+export const whatsappLink = (phone) => `https://wa.me/${phone.replace(/\D/g, "")}`;
