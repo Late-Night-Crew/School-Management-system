@@ -16,7 +16,7 @@ const TABS = [
   { key: "schools", label: "Schools", icon: "bi-mortarboard" },
 ];
 
-// How to reach the ministry, each division office and each school outside NSMS.
+// How to reach the ministry, each division office and each school outside OSS.
 // Personal numbers of school managers only show for their division and the ministry.
 export default function ContactsPage() {
   const session = getSession();
@@ -96,7 +96,7 @@ export default function ContactsPage() {
 
 function MinistryCard({ people }) {
   return (
-    <Card accent="purple" icon="bi-bank" title="Ministry Headquarters" subtitle="NSMS super admin">
+    <Card accent="purple" icon="bi-bank" title="Ministry Headquarters" subtitle="Learner Support Manager">
       {people.length === 0 && <NoContact />}
       {people.map((person) => (
         <Person key={person.id} person={person} />
@@ -174,7 +174,7 @@ function SchoolCard({ school, title, onEdit }) {
           <HeadTeacher school={school} />
         </div>
         <div>
-          <div className={styles.section}>NSMS users</div>
+          <div className={styles.section}>OSS users</div>
           <Managers managers={school.managers} />
         </div>
       </div>
@@ -284,7 +284,7 @@ function SchoolDirectory({ schools, regions, defaultRegionId, onEdit }) {
                 <th>School</th>
                 <th>School office</th>
                 <th>Head teacher</th>
-                <th>NSMS users</th>
+                <th>OSS users</th>
                 <th className="end" aria-label="Actions" />
               </tr>
             </thead>

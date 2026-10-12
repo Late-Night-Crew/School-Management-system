@@ -148,7 +148,7 @@ export function ConversationThread({ id, onBack, onChanged }) {
             <div className={styles.pane} style={{ paddingBottom: 0 }}>
               <Notice tone="amber">
                 Reported by {thread.reported_by_name || "a participant"} on {formatDate(thread.reported_at)}: {thread.report_reason}.{" "}
-                {thread.read_only ? "You are reviewing it as the super admin." : "The ministry can now read this conversation."}
+                {thread.read_only ? "You are reviewing it as the Learner Support Manager." : "The ministry can now read this conversation."}
               </Notice>
             </div>
           )}
@@ -244,7 +244,7 @@ function ReportDialog({ conversationId, onHide, onDone }) {
       }
     >
       <p className={styles.explain}>
-        Reporting lets the ministry (super admin) read this whole conversation so they can deal with misuse. Both sides
+        Reporting lets the Learner Support Manager read this whole conversation so they can deal with misuse. Both sides
         will see that it was reported. This cannot be undone.
       </p>
       {error && <Notice tone="red">{error}</Notice>}

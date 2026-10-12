@@ -63,7 +63,7 @@ export default function LoginPage() {
             <i className="bi bi-mortarboard-fill" />
           </div>
           <div>
-            <h1 className={styles.title}>National School Management System</h1>
+            <h1 className={styles.title}>Open Secondary School</h1>
             <div className={styles.sub}>Sign in to continue</div>
           </div>
         </div>
@@ -102,7 +102,7 @@ export default function LoginPage() {
           </Button>
         </form>
 
-        <div className={styles.footer}>© {new Date().getFullYear()} National School Management System</div>
+        <div className={styles.footer}>© {new Date().getFullYear()} Open Secondary School</div>
       </div>
     </div>
   );

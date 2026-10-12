@@ -103,7 +103,7 @@ export default function UnifiedAppShell() {
               )}
 
               <div>
-                <span style={styles.meta}>National School Management</span>
+                <span style={styles.meta}>Open Secondary School</span>
                 <h1 style={styles.title}>{getTitle()}</h1>
               </div>
             </div>

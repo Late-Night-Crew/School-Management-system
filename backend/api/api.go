@@ -28,10 +28,12 @@ type API struct {
 	CommsService        services.CommsService
 	AccountService      services.AccountService
 	ContactService      services.ContactService
+	GradingService      services.GradingService
 }
 
 func NewAPI(config *config.Config) *API {
-	dbConn := dbsqlc.New(config.OpenDB())
+	sqlDB := config.OpenDB()
+	dbConn := dbsqlc.New(sqlDB)
 	logger := logging.NewFromConfig(&config.Logging)
 
 	return &API{
@@ -53,6 +55,7 @@ func NewAPI(config *config.Config) *API {
 		CommsService:        services.NewCommsService(dbConn, logger),
 		AccountService:      services.NewAccountService(dbConn, logger),
 		ContactService:      services.NewContactService(dbConn, logger),
+		GradingService:      services.NewGradingService(sqlDB.DB, dbConn, logger),
 	}
 }
 

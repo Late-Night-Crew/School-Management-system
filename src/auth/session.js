@@ -21,7 +21,7 @@ export const ROLES = {
 };
 
 export const ROLE_LABELS = {
-  [ROLES.SUPER_ADMIN]: "Super Admin",
+  [ROLES.SUPER_ADMIN]: "Learner Support Manager",
   [ROLES.REGIONAL_ADMIN]: "Regional Admin",
   [ROLES.SCHOOL_MANAGER]: "School Manager",
 };

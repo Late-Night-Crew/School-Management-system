@@ -11,9 +11,9 @@ import { Button, Card, Field, Input, Notice } from "./ui";
 
 // Who sees the signed-in user's numbers, per role (matches the contact directory rules)
 const VISIBILITY = {
-  [ROLES.SUPER_ADMIN]: "Every NSMS user can see these numbers. Use an office or helpdesk number if you prefer.",
-  [ROLES.REGIONAL_ADMIN]: "Every NSMS user can see these numbers, so schools can reach their division.",
-  [ROLES.SCHOOL_MANAGER]: "Only the ministry, your division office and your school's other NSMS users can see these numbers.",
+  [ROLES.SUPER_ADMIN]: "Every OSS user can see these numbers. Use an office or helpdesk number if you prefer.",
+  [ROLES.REGIONAL_ADMIN]: "Every OSS user can see these numbers, so schools can reach their division.",
+  [ROLES.SCHOOL_MANAGER]: "Only the ministry, your division office and your school's other OSS users can see these numbers.",
 };
 
 // The signed-in user's account, with the numbers others use to reach them.
@@ -43,7 +43,7 @@ export function MyAccountCard() {
   };
 
   return (
-    <Card accent="blue" icon="bi-person-circle" title="My account" subtitle="How other NSMS users can reach you">
+    <Card accent="blue" icon="bi-person-circle" title="My account" subtitle="How other OSS users can reach you">
       <DataState loading={loading} error={error} onRetry={reload}>
         {account && (
           <>

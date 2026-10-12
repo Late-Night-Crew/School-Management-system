@@ -70,6 +70,10 @@ func (api *API) adminRoutes() {
 	adminApi.Put("/subjects/:id", superAdmin, admin.UpdateSubject(api.SubjectService, api.logger))
 	adminApi.Delete("/subjects/:id", superAdmin, admin.DeleteSubject(api.SubjectService, api.logger))
 
+	// The grading scale is read by every role (marks, reports) and set by super admins
+	adminApi.Get("/grading_scale", admin.GetGradingScale(api.GradingService, api.logger))
+	adminApi.Put("/grading_scale", superAdmin, admin.SaveGradingScale(api.GradingService, api.logger))
+
 	adminApi.Post("/transfers", superAdmin, admin.CreateTransfer(api.TransferService, api.logger))
 	adminApi.Get("/transfers", superAdmin, admin.ListTransferHistory(api.TransferService, api.logger))
 	adminApi.Get("/transfers/export", superAdmin, admin.ExportTransferHistory(api.TransferService, api.logger))

@@ -65,6 +65,16 @@ type ExamResult struct {
 	MscePassRate   sql.NullString
 }
 
+type GradeBand struct {
+	ID          int32
+	Grade       string
+	MinMark     int32
+	IsPass      bool
+	Description sql.NullString
+	CreatedAt   sql.NullTime
+	UpdatedAt   sql.NullTime
+}
+
 type Message struct {
 	ID              int32
 	ConversationID  int32

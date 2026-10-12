@@ -7,7 +7,7 @@ import { listSubjects } from "../../api/subjects";
 import useAsync from "../../hooks/useAsync";
 import usePagination from "../../hooks/usePagination";
 import { fullName } from "../../utils/format";
-import { PASS_MARK, average, formatMark } from "../../utils/grades";
+import { average, formatMark, passRate, useGradingScale } from "../../utils/grades";
 import DataState from "../../components/DataState";
 import GradeBadge from "../../components/GradeBadge";
 import TablePagination from "../../components/TablePagination";
@@ -23,6 +23,7 @@ const cellKey = (studentId, subjectId) => `${studentId}-${subjectId}`;
 
 export default function EnterMarks() {
   const { schoolId } = useParams();
+  const scale = useGradingScale();
 
   // Students, subjects and years load once; marks reload when the year or term changes
   const lookups = useAsync(
@@ -143,7 +144,7 @@ export default function EnterMarks() {
       ...sub,
       count: values.length,
       average: average(values),
-      passRate: values.length ? (values.filter((m) => m >= PASS_MARK).length / values.length) * 100 : null,
+      passRate: passRate(values, scale),
     };
   });
 
@@ -300,8 +301,8 @@ export default function EnterMarks() {
                       <StatTile label="Highest" value={Math.max(...enteredMarks)} icon="bi-arrow-up-circle" tone="green" />
                       <StatTile label="Lowest" value={Math.min(...enteredMarks)} icon="bi-arrow-down-circle" tone="red" />
                       <StatTile
-                        label={`Pass rate (≥ ${PASS_MARK})`}
-                        value={`${((enteredMarks.filter((m) => m >= PASS_MARK).length / enteredMarks.length) * 100).toFixed(1)}%`}
+                        label={scale ? `Pass rate (≥ ${scale.passMark})` : "Pass rate"}
+                        value={scale ? `${passRate(enteredMarks, scale).toFixed(1)}%` : "-"}
                         icon="bi-check2-circle"
                         tone="amber"
                       />

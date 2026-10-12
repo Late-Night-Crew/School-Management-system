@@ -4,7 +4,7 @@ import { formatDate } from "../../utils/format";
 export const DATE_TIME = { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" };
 
 export const PRIVACY_NOTE =
-  "Conversations are private between the two sides. If either side reports one, the ministry (super admin) can read it.";
+  "Conversations are private between the two sides. If either side reports one, the Learner Support Manager can read it.";
 
 export const DATA_PROTECTION_HINT =
   "Messages are kept as official records and cannot be edited or deleted. Share only the student details that are needed.";

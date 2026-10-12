@@ -15,6 +15,7 @@ import AdminTransfers from "./pages/admin/AdminTransfers";
 import ManageAcademicYears from "./pages/admin/ManageAcademicYears";
 import ManageDistricts from "./pages/admin/ManageDistricts";
 import ManageDivisions from "./pages/admin/ManageDivisions";
+import ManageGrading from "./pages/admin/ManageGrading";
 import ManageSchools from "./pages/admin/ManageSchools";
 import ManageStudents from "./pages/admin/ManageStudents";
 import ManageSubjects from "./pages/admin/ManageSubjects";
@@ -65,6 +66,7 @@ const router = createHashRouter([
           { path: "manageacademicyear", element: <ManageAcademicYears /> },
           { path: "managestudents", element: <ManageStudents /> },
           { path: "managesubjects", element: <ManageSubjects /> },
+          { path: "grading", element: <ManageGrading /> },
           { path: "transfers", element: <AdminTransfers /> },
           { path: "reports", element: <AdminReports /> },
           { path: "notifications", element: <AdminNotifications /> },

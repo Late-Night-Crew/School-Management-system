@@ -48,7 +48,7 @@ export default function ChangePasswordPage() {
           </Button>
         </div>
 
-        <div className={styles.footer}>© {new Date().getFullYear()} National School Management System</div>
+        <div className={styles.footer}>© {new Date().getFullYear()} Open Secondary School</div>
       </div>
     </div>
   );

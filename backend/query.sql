@@ -1784,7 +1784,7 @@ SELECT
     u.role,
     u.phone,
     u.whatsapp,
-    COALESCE(sd.region_id, u.region_id)::int AS region_id,
+    COALESCE(sd.region_id, u.region_id, 0)::int AS region_id,
     COALESCE(rg.name, '')::text AS region_name,
     u.school_id,
     COALESCE(sc.name, '')::text AS school_name,
@@ -1812,7 +1812,7 @@ SELECT
     u.role,
     u.phone,
     u.whatsapp,
-    COALESCE(sd.region_id, u.region_id)::int AS region_id,
+    COALESCE(sd.region_id, u.region_id, 0)::int AS region_id,
     COALESCE(rg.name, '')::text AS region_name,
     u.school_id,
     COALESCE(sc.name, '')::text AS school_name,
@@ -2000,3 +2000,28 @@ logged AS (
     FROM updated LEFT JOIN users a ON a.id = sqlc.arg(actor_user_id)::int
 )
 SELECT updated.id FROM updated;
+
+-- name: ListGradeBands :many
+-- The grading scale, highest band first.
+SELECT
+    id,
+    grade,
+    min_mark,
+    is_pass,
+    description,
+    updated_at
+FROM
+    grade_bands
+ORDER BY
+    min_mark DESC;
+
+-- name: DeleteAllGradeBands :exec
+-- Run with CreateGradeBand in one transaction to replace the whole scale.
+DELETE FROM
+    grade_bands;
+
+-- name: CreateGradeBand :exec
+INSERT INTO
+    grade_bands (grade, min_mark, is_pass, description)
+VALUES
+    ($1, $2, $3, $4);

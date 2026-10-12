@@ -15,7 +15,7 @@ import {
 import { listSubjects } from "../../api/subjects";
 import useAsync from "../../hooks/useAsync";
 import { formatRate, fullName } from "../../utils/format";
-import { PASS_MARK, average, formatMark, gradeFor } from "../../utils/grades";
+import { average, formatMark, gradeFor, isPass, passRate, useGradingScale } from "../../utils/grades";
 import DataState from "../../components/DataState";
 import GradeBadge from "../../components/GradeBadge";
 import ToastNote from "../../components/ToastNote";
@@ -28,6 +28,7 @@ const FORMS = [1, 2, 3, 4];
 // Cumulative marks report: each student's average per subject over the chosen
 // year(s) and term(s), their overall average, grade and position in the selection.
 function MarksReport({ schoolId, students, subjects, years }) {
+  const scale = useGradingScale();
   const sortedYears = [...years].sort((a, b) => b.year - a.year);
   const defaultYear = sortedYears.find((y) => y.status === "Active") || sortedYears[0];
   const [filters, setFilters] = useState({
@@ -65,7 +66,7 @@ function MarksReport({ schoolId, students, subjects, years }) {
         student,
         subjectAverages,
         overall: average(recorded),
-        passed: recorded.filter((v) => v >= PASS_MARK).length,
+        passed: recorded.filter((v) => isPass(v, scale)).length,
         taken: recorded.length,
       };
     })
@@ -81,7 +82,7 @@ function MarksReport({ schoolId, students, subjects, years }) {
     return {
       ...sub,
       average: average(values),
-      passRate: values.length ? (values.filter((v) => v >= PASS_MARK).length / values.length) * 100 : null,
+      passRate: passRate(values, scale),
       count: values.length,
     };
   });
@@ -102,7 +103,7 @@ function MarksReport({ schoolId, students, subjects, years }) {
     r.student.form_level,
     ...columns.map((c) => formatMark(r.subjectAverages[c.id])),
     formatMark(r.overall),
-    gradeFor(r.overall).grade,
+    gradeFor(r.overall, scale).grade,
     `${r.passed}/${r.taken}`,
   ]);
 
@@ -158,7 +159,7 @@ function MarksReport({ schoolId, students, subjects, years }) {
         accent="green"
         icon="bi-trophy"
         title={title}
-        subtitle={`Subject marks averaged over the selection · Pass mark ${PASS_MARK} · Current students only`}
+        subtitle={`Subject marks averaged over the selection · Pass mark ${scale ? scale.passMark : "-"} · Current students only`}
         actions={
           <>
             <Button variant="success" size="sm" icon="bi-file-earmark-excel" onClick={exportXLS} disabled={!rows.length}>

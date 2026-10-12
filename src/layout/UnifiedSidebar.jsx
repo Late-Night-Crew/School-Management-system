@@ -21,6 +21,7 @@ function menuFor(session) {
             { name: "Schools", path: "/admin/manageschools", icon: "bi-building" },
             { name: "Students", path: "/admin/managestudents", icon: "bi-journal-bookmark" },
             { name: "Subjects", path: "/admin/managesubjects", icon: "bi-book" },
+            { name: "Grading Scale", path: "/admin/grading", icon: "bi-award" },
             { name: "Academic Years", path: "/admin/manageacademicyear", icon: "bi-calendar4-week" },
             { name: "Accounts", path: "/admin/accounts", icon: "bi-people" },
           ],
@@ -161,7 +162,7 @@ export default function UnifiedSidebar({ isMobileOpen = false, setIsMobileOpen =
           </button>
         </div>
 
-        <div className="unified-sidebar-footer">© {new Date().getFullYear()} NSMS</div>
+        <div className="unified-sidebar-footer">© {new Date().getFullYear()} Open Secondary School</div>
 
       </aside>
     </>

@@ -543,6 +543,30 @@ func (q *Queries) CreateExamResult(ctx context.Context, arg CreateExamResultPara
 	return i, err
 }
 
+const createGradeBand = `-- name: CreateGradeBand :exec
+INSERT INTO
+    grade_bands (grade, min_mark, is_pass, description)
+VALUES
+    ($1, $2, $3, $4)
+`
+
+type CreateGradeBandParams struct {
+	Grade       string
+	MinMark     int32
+	IsPass      bool
+	Description sql.NullString
+}
+
+func (q *Queries) CreateGradeBand(ctx context.Context, arg CreateGradeBandParams) error {
+	_, err := q.db.ExecContext(ctx, createGradeBand,
+		arg.Grade,
+		arg.MinMark,
+		arg.IsPass,
+		arg.Description,
+	)
+	return err
+}
+
 const createMessage = `-- name: CreateMessage :one
 WITH m AS (
     INSERT INTO messages (conversation_id, sender_user_id, sender_name, sender_role, sender_party_type, sender_party_id, body)
@@ -1128,6 +1152,17 @@ func (q *Queries) DeleteAcademicYear(ctx context.Context, id int32) error {
 	return err
 }
 
+const deleteAllGradeBands = `-- name: DeleteAllGradeBands :exec
+DELETE FROM
+    grade_bands
+`
+
+// Run with CreateGradeBand in one transaction to replace the whole scale.
+func (q *Queries) DeleteAllGradeBands(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, deleteAllGradeBands)
+	return err
+}
+
 const deleteDistrict = `-- name: DeleteDistrict :exec
 DELETE FROM
     districts
@@ -1545,7 +1580,7 @@ SELECT
     u.role,
     u.phone,
     u.whatsapp,
-    COALESCE(sd.region_id, u.region_id)::int AS region_id,
+    COALESCE(sd.region_id, u.region_id, 0)::int AS region_id,
     COALESCE(rg.name, '')::text AS region_name,
     u.school_id,
     COALESCE(sc.name, '')::text AS school_name,
@@ -2696,7 +2731,7 @@ SELECT
     u.role,
     u.phone,
     u.whatsapp,
-    COALESCE(sd.region_id, u.region_id)::int AS region_id,
+    COALESCE(sd.region_id, u.region_id, 0)::int AS region_id,
     COALESCE(rg.name, '')::text AS region_name,
     u.school_id,
     COALESCE(sc.name, '')::text AS school_name,
@@ -3362,6 +3397,60 @@ func (q *Queries) ListExamResultsBySchoolID(ctx context.Context, schoolID int32)
 			&i.AcademicYearID,
 			&i.JcePassRate,
 			&i.MscePassRate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listGradeBands = `-- name: ListGradeBands :many
+SELECT
+    id,
+    grade,
+    min_mark,
+    is_pass,
+    description,
+    updated_at
+FROM
+    grade_bands
+ORDER BY
+    min_mark DESC
+`
+
+type ListGradeBandsRow struct {
+	ID          int32
+	Grade       string
+	MinMark     int32
+	IsPass      bool
+	Description sql.NullString
+	UpdatedAt   sql.NullTime
+}
+
+// The grading scale, highest band first.
+func (q *Queries) ListGradeBands(ctx context.Context) ([]ListGradeBandsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listGradeBands)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListGradeBandsRow
+	for rows.Next() {
+		var i ListGradeBandsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Grade,
+			&i.MinMark,
+			&i.IsPass,
+			&i.Description,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}

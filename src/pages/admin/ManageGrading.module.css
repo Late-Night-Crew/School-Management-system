@@ -1,0 +1,36 @@
+.gradeInput {
+  width: 80px;
+  text-transform: uppercase;
+}
+
+.markInput {
+  width: 90px;
+}
+
+.descriptionInput {
+  min-width: 180px;
+}
+
+.problems {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.footerActions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.passMark {
+  font-size: 13px;
+  color: var(--ui-text-muted);
+}
