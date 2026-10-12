@@ -123,7 +123,7 @@ export default function UnifiedAppShell() {
 const TOPBAR_HEIGHT = 72;
 
 const PORTAL_TITLES = {
-  admin: "Ministry Administration",
+  admin: "Ministry of Education Science & Technology (Malawi College of Distance Education)",
   regional: "Regional Office",
   school: "School Portal",
 };

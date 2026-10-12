@@ -120,10 +120,10 @@ export default function UnifiedSidebar({ isMobileOpen = false, setIsMobileOpen =
       >
         <div className="unified-sidebar-header px-4 py-4">
           <div className="d-flex align-items-center gap-3">
-            <div className="unified-logo">NS</div>
+            <div className="unified-logo">OS</div>
             <div>
-              <h2 className="unified-system-name">NSMS</h2>
-              <span className="unified-system-sub">National School Management</span>
+              <h2 className="unified-system-name">OSS</h2>
+              <span className="unified-system-sub">Open Secondary School</span>
             </div>
           </div>
           <div className="unified-brand-meta">
