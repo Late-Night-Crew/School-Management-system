@@ -1,18 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { AUTH_TOKEN_KEY } from "../constants/storageKeys";
+import AcademicYearService from "./services/academicYearService";
+import { useParams } from "react-router-dom";
 
-// ─── MOCK DATA (replace with API calls) ───────────────────────────────────────
-const MOCK_ACADEMIC_YEARS = [
-    { id: 1, year: "2023", term: 1, begin_month: "January",  end_month: "April",  status: "completed" },
-    { id: 2, year: "2023", term: 2, begin_month: "May",      end_month: "August", status: "completed" },
-    { id: 3, year: "2024", term: 1, begin_month: "January",  end_month: "April",  status: "active"    },
-    { id: 4, year: "2024", term: 2, begin_month: "May",      end_month: "August", status: "upcoming"  },
-    { id: 5, year: "2024", term: 3, begin_month: "September",end_month: "December",status: "upcoming" },
-];
-
+// ─── CONSTANTS ───────────────────────────────────────────────────────────────
 const MONTHS = [
-    "January","February","March","April","May","June",
-    "July","August","September","October","November","December"
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
 ];
 
 const TERMS = [
@@ -23,293 +16,7 @@ const TERMS = [
 
 const YEAR_RANGE = Array.from({ length: 6 }, (_, i) => String(new Date().getFullYear() + i));
 
-// ─── CSS ──────────────────────────────────────────────────────────────────────
-const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap');
-
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-.ay-root {
-  font-family: 'Plus Jakarta Sans', sans-serif;
-  background: #eef1f7;
-  min-height: 100vh;
-  color: #1a1d2e;
-  display: flex;
-  flex-direction: column;
-}
-
-/* ── HEADER ── */
-.ay-header {
-  background: linear-gradient(135deg, #1e3a5f 0%, #2563a8 55%, #3b82c4 100%);
-  padding: 26px 36px;
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  flex-shrink: 0;
-}
-.ay-header-icon {
-  width: 52px; height: 52px; border-radius: 15px;
-  background: rgba(255,255,255,0.18);
-  border: 1px solid rgba(255,255,255,0.25);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 24px; color: #fff; flex-shrink: 0;
-}
-.ay-header-text h2 { font-size: 21px; font-weight: 800; color: #fff; letter-spacing: -0.5px; }
-.ay-header-sub { font-size: 12.5px; color: rgba(255,255,255,0.6); margin-top: 3px; }
-
-/* ── TABS ── */
-.ay-tabs-bar { padding: 20px 36px 0; }
-.ay-tabs {
-  display: inline-flex; gap: 4px;
-  background: #fff; border-radius: 50px;
-  padding: 5px; box-shadow: 0 2px 14px rgba(0,0,0,0.09);
-}
-.ay-tab {
-  display: flex; align-items: center; gap: 8px;
-  padding: 9px 22px; border-radius: 50px; border: none;
-  font-family: 'Plus Jakarta Sans', sans-serif;
-  font-size: 13px; font-weight: 600; color: #6b7280;
-  background: transparent; cursor: pointer;
-  transition: all 0.22s ease; white-space: nowrap;
-}
-.ay-tab:hover { color: #374151; }
-.ay-tab.active {
-  background: linear-gradient(135deg, #1e3a5f, #2563a8);
-  color: #fff; box-shadow: 0 4px 14px rgba(37,99,168,0.38);
-}
-
-/* ── BODY ── */
-.ay-body { padding: 24px 36px; flex-grow: 1; display: flex; flex-direction: column; gap: 20px; }
-
-/* ── FORM CARD ── */
-.ay-card {
-  background: #fff;
-  border-radius: 16px;
-  box-shadow: 0 4px 24px rgba(0,0,0,0.06);
-  border: 1px solid #e5e7eb;
-  overflow: hidden;
-}
-.ay-card-header {
-  padding: 18px 24px;
-  border-bottom: 1px solid #f1f5f9;
-  display: flex; align-items: center; gap: 12px;
-}
-.ay-card-header-icon {
-  width: 36px; height: 36px; border-radius: 10px;
-  background: linear-gradient(135deg, #1e3a5f, #2563a8);
-  display: flex; align-items: center; justify-content: center;
-  color: #fff; font-size: 15px; flex-shrink: 0;
-}
-.ay-card-title { font-size: 15px; font-weight: 800; color: #111827; }
-.ay-card-sub { font-size: 12px; color: #6b7280; font-weight: 500; margin-top: 2px; }
-.ay-card-body { padding: 24px; }
-
-/* ── FORM GRID ── */
-.ay-form-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 18px;
-}
-.f-col { display: flex; flex-direction: column; gap: 6px; }
-.lbl {
-  font-size: 10.5px; font-weight: 700; letter-spacing: 0.7px;
-  text-transform: uppercase; color: #9ca3af;
-}
-.sel, .inp {
-  background: #fff; border: 1.5px solid #e2e8f0;
-  border-radius: 12px; font-family: 'Plus Jakarta Sans', sans-serif;
-  font-size: 14px; font-weight: 600; color: #1a1d2e;
-  padding: 12px 16px; outline: none; width: 100%;
-  transition: all 0.18s; cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-  appearance: none; -webkit-appearance: none;
-}
-.sel:hover { background: #eff6ff; color: #2563a8; border-color: #93c5fd; }
-.sel:focus, .inp:focus {
-  background: #fff; border-color: #2563a8;
-  box-shadow: 0 0 0 4px rgba(37,99,168,0.15);
-}
-.sel-wrap { position: relative; }
-.sel-wrap::after {
-  content: '▼'; position: absolute; right: 14px; top: 50%;
-  transform: translateY(-50%); color: #2563a8;
-  pointer-events: none; font-size: 11px; font-weight: bold;
-}
-
-/* Term Pill Selector */
-.term-pills { display: flex; gap: 10px; flex-wrap: wrap; }
-.term-pill {
-  flex: 1; min-width: 80px;
-  padding: 12px 10px; border-radius: 12px; border: 1.5px solid #e2e8f0;
-  background: #fff; font-family: 'Plus Jakarta Sans', sans-serif;
-  font-size: 13px; font-weight: 700; color: #6b7280;
-  cursor: pointer; transition: all 0.2s; text-align: center;
-}
-.term-pill:hover { border-color: #93c5fd; color: #2563a8; background: #eff6ff; }
-.term-pill.active {
-  background: linear-gradient(135deg, #1e3a5f, #2563a8);
-  border-color: #2563a8; color: #fff;
-  box-shadow: 0 4px 14px rgba(37,99,168,0.32);
-}
-.term-pill-num {
-  font-family: 'DM Mono', monospace;
-  font-size: 22px; font-weight: 500; display: block; margin-bottom: 2px;
-}
-
-/* ── FORM ACTIONS ── */
-.ay-form-actions {
-  display: flex; justify-content: flex-end; gap: 10px;
-  padding: 16px 24px; border-top: 1px solid #f1f5f9;
-}
-.btn-prim {
-  display: inline-flex; align-items: center; gap: 7px;
-  background: linear-gradient(135deg, #1e3a5f, #2563a8);
-  color: #fff; border: none; border-radius: 10px;
-  padding: 11px 22px; font-family: 'Plus Jakarta Sans', sans-serif;
-  font-size: 13px; font-weight: 700; cursor: pointer;
-  transition: all 0.2s; box-shadow: 0 4px 12px rgba(37,99,168,0.3);
-}
-.btn-prim:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(37,99,168,0.42); }
-.btn-prim:active { transform: translateY(0); }
-.btn-prim:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
-.btn-sec {
-  display: inline-flex; align-items: center; gap: 7px;
-  background: #fff; color: #374151;
-  border: 1.5px solid #e2e8f0; border-radius: 10px;
-  padding: 11px 22px; font-family: 'Plus Jakarta Sans', sans-serif;
-  font-size: 13px; font-weight: 700; cursor: pointer;
-  transition: all 0.2s;
-}
-.btn-sec:hover { background: #f8fafc; border-color: #cbd5e1; }
-
-/* ── TABLE ── */
-.table-container {
-  background: #fff; border-radius: 16px;
-  box-shadow: 0 4px 24px rgba(0,0,0,0.06);
-  overflow: auto; border: 1px solid #e5e7eb;
-}
-.ay-table { width: 100%; border-collapse: separate; border-spacing: 0; }
-.ay-th {
-  background: #f8fafc; padding: 14px 16px;
-  font-size: 11px; font-weight: 800; color: #64748b;
-  text-transform: uppercase; letter-spacing: 0.5px;
-  white-space: nowrap; border-bottom: 2px solid #e5e7eb;
-  text-align: left;
-}
-.ay-td {
-  padding: 14px 16px; font-size: 13px; color: #374151;
-  border-bottom: 1px solid #f1f5f9; white-space: nowrap;
-}
-tr:last-child .ay-td { border-bottom: none; }
-tr:hover .ay-td { background: #fafbff; }
-
-/* Term badge */
-.term-bdg {
-  display: inline-flex; align-items: center; gap: 6px;
-  background: #eff6ff; color: #1e40af;
-  font-weight: 700; font-size: 12px; padding: 4px 12px;
-  border-radius: 20px;
-}
-.term-bdg-dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: #2563a8; flex-shrink: 0;
-}
-
-/* Year mono */
-.yr-mono {
-  font-family: 'DM Mono', monospace; font-size: 13px;
-  font-weight: 500; color: #1a1d2e;
-}
-
-/* Month range */
-.month-range {
-  display: inline-flex; align-items: center; gap: 8px;
-  font-size: 12px; color: #374151;
-}
-.month-arrow { color: #94a3b8; }
-
-/* Status badge */
-.status-bdg {
-  display: inline-block; padding: 3px 10px; border-radius: 20px;
-  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
-}
-.status-active   { background: #dcfce7; color: #15803d; }
-.status-completed{ background: #f1f5f9; color: #64748b; }
-.status-upcoming { background: #fef9c3; color: #a16207; }
-
-/* ── ROW ACTIONS ── */
-.row-act-btns { display: flex; gap: 6px; }
-.icon-btn {
-  width: 32px; height: 32px; border-radius: 8px;
-  border: 1px solid #e5e7eb; background: #fff; color: #374151;
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer; font-size: 13px; transition: all 0.18s;
-}
-.icon-btn:hover { background: #eff6ff; color: #2563a8; border-color: #93c5fd; }
-.icon-btn.danger:hover { background: #fef2f2; color: #dc2626; border-color: #fca5a5; }
-
-/* ── EMPTY STATE ── */
-.ay-empty {
-  text-align: center; padding: 60px 20px; color: #94a3b8;
-}
-.ay-empty i { font-size: 48px; opacity: 0.35; display: block; margin-bottom: 16px; }
-.ay-empty h3 { font-size: 17px; font-weight: 700; color: #64748b; margin-bottom: 6px; }
-.ay-empty p { font-size: 13px; }
-
-/* ── TOAST ── */
-.ay-toast-wrap {
-  position: fixed; top: 20px; right: 20px; z-index: 9999;
-  display: flex; flex-direction: column; gap: 8px; pointer-events: none;
-}
-.ay-toast {
-  display: flex; align-items: center; gap: 10px;
-  padding: 12px 18px; border-radius: 12px; min-width: 260px;
-  box-shadow: 0 8px 28px rgba(0,0,0,0.12); font-size: 13px; font-weight: 600;
-  pointer-events: all; animation: toastIn 0.28s cubic-bezier(.34,1.56,.64,1) both;
-}
-.ay-toast.success { background: #fff; border-left: 4px solid #22c55e; color: #15803d; }
-.ay-toast.danger  { background: #fff; border-left: 4px solid #ef4444; color: #dc2626; }
-.ay-toast.info    { background: #fff; border-left: 4px solid #2563a8; color: #1e40af; }
-.ay-toast-close {
-  margin-left: auto; background: none; border: none;
-  font-size: 16px; cursor: pointer; color: inherit; opacity: 0.5;
-  line-height: 1;
-}
-.ay-toast-close:hover { opacity: 1; }
-@keyframes toastIn { from { opacity:0; transform: translateX(24px); } to { opacity:1; transform: translateX(0); } }
-
-/* ── CONFIRM MODAL ── */
-.ay-overlay {
-  position: fixed; inset: 0; background: rgba(15,23,42,0.45);
-  z-index: 9000; display: flex; align-items: center; justify-content: center;
-  animation: fadeIn 0.18s ease both;
-}
-.ay-modal {
-  background: #fff; border-radius: 20px; padding: 28px;
-  width: 100%; max-width: 380px; box-shadow: 0 20px 60px rgba(0,0,0,0.2);
-  animation: scaleIn 0.22s cubic-bezier(.34,1.56,.64,1) both;
-}
-.ay-modal h3 { font-size: 17px; font-weight: 800; color: #111827; margin-bottom: 8px; }
-.ay-modal p  { font-size: 13px; color: #6b7280; line-height: 1.6; margin-bottom: 20px; }
-.ay-modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
-@keyframes fadeIn  { from { opacity:0; } to { opacity:1; } }
-@keyframes scaleIn { from { opacity:0; transform: scale(0.92); } to { opacity:1; transform: scale(1); } }
-
-/* Responsive */
-@media (max-width: 768px) {
-  .ay-header { padding: 18px 16px; }
-  .ay-tabs-bar { padding: 16px 16px 0; }
-  .ay-body { padding: 16px; gap: 14px; }
-  .ay-form-grid { grid-template-columns: 1fr 1fr; }
-  .ay-card-body { padding: 16px; }
-  .ay-form-actions { flex-direction: column; }
-  .btn-prim, .btn-sec { width: 100%; justify-content: center; }
-}
-@media (max-width: 480px) {
-  .ay-form-grid { grid-template-columns: 1fr; }
-  .term-pills { flex-direction: column; }
-}
-`;
+// ─── SUB-COMPONENTS ─────────────────────────────────────────────────────────
 
 // ─── TOAST COMPONENT ──────────────────────────────────────────────────────────
 function Toast({ toasts, onClose }) {
@@ -352,16 +59,50 @@ function StatusBadge({ status }) {
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function AcademicYear() {
+    
+    // FIX 1: Call useParams INSIDE the component to get schoolId from URL
+    const { schoolId } = useParams();
+
+    // Guard: Ensure we have an ID before rendering
+    if (!schoolId) {
+        return <div>Error: School ID missing from URL.</div>;
+    }
+
     const [activeTab, setActiveTab] = useState("list");
-    const [records, setRecords]     = useState([]);
-    const [loading, setLoading]     = useState(true);
-    const [saving,  setSaving]      = useState(false);
-    const [editId,  setEditId]      = useState(null);
-    const [confirm, setConfirm]     = useState(null); // { id }
-    const [toasts,  setToasts]      = useState([]);
+    const [records, setRecords] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [editId, setEditId] = useState(null);
+    const [confirm, setConfirm] = useState(null);
+    const [toasts, setToasts] = useState([]);
+
+    // ─── PAGINATION STATE ───────────────────────────────────────
+    const [currentPage, setCurrentPage] = useState(1);
+    const itemsPerPage = 10;
+
+    // ─── PAGINATION LOGIC ─────────────────────────────────────────
+    const indexOfLastRecord = currentPage * itemsPerPage;
+    const indexOfFirstRecord = indexOfLastRecord - itemsPerPage;
+    const currentRecords = records.slice(indexOfFirstRecord, indexOfLastRecord);
+    const totalPages = Math.ceil(records.length / itemsPerPage);
+
+    const handlePrevPage = () => {
+        if (currentPage > 1) setCurrentPage(prev => prev - 1);
+    };
+
+    const handleNextPage = () => {
+        if (indexOfLastRecord < records.length) setCurrentPage(prev => prev + 1);
+    };
+
+    useEffect(() => {
+        if (currentPage > totalPages && totalPages > 0) {
+            setCurrentPage(totalPages);
+        }
+    }, [records.length, totalPages, currentPage]);
 
     // Form state
-    const EMPTY_FORM = { term: null, year: "", begin_month: "", end_month: "" };
+    // Matches backend schema: term, year, begin_month, end_month
+    const EMPTY_FORM = { term: null, year: '', begin_month: '', end_month: '', status: 'active' };
     const [form, setForm] = useState(EMPTY_FORM);
     const [formErrors, setFormErrors] = useState({});
 
@@ -373,26 +114,35 @@ export default function AcademicYear() {
     };
     const removeToast = (id) => setToasts(prev => prev.filter(t => t.id !== id));
 
-    // ── Data Fetch ───────────────────────────────────────────────────────────
+    // ── Data Fetch helper ────────────────────────────────────────────────────
+    const fetchRecords = async () => {
+        const data = await AcademicYearService.fetchAllAcademicYears(schoolId);
+        setRecords(Array.isArray(data) ? data : []);
+    };
+
+    // ── Initial load ─────────────────────────────────────────────────────────
     useEffect(() => {
-        // Simulate API call
-        setTimeout(() => {
-            setRecords(MOCK_ACADEMIC_YEARS);
-            setLoading(false);
-        }, 600);
-    }, []);
+        setLoading(true);
+        fetchRecords()
+            .catch(() => {
+                pushToast("Failed to fetch academic years.", "danger");
+                setRecords([]);
+            })
+            .finally(() => setLoading(false));
+    }, [schoolId]); 
 
     // ── Validation ───────────────────────────────────────────────────────────
     const validate = () => {
         const errs = {};
-        if (!form.term)        errs.term        = "Select a term.";
-        if (!form.year)        errs.year        = "Select a year.";
-        if (!form.begin_month) errs.begin_month = "Select beginning month.";
-        if (!form.end_month)   errs.end_month   = "Select end month.";
+        if (!form.term) errs.term = "Select a term.";
+        if (!form.year) errs.year = "Select a year.";
+        if (!form.begin_month) errs.begin_month = "Select a beginning month.";
+        if (!form.end_month) errs.end_month = "Select an end month.";
+        
         if (form.begin_month && form.end_month) {
-            const bi = MONTHS.indexOf(form.begin_month);
-            const ei = MONTHS.indexOf(form.end_month);
-            if (ei <= bi) errs.end_month = "End month must be after beginning month.";
+            if (MONTHS.indexOf(form.end_month) <= MONTHS.indexOf(form.begin_month)) {
+                errs.end_month = "End month must be after beginning month.";
+            }
         }
         setFormErrors(errs);
         return Object.keys(errs).length === 0;
@@ -402,37 +152,36 @@ export default function AcademicYear() {
     const handleSubmit = async () => {
         if (!validate()) return;
         setSaving(true);
-        await new Promise(r => setTimeout(r, 500)); // simulate API
-
-        if (editId) {
-            setRecords(prev => prev.map(r =>
-                r.id === editId
-                    ? { ...r, term: form.term, year: form.year, begin_month: form.begin_month, end_month: form.end_month }
-                    : r
-            ));
-            pushToast(`Term ${form.term} — ${form.year} updated successfully!`, "success");
-        } else {
-            const newRecord = {
-                id: Date.now(),
-                term: form.term,
-                year: form.year,
-                begin_month: form.begin_month,
-                end_month: form.end_month,
-                status: "upcoming",
-            };
-            setRecords(prev => [...prev, newRecord]);
-            pushToast(`Term ${form.term} — ${form.year} created successfully!`, "success");
+        try {
+            if (editId) {
+                // Service: updateAcademicYear(schoolId, id, data)
+                await AcademicYearService.updateAcademicYear(schoolId, editId, form);
+                pushToast(`Academic year ${form.year} updated successfully!`, "success");
+            } else {
+                // Service: createAcademicYear(schoolId, data)
+                await AcademicYearService.createAcademicYear(schoolId, form);
+                pushToast(`Academic year ${form.year} created successfully!`, "success");
+            }
+            await fetchRecords();
+            resetForm();
+            setActiveTab("list");
+        } catch (error) {
+            pushToast("Failed to save academic year.", "danger");
+        } finally {
+            setSaving(false);
         }
-
-        setSaving(false);
-        resetForm();
-        setActiveTab("list");
     };
 
     // ── Edit ─────────────────────────────────────────────────────────────────
     const handleEdit = (rec) => {
         setEditId(rec.id);
-        setForm({ term: rec.term, year: rec.year, begin_month: rec.begin_month, end_month: rec.end_month });
+        setForm({
+            term: rec.term,
+            year: rec.year,
+            begin_month: rec.begin_month,
+            end_month: rec.end_month,
+            status: rec.status || 'active',
+        });
         setFormErrors({});
         setActiveTab("form");
     };
@@ -440,10 +189,16 @@ export default function AcademicYear() {
     // ── Delete ───────────────────────────────────────────────────────────────
     const handleDeleteConfirm = (id) => setConfirm({ id });
     const handleDeleteExecute = async () => {
-        await new Promise(r => setTimeout(r, 300));
-        setRecords(prev => prev.filter(r => r.id !== confirm.id));
-        setConfirm(null);
-        pushToast("Academic year record deleted.", "info");
+        try {
+            // Service: deleteAcademicYear(schoolId, id)
+            await AcademicYearService.deleteAcademicYear(schoolId, confirm.id);
+            pushToast("Academic year record deleted.", "info");
+            await fetchRecords();
+        } catch (error) {
+            pushToast("Failed to delete academic year.", "danger");
+        } finally {
+            setConfirm(null);
+        }
     };
 
     // ── Reset ────────────────────────────────────────────────────────────────
@@ -471,8 +226,6 @@ export default function AcademicYear() {
 
     return (
         <>
-            <style>{CSS}</style>
-
             {/* Toasts */}
             <Toast toasts={toasts} onClose={removeToast} />
 
@@ -518,10 +271,10 @@ export default function AcademicYear() {
                             {/* Summary strip */}
                             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                                 {[
-                                    { label: 'Total Records', val: records.length, icon: 'bi-stack', color: '#2563a8' },
-                                    { label: 'Active Term',   val: records.filter(r => r.status === 'active').length,    icon: 'bi-play-circle-fill', color: '#15803d' },
-                                    { label: 'Upcoming',      val: records.filter(r => r.status === 'upcoming').length,  icon: 'bi-clock-fill',       color: '#a16207' },
-                                    { label: 'Completed',     val: records.filter(r => r.status === 'completed').length, icon: 'bi-check-circle-fill',color: '#64748b' },
+                                    { label: 'Total Records', val: records.length, icon: 'bi-stack', color: '#198754' },
+                                    { label: 'Active Term', val: records.filter(r => r.status === 'active').length, icon: 'bi-play-circle-fill', color: '#15803d' },
+                                    { label: 'Upcoming', val: records.filter(r => r.status === 'upcoming').length, icon: 'bi-clock-fill', color: '#a16207' },
+                                    { label: 'Completed', val: records.filter(r => r.status === 'completed').length, icon: 'bi-check-circle-fill', color: '#64748b' },
                                 ].map(s => (
                                     <div key={s.label} style={{
                                         background: '#fff', borderRadius: 14, padding: '14px 20px',
@@ -571,59 +324,84 @@ export default function AcademicYear() {
                                         <p>Click <strong>New Record</strong> to add the first academic year term.</p>
                                     </div>
                                 ) : (
-                                    <div className="table-container" style={{ borderRadius: 0, border: 'none', boxShadow: 'none' }}>
-                                        <table className="ay-table">
-                                            <thead>
-                                                <tr>
-                                                    <th className="ay-th">#</th>
-                                                    <th className="ay-th">Term</th>
-                                                    <th className="ay-th">Year</th>
-                                                    <th className="ay-th">Period</th>
-                                                    <th className="ay-th">Status</th>
-                                                    <th className="ay-th">Actions</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {records.map((rec, idx) => (
-                                                    <tr key={rec.id}>
-                                                        <td className="ay-td" style={{ color: '#94a3b8', fontSize: 12, fontFamily: "'DM Mono',monospace" }}>
-                                                            {String(idx + 1).padStart(2, '0')}
-                                                        </td>
-                                                        <td className="ay-td">
-                                                            <span className="term-bdg">
-                                                                <span className="term-bdg-dot"></span>
-                                                                Term {rec.term}
-                                                            </span>
-                                                        </td>
-                                                        <td className="ay-td">
-                                                            <span className="yr-mono">{rec.year}</span>
-                                                        </td>
-                                                        <td className="ay-td">
-                                                            <span className="month-range">
-                                                                <i className="bi bi-calendar-event" style={{ color: '#2563a8' }}></i>
-                                                                {rec.begin_month}
-                                                                <span className="month-arrow">→</span>
-                                                                {rec.end_month}
-                                                            </span>
-                                                        </td>
-                                                        <td className="ay-td">
-                                                            <StatusBadge status={rec.status} />
-                                                        </td>
-                                                        <td className="ay-td">
-                                                            <div className="row-act-btns">
-                                                                <button className="icon-btn" title="Edit" onClick={() => handleEdit(rec)}>
-                                                                    <i className="bi bi-pencil-fill"></i>
-                                                                </button>
-                                                                <button className="icon-btn danger" title="Delete" onClick={() => handleDeleteConfirm(rec.id)}>
-                                                                    <i className="bi bi-trash-fill"></i>
-                                                                </button>
-                                                            </div>
-                                                        </td>
+                                    <>
+                                        <div className="table-container" style={{ borderRadius: 0, border: 'none', boxShadow: 'none' }}>
+                                            <table className="ay-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th className="ay-th">#</th>
+                                                        <th className="ay-th">Term</th>
+                                                        <th className="ay-th">Year</th>
+                                                        <th className="ay-th">Period</th>
+                                                        <th className="ay-th">Status</th>
+                                                        <th className="ay-th">Actions</th>
                                                     </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
+                                                </thead>
+                                                <tbody>
+                                                    {currentRecords.map((rec, idx) => (
+                                                        <tr key={rec.id}>
+                                                            <td className="ay-td" style={{ color: '#94a3b8', fontSize: 12, fontFamily: "'DM Mono',monospace" }}>
+                                                                {String(indexOfFirstRecord + idx + 1).padStart(2, '0')}
+                                                            </td>
+                                                            <td className="ay-td">
+                                                                <span className="term-bdg">
+                                                                    <span className="term-bdg-dot"></span>
+                                                                    Term {rec.term}
+                                                                </span>
+                                                            </td>
+                                                            <td className="ay-td">
+                                                                <span className="yr-mono">{rec.year}</span>
+                                                            </td>
+                                                            <td className="ay-td">
+                                                                <span className="month-range">
+                                                                    <i className="bi bi-calendar-event" style={{ color: '#198754' }}></i>
+                                                                    {rec.begin_month}
+                                                                    <span className="month-arrow">→</span>
+                                                                    {rec.end_month}
+                                                                </span>
+                                                            </td>
+                                                            <td className="ay-td">
+                                                                <StatusBadge status={rec.status} />
+                                                            </td>
+                                                            <td className="ay-td">
+                                                                <div className="row-act-btns">
+                                                                    <button className="icon-btn" title="Edit" onClick={() => handleEdit(rec)}>
+                                                                        <i className="bi bi-pencil-fill"></i>
+                                                                    </button>
+                                                                    <button className="icon-btn danger" title="Delete" onClick={() => handleDeleteConfirm(rec.id)}>
+                                                                        <i className="bi bi-trash-fill"></i>
+                                                                    </button>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+
+                                        {/* ─── PAGINATION ─── */}
+                                        {totalPages > 1 && (
+                                            <div className="ay-pagination">
+                                                <button
+                                                    className="ay-pag-btn"
+                                                    disabled={currentPage === 1}
+                                                    onClick={handlePrevPage}
+                                                >
+                                                    <i className="bi bi-chevron-left"></i> Prev
+                                                </button>
+                                                <span className="ay-pag-info">
+                                                    Page {currentPage} of {totalPages}
+                                                </span>
+                                                <button
+                                                    className="ay-pag-btn"
+                                                    disabled={indexOfLastRecord >= records.length}
+                                                    onClick={handleNextPage}
+                                                >
+                                                    Next <i className="bi bi-chevron-right"></i>
+                                                </button>
+                                            </div>
+                                        )}
+                                    </>
                                 )}
                             </div>
                         </>
@@ -734,12 +512,14 @@ export default function AcademicYear() {
                                 {/* Preview strip */}
                                 {(form.term && form.year && form.begin_month && form.end_month) && (
                                     <div style={{
-                                        marginTop: 22, padding: '14px 18px', background: '#eff6ff',
-                                        border: '1.5px solid #bfdbfe', borderRadius: 12,
+                                        marginTop: 22, padding: '14px 18px',
+                                        background: '#ebfbee',
+                                        border: '1.5px solid #a3cfbb',
+                                        borderRadius: 12,
                                         display: 'flex', alignItems: 'center', gap: 12
                                     }}>
-                                        <i className="bi bi-eye-fill" style={{ color: '#2563a8', fontSize: 16 }}></i>
-                                        <span style={{ fontSize: 13, fontWeight: 700, color: '#1e40af' }}>
+                                        <i className="bi bi-eye-fill" style={{ color: '#198754', fontSize: 16 }}></i>
+                                        <span style={{ fontSize: 13, fontWeight: 700, color: '#0f5132' }}>
                                             Preview:&nbsp;
                                         </span>
                                         <span style={{ fontSize: 13, color: '#1e3a5f' }}>

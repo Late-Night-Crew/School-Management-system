@@ -1,421 +1,317 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
+import ToastNote from "../../components/ToastNote";
 
-const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+// ─── NAV SECTIONS ─────────────────────────────────────────────────────────────
+const NAV = [
+  { id: "profile",       icon: "bi-person-circle",              label: "My Profile" },
+  { id: "school",        icon: "bi-building",                   label: "School Info" },
+  { id: "marks",         icon: "bi-grid-3x3-gap",               label: "Marks & Grades" },
+];
 
-/* SCOPED STYLING TO PREVENT GLOBAL CONFLICTS */
-/* All classes prefixed with .ss- */
-
-.ss-wrapper {
-  font-family: 'Plus Jakarta Sans', sans-serif;
-  background-color: #F3F4F6;
-  min-height: 100vh;
-  color: #1e293b;
-  padding: 2rem;
+// ─── SECTION HEADER ───────────────────────────────────────────────────────────
+function SectionHeader({ icon, title, subtitle }) {
+  return (
+    <div className="sxp-section-header">
+      <div className="sxp-section-header__icon">
+        <i className={`bi ${icon}`}></i>
+      </div>
+      <div>
+        <h2 className="sxp-section-header__title">{title}</h2>
+        {subtitle && <p className="sxp-section-header__sub">{subtitle}</p>}
+      </div>
+    </div>
+  );
 }
 
-.ss-container {
-  max-width: 900px;
-  margin: 0 auto;
+// ─── CARD ─────────────────────────────────────────────────────────────────────
+function Card({ children, className = "" }) {
+  return <div className={`sxp-card ${className}`}>{children}</div>;
 }
 
-.ss-card {
-  background: white;
-  border-radius: 1.25rem;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-  border: 1px solid rgba(226, 232, 240, 0.8);
-  padding: 2.5rem;
-  margin-bottom: 2rem;
-  animation: fadeIn 0.5s ease-in-out;
+function CardHead({ title, subtitle, action }) {
+  return (
+    <div className="sxp-card__head">
+      <div>
+        <div className="sxp-card__title">{title}</div>
+        {subtitle && <div className="sxp-card__sub">{subtitle}</div>}
+      </div>
+      {action && <div className="sxp-card__action">{action}</div>}
+    </div>
+  );
 }
 
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+function CardBody({ children }) {
+  return <div className="sxp-card__body">{children}</div>;
 }
 
-/* HEADER */
-.ss-header {
-  margin-bottom: 2rem;
+// ─── FIELD ────────────────────────────────────────────────────────────────────
+function Field({ label, hint, children }) {
+  return (
+    <div className="sxp-field">
+      <label className="sxp-field__label">{label}</label>
+      {children}
+      {hint && <p className="sxp-field__hint">{hint}</p>}
+    </div>
+  );
 }
 
-.ss-header h1 {
-  font-size: 1.75rem;
-  font-weight: 800;
-  color: #0f172a;
-  margin: 0;
-  letter-spacing: -0.025em;
+// ─── INPUT ────────────────────────────────────────────────────────────────────
+function Input({ type = "text", value, placeholder, readOnly }) {
+  return (
+    <input
+      type={type}
+      className={`sxp-input${readOnly ? " sxp-input--readonly" : ""}`}
+      value={value}
+      placeholder={placeholder}
+      readOnly={readOnly}
+    />
+  );
 }
 
-.ss-header p {
-  color: #64748b;
-  margin: 0.5rem 0 0 0;
-  font-size: 0.875rem;
-}
+// ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
+export default function SchoolSettings() {
+  const { schoolId } = useParams();
+  const [activeSection, setActiveSection] = useState("profile");
+  const [toast, setToast] = useState({ show: false, message: "", variant: "success" });
 
-/* PROFILE SECTION SPECIFIC */
-.ss-profile-layout {
-  display: flex;
-  align-items: center;
-  gap: 2rem;
-  flex-wrap: wrap;
-}
+  // ── Profile ──────────────────────────────────────────────────────────────────
+  const [profile, setProfile] = useState({
+    displayName: "Sarah Mitchell",
+    username: "sarah.manager",
+    phone: "+265 999 123 456",
+    email: "sarah.mitchell@greenvalley.edu",
+    role: "School Manager",
+  });
 
-.ss-avatar-large {
-  width: 120px;
-  height: 120px;
-  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-size: 3rem;
-  font-weight: 800;
-  box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3);
-  flex-shrink: 0;
-}
+  // ── School Info ──────────────────────────────────────────────────────────────
+  const [schoolInfo] = useState({
+    name: "Green Valley High School",
+    code: "GVH-2024",
+    district: "Lilongwe Urban",
+    division: "Zone 3",
+    address: "P.O Box 101, Lilongwe",
+    phone: "+265 01 123 456",
+    email: "info@greenvalley.edu",
+    type: "Secondary",
+    capacity: "1500",
+  });
 
-.ss-profile-info {
-  flex-grow: 1;
-}
+  // ── Marks & Grades ────────────────────────────────────────────────────────────
+  const [marksConfig, setMarksConfig] = useState({
+    markingScheme: "percentage",
+    passMarkPercent: "50", 
+    gradeA: "90",
+    gradeB: "80",
+    gradeC: "70",
+    gradeD: "50", // Pass starts at 50
+    gradeF: "0",  // Fail is below 50
+  });
 
-.ss-profile-name {
-  font-size: 1.75rem;
-  font-weight: 700;
-  color: #0f172a;
-  margin: 0 0 0.5rem 0;
-}
+  // ── Fetch Grading Config from Database ────────────────────────────────────────
+  useEffect(() => {
+    // Simulating fetching grading thresholds created in Admin settings
+    const fetchGradingScheme = async () => {
+        try {
+          
+            const mockDbResponse = {
+                gradeA: "90",
+                gradeB: "80",
+                gradeC: "70",
+                gradeD: "50", 
+                gradeF: "0",
+                passMarkPercent: "50",
+                markingScheme: "percentage"
+            };
 
-.ss-profile-role {
-  display: inline-block;
-  background: #eff6ff;
-  color: #2563eb;
-  padding: 0.25rem 0.75rem;
-  border-radius: 99px;
-  font-size: 0.85rem;
-  font-weight: 600;
-  margin-bottom: 1.5rem;
-}
+            // Artificial delay to mimic network request
+            setTimeout(() => {
+                setMarksConfig(prev => ({
+                    ...prev,
+                    ...mockDbResponse
+                }));
+            }, 500);
 
-/* FORMS & READ ONLY GRID */
-.ss-grid-2 {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 1.5rem;
-}
-
-.ss-form-group {
-  margin-bottom: 1.5rem;
-}
-
-.ss-label {
-  display: block;
-  margin-bottom: 0.5rem;
-  font-size: 0.8rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #94a3b8;
-}
-
-.ss-input, .ss-select {
-  width: 100%;
-  padding: 0.75rem 1rem;
-  border-radius: 0.75rem;
-  border: 1px solid #cbd5e1;
-  font-family: inherit;
-  font-size: 0.95rem;
-  color: #1e293b;
-  transition: all 0.2s;
-  background-color: #fff;
-}
-
-.ss-input:focus, .ss-select:focus {
-  outline: none;
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-}
-
-.ss-input:disabled, .ss-select:disabled {
-  background-color: #f8fafc;
-  color: #94a3b8;
-  border-color: #e2e8f0;
-  cursor: not-allowed;
-  font-weight: 500;
-}
-
-/* TOGGLES */
-.ss-setting-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1.25rem;
-  border: 1px solid #f1f5f9;
-  border-radius: 0.75rem;
-  background: #fff;
-  transition: all 0.2s;
-}
-
-.ss-setting-row:hover {
-  border-color: #cbd5e1;
-}
-
-.ss-setting-info h4 {
-  margin: 0;
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: #0f172a;
-}
-
-.ss-setting-info p {
-  margin: 0.25rem 0 0 0;
-  font-size: 0.8rem;
-  color: #64748b;
-}
-
-.ss-switch {
-  position: relative;
-  display: inline-block;
-  width: 48px;
-  height: 26px;
-  flex-shrink: 0;
-}
-
-.ss-switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.ss-slider {
-  position: absolute;
-  cursor: pointer;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background-color: #e2e8f0;
-  transition: .4s;
-  border-radius: 34px;
-}
-
-.ss-slider:before {
-  position: absolute;
-  content: "";
-  height: 20px;
-  width: 20px;
-  left: 3px;
-  bottom: 3px;
-  background-color: white;
-  transition: .4s;
-  border-radius: 50%;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.ss-switch input:checked + .ss-slider {
-  background-color: #2563eb;
-}
-
-.ss-switch input:checked + .ss-slider:before {
-  transform: translateX(22px);
-}
-
-/* SECTION HEADERS */
-.ss-section-title {
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: #0f172a;
-  margin-bottom: 1.5rem;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.ss-section-title i {
-  color: #2563eb;
-  font-size: 1.25rem;
-}
-
-/* BUTTON */
-.ss-btn-save {
-  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-  color: white;
-  padding: 0.75rem 2.5rem;
-  border-radius: 0.75rem;
-  font-weight: 600;
-  border: none;
-  cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-  justify-content: center;
-}
-
-.ss-btn-save:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
-}
-`;
-
-const SchoolSettings = () => {
-    const { schoolId } = useParams();
-    
-    // My Profile State
-    const [profile, setProfile] = useState({
-        displayName: "Sarah Mitchell",
-        username: "sarah.manager",
-        phone: "+1 (555) 987-6543",
-        email: "sarah.mitchell@greenvalley.edu"
-    });
-
-    // General Settings (Read Only)
-    const [schoolInfo, setSchoolInfo] = useState({
-        schoolName: "Green Valley High",
-        schoolCode: "GVH-2024",
-        district: "Lilongwe Urban",
-        division: "Zone 3"
-    });
-
-    // System Settings
-    const [systemConfig, setSystemConfig] = useState({
-        smsAlerts: true,
-        transferAlerts: true, // Added Transfer Alerts
-        logoutTime: "30"
-    });
-
-    const handleSave = () => {
-        console.log("Saving settings...", { profile, schoolInfo, systemConfig });
-        alert("Settings saved successfully!");
+        } catch (error) {
+            console.error("Failed to fetch grading scheme", error);
+        }
     };
 
-    return (
-        <>
-            <style>{CSS}</style>
-            <div className="ss-wrapper">
-                <div className="ss-container">
-                    
-                    {/* Header */}
-                    <div className="ss-header">
-                        <h1>School Manager Settings</h1>
-                        <p>Manage your profile, school configuration, and system access.</p>
-                    </div>
+    fetchGradingScheme();
+  }, [schoolId]);
 
-                    {/* SECTION 1: MY PROFILE */}
-                    <div className="ss-card">
-                        <div className="ss-section-title">
-                            <i className="bi bi-person-circle"></i> My Profile
-                        </div>
-                        <div className="ss-profile-layout">
-                            <div className="ss-avatar-large">
-                                {profile.displayName.split(' ').map(n => n[0]).join('')}
-                            </div>
-                            <div className="ss-profile-info">
-                                <h2 className="ss-profile-name">{profile.displayName}</h2>
-                                <span className="ss-profile-role">School Manager</span>
-                                
-                                <div className="ss-grid-2">
-                                    <div className="ss-form-group">
-                                        <label className="ss-label">Username</label>
-                                        <input type="text" className="ss-input" value={profile.username} disabled />
-                                    </div>
-                                    <div className="ss-form-group">
-                                        <label className="ss-label">Phone Number</label>
-                                        <input type="tel" className="ss-input" value={profile.phone} disabled />
-                                    </div>
-                                    <div className="ss-form-group" style={{ gridColumn: "1 / -1" }}>
-                                        <label className="ss-label">Email Address</label>
-                                        <input type="email" className="ss-input" value={profile.email} disabled />
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+  const GRADE_THRESHOLDS = [
+    { key: "gradeA", label: "Grade A  (Excellent)" },
+    { key: "gradeB", label: "Grade B (Very Good)" },
+    { key: "gradeC", label: "Grade C (Good)" },
+    { key: "gradeD", label: "Grade D (Pass)" },
+    { key: "gradeF", label: "Grade F (Fail)" }, 
+  ];
 
-                    {/* SECTION 2: GENERAL SCHOOL SETTINGS */}
-                    <div className="ss-card">
-                        <div className="ss-section-title">
-                            <i className="bi bi-building"></i> General School Information
-                        </div>
-                        <p style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: '1.5rem' }}>
-                            School details are managed by the system administrator.
-                        </p>
-                        <div className="ss-grid-2">
-                            <div className="ss-form-group">
-                                <label className="ss-label">School Name</label>
-                                <input type="text" className="ss-input" value={schoolInfo.schoolName} disabled />
-                            </div>
-                            <div className="ss-form-group">
-                                <label className="ss-label">School Code</label>
-                                <input type="text" className="ss-input" value={schoolInfo.schoolCode} disabled />
-                            </div>
-                            <div className="ss-form-group">
-                                <label className="ss-label">District</label>
-                                <input type="text" className="ss-input" value={schoolInfo.district} disabled />
-                            </div>
-                            <div className="ss-form-group">
-                                <label className="ss-label">Division</label>
-                                <input type="text" className="ss-input" value={schoolInfo.division} disabled />
-                            </div>
-                        </div>
-                    </div>
+  // ── Render ────────────────────────────────────────────────────────────────────
+  return (
+    <>
+      <ToastNote
+        show={toast.show}
+        onClose={() => setToast((t) => ({ ...t, show: false }))}
+        message={toast.message}
+        variant={toast.variant}
+      />
 
-                    {/* SECTION 3: SYSTEM CONFIGURATION */}
-                    <div className="ss-card">
-                        <div className="ss-section-title">
-                            <i className="bi bi-gear"></i> System Configuration
-                        </div>
-                        
-                        <div className="ss-grid-2">
-                            <div>
-                                <label className="ss-label" style={{ marginBottom: '0.5rem' }}>Auto-Logout Timer</label>
-                                <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1rem' }}>System logs out inactive users after this duration.</p>
-                                <select 
-                                    className="ss-select"
-                                    value={systemConfig.logoutTime}
-                                    onChange={e => setSystemConfig({...systemConfig, logoutTime: e.target.value})}
-                                >
-                                    <option value="15">15 Minutes</option>
-                                    <option value="30">30 Minutes</option>
-                                    <option value="60">1 Hour</option>
-                                    <option value="0">Never</option>
-                                </select>
-                            </div>
+      <div className="sxp-shell">
 
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', justifyContent: 'center' }}>
-                                <div className="ss-setting-row" style={{ padding: '0.75rem', marginBottom: 0 }}>
-                                    <div className="ss-setting-info">
-                                        <h4 style={{ fontSize: '0.9rem' }}>SMS Alerts</h4>
-                                    </div>
-                                    <label className="ss-switch">
-                                        <input type="checkbox" checked={systemConfig.smsAlerts} onChange={() => setSystemConfig({...systemConfig, smsAlerts: !systemConfig.smsAlerts})} />
-                                        <span className="ss-slider"></span>
-                                    </label>
-                                </div>
-                                <div className="ss-setting-row" style={{ padding: '0.75rem', marginBottom: 0 }}>
-                                    <div className="ss-setting-info">
-                                        <h4 style={{ fontSize: '0.9rem' }}>Transfer Alerts</h4>
-                                    </div>
-                                    <label className="ss-switch">
-                                        <input type="checkbox" checked={systemConfig.transferAlerts} onChange={() => setSystemConfig({...systemConfig, transferAlerts: !systemConfig.transferAlerts})} />
-                                        <span className="ss-slider"></span>
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div style={{ marginTop: '2rem', paddingTop: '2rem', borderTop: '1px solid #f1f5f9', textAlign: 'center' }}>
-                            <button className="ss-btn-save" onClick={handleSave}>
-                                <i className="bi bi-check-lg"></i> Save All Changes
-                            </button>
-                        </div>
-                    </div>
-
-                </div>
+        {/* ── SIDEBAR NAV ── */}
+        <aside className="sxp-sidebar">
+          <div className="sxp-sidebar__brand">
+            <div className="sxp-sidebar__logo">
+              <i className="bi bi-gear-wide-connected"></i>
             </div>
-        </>
-    );
-};
+            <div>
+              <p className="sxp-sidebar__appname">Settings</p>
+              <p className="sxp-sidebar__schoolid">School #{schoolId || "—"}</p>
+            </div>
+          </div>
 
-export default SchoolSettings;
+          <nav className="sxp-sidebar__nav">
+            {NAV.map((item) => (
+              <button
+                key={item.id}
+                className={`sxp-navitem${activeSection === item.id ? " sxp-navitem--active" : ""}`}
+                onClick={() => setActiveSection(item.id)}
+              >
+                <i className={`bi ${item.icon} sxp-navitem__icon`}></i>
+                <span className="sxp-navitem__label">{item.label}</span>
+                {activeSection === item.id && <span className="sxp-navitem__bar"></span>}
+              </button>
+            ))}
+          </nav>
+        </aside>
+
+        {/* ── MAIN CONTENT ── */}
+        <main className="sxp-main">
+          <div className="sxp-content">
+
+            {/* ════════════════ MY PROFILE ════════════════ */}
+            {activeSection === "profile" && (
+              <div className="sxp-section sxp-fade-in">
+                <SectionHeader icon="bi-person-circle" title="My Profile" subtitle="Your personal account information." />
+
+                <Card>
+                  <CardHead title="Account Identity" />
+                  <CardBody>
+                    <div className="sxp-profile-hero">
+                      <div className="sxp-avatar-xl">
+                        {profile.displayName.split(" ").map((n) => n[0]).join("")}
+                        <span className="sxp-avatar-xl__ring"></span>
+                      </div>
+                      <div className="sxp-profile-hero__info">
+                        <p className="sxp-profile-hero__name">{profile.displayName}</p>
+                        <span className="sxp-tag sxp-tag--primary">{profile.role}</span>
+                      </div>
+                    </div>
+
+                    <div className="sxp-grid sxp-grid--2">
+                      <Field label="Display Name">
+                        <Input value={profile.displayName} readOnly />
+                      </Field>
+                      <Field label="Username">
+                        <Input value={profile.username} readOnly />
+                      </Field>
+                      <Field label="Phone Number">
+                        <Input type="tel" value={profile.phone} readOnly />
+                      </Field>
+                      <Field label="Email Address">
+                        <Input type="email" value={profile.email} readOnly />
+                      </Field>
+                    </div>
+                  </CardBody>
+                </Card>
+              </div>
+            )}
+
+            {/* ════════════════ SCHOOL INFO ════════════════ */}
+            {activeSection === "school" && (
+              <div className="sxp-section sxp-fade-in">
+                <SectionHeader icon="bi-building" title="School Information" subtitle="Official school details." />
+
+                <div className="sxp-info-banner">
+                  <i className="bi bi-lock-fill"></i>
+                  These fields are read-only and managed by the Regional Administrator.
+                </div>
+
+                <Card>
+                  <CardHead title="Official Details" />
+                  <CardBody>
+                    <div className="sxp-grid sxp-grid--2">
+                      {[
+                        { label: "School Name",     value: schoolInfo.name },
+                        { label: "School Code",     value: schoolInfo.code },
+                        { label: "District",        value: schoolInfo.district },
+                        { label: "Division / Zone", value: schoolInfo.division },
+                        { label: "Address",         value: schoolInfo.address },
+                        { label: "Phone",           value: schoolInfo.phone },
+                        { label: "Email",           value: schoolInfo.email },
+                        { label: "School Type",     value: schoolInfo.type },
+                        { label: "Capacity",        value: schoolInfo.capacity + " students" },
+                      ].map(({ label, value }) => (
+                        <Field key={label} label={label}>
+                          <Input value={value} readOnly />
+                        </Field>
+                      ))}
+                    </div>
+                  </CardBody>
+                </Card>
+              </div>
+            )}
+
+            {/* ════════════════ MARKS & GRADES ════════════════ */}
+            {activeSection === "marks" && (
+              <div className="sxp-section sxp-fade-in">
+                <SectionHeader icon="bi-grid-3x3-gap" title="Marks & Grades Settings" subtitle="Grading thresholds managed by the Administrator." />
+
+                <Card>
+                  <CardHead title="Grading Scale" subtitle="Grading policy: Scores below 50% are considered Fail (Grade F)." />
+                  <CardBody>
+                    <div className="sxp-grid sxp-grid--2">
+                      <Field label="Pass Mark (%)">
+                        <Input type="number" value={marksConfig.passMarkPercent} readOnly />
+                      </Field>
+                      <Field label="Marking Scheme">
+                        <div className="sxp-select-wrap">
+                            <select className="sxp-select sxp-input--readonly" value={marksConfig.markingScheme} disabled>
+                                <option value="percentage">Percentage (0–100)</option>
+                            </select>
+                            <i className="bi bi-chevron-down sxp-select-chevron"></i>
+                        </div>
+                      </Field>
+                    </div>
+
+                    <div className="sxp-grade-grid">
+                      {GRADE_THRESHOLDS.map(({ key, label }) => (
+                        <div key={key} className="sxp-grade-row">
+                          <div className={`sxp-grade-badge sxp-grade-badge--${key.replace("grade","").toLowerCase()}`}>
+                            {key.replace("grade", "")}
+                          </div>
+                          <span className="sxp-grade-row__label">{label}</span>
+                          <div className="sxp-grade-row__input">
+                            <Input
+                              type="number"
+                              value={marksConfig[key]}
+                              readOnly
+                            />
+                            <span className="sxp-grade-row__unit">%</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardBody>
+                </Card>
+              </div>
+            )}
+
+          </div>
+        </main>
+      </div>
+    </>
+  );
+}

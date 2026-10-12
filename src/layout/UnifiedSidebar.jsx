@@ -38,6 +38,7 @@ export default function UnifiedSidebar({ isMobileOpen = false, setIsMobileOpen =
       { name: "Transfers", path: "/admin/transfers", icon: "bi-arrow-left-right" },
       { name: "Reports", path: "/admin/reports", icon: "bi-file-earmark-text" },
       { name: "Notifications", path: "/admin/notifications", icon: "bi-bell", badge: 6 },
+      {name: "Users", path: "/admin/users", icon: "bi-person-fill"},
     ],
     region_admin: regionId ? [
       { name: "Dashboard", path: `/regional/${regionId}/dashboard`, icon: "bi-speedometer2" },
@@ -56,19 +57,21 @@ export default function UnifiedSidebar({ isMobileOpen = false, setIsMobileOpen =
       { name: "Transfers", path: `/school/${schoolId}/transfers`, icon: "bi-arrow-left-right" },
       {name: "Enter Marks", path: `/school/${schoolId}/marks`, icon: "bi-pen"},
       { name: "Reports", path: `/school/${schoolId}/reports`, icon: "bi-file-earmark-text" },
-      { name: "Settings", path: `/school/${schoolId}/settings`, icon: "bi-gear" },
       { name: "Notifications", path: `/school/${schoolId}/notifications`, icon: "bi-bell", badge: 6 },
+      { name: "Settings", path: `/school/${schoolId}/settings`, icon: "bi-gear" },
+      
     ] : [],
     school_manager: schoolId ? [
       { name: "Dashboard", path: `/school/${schoolId}/dashboard`, icon: "bi-speedometer2" },
+      {name: "Add Subjects", path: `/school/${schoolId}/addsubjects`, icon: "bi-book" },
       {name: "Academic Year", path: `/school/${schoolId}/academicyear`, icon: "bi-calendar4-week"},
       { name: "Register Students", path: `/school/${schoolId}/register`, icon: "bi-person-plus" },
       { name: "Students", path: `/school/${schoolId}/students`, icon: "bi-journal-bookmark" },
       {name: "Enter Marks", path: `/school/${schoolId}/marks`, icon: "bi-pen"},
       { name: "Transfers", path: `/school/${schoolId}/transfers`, icon: "bi-arrow-left-right" },
       { name: "Reports", path: `/school/${schoolId}/reports`, icon: "bi-file-earmark-text" },
-      { name: "Settings", path: `/school/${schoolId}/settings`, icon: "bi-gear" },
       { name: "Notifications", path: `/school/${schoolId}/notifications`, icon: "bi-bell", badge: 6 },
+      { name: "Settings", path: `/school/${schoolId}/settings`, icon: "bi-gear" },
     ] : [],
   };
 
@@ -106,9 +109,9 @@ export default function UnifiedSidebar({ isMobileOpen = false, setIsMobileOpen =
       >
         <div className="unified-sidebar-header px-4 py-4">
           <div className="d-flex align-items-center gap-3">
-            <div className="unified-logo">NS</div>
+            <div className="unified-logo">ODS</div>
             <div>
-              <h2 className="unified-system-name">NSMS</h2>
+              <h2 className="unified-system-name">OPEN DAY SYSTEM</h2>
               <span className="unified-system-sub">National School Management</span>
             </div>
           </div>
@@ -144,7 +147,7 @@ export default function UnifiedSidebar({ isMobileOpen = false, setIsMobileOpen =
         </div>
 
         <div className="unified-sidebar-footer px-4 py-3 small text-white-50 text-center">
-          © 2025 NSMS
+          © 2026 - ODS
         </div>
 
         <style>{`

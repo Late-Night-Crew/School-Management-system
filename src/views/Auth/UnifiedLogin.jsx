@@ -64,7 +64,7 @@ export default function UnifiedLogin() {
   return (
     <div className="harbor-container">
       <div className="harbor-login-card">
-        <h2 className="harbor-title">National School Management System</h2>
+        <h2 className="harbor-title">ODS Management System</h2>
 
         <form onSubmit={formik.handleSubmit}>
           <div className="mb-3">
@@ -119,7 +119,7 @@ export default function UnifiedLogin() {
           </button>
         </form>
 
-        <p className="harbor-footer mt-3">© 2025 National School Management System</p>
+        <p className="harbor-footer mt-3">© {new Date().getFullYear()} Open Day Secondary School Management System</p>
       </div>
     </div>
   );

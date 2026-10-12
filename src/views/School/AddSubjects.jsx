@@ -1,83 +1,157 @@
 import React, { useState, useEffect } from "react";
+import ToastNote from "../../components/ToastNote";
 import { AUTH_TOKEN_KEY } from "../constants/storageKeys";
-import "./AddSubjects.css";
 
 export default function AddSubjects() {
+
+    /* ──────────────────────────────────────────────────────────
+       STATE
+    ────────────────────────────────────────────────────────── */
     const [activeTab, setActiveTab] = useState("add");
+
     const [subjects, setSubjects] = useState([]);
     const [classes, setClasses] = useState([]);
     const [classSubjects, setClassSubjects] = useState([]);
+
     const [searchTerm, setSearchTerm] = useState("");
+    const [isFetching, setIsFetching] = useState(false);
+
+    /* Pagination */
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 7;
 
-    // Add Subject Form State
+    /* Add Subject Form */
     const [subjectForm, setSubjectForm] = useState({
         name: "",
         code: "",
-        description: ""
     });
 
-    // Assign Subject Form State
+    /* Assign Subject Form */
     const [assignForm, setAssignForm] = useState({
         subjectId: "",
         class: "",
         optional: false
     });
 
+    const [toast, setToast] = useState({
+        show: false,
+        message: "",
+        variant: "success"
+    });
+
+    /* ──────────────────────────────────────────────────────────
+       EFFECTS
+    ────────────────────────────────────────────────────────── */
     useEffect(() => {
         fetchSubjects();
         fetchClasses();
         fetchClassSubjects();
     }, []);
 
+    /* ──────────────────────────────────────────────────────────
+       TOAST
+    ────────────────────────────────────────────────────────── */
+    const showToast = (message, variant = "success") => {
+        setToast({
+            show: true,
+            message,
+            variant
+        });
+
+        setTimeout(() => {
+            setToast(prev => ({
+                ...prev,
+                show: false
+            }));
+        }, 3000);
+    };
+
+    const hideToast = () => {
+        setToast(prev => ({
+            ...prev,
+            show: false
+        }));
+    };
+
+    /* ──────────────────────────────────────────────────────────
+       FETCH DATA
+    ────────────────────────────────────────────────────────── */
     const fetchSubjects = async () => {
+        setIsFetching(true);
+
         try {
             const token = localStorage.getItem(AUTH_TOKEN_KEY);
+
             const response = await fetch("/api/subjects", {
-                headers: { Authorization: `Bearer ${token}` }
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
             });
+
             const data = await response.json();
+
             setSubjects(data || []);
+
         } catch (error) {
-            console.error("Error fetching subjects:", error);
+            console.error(error);
+            showToast("Failed to load subjects", "danger");
+        } finally {
+            setIsFetching(false);
         }
     };
 
     const fetchClasses = async () => {
         try {
             const token = localStorage.getItem(AUTH_TOKEN_KEY);
+
             const response = await fetch("/api/classes", {
-                headers: { Authorization: `Bearer ${token}` }
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
             });
+
             const data = await response.json();
+
             setClasses(data || []);
+
         } catch (error) {
-            console.error("Error fetching classes:", error);
+            console.error(error);
         }
     };
 
     const fetchClassSubjects = async () => {
         try {
             const token = localStorage.getItem(AUTH_TOKEN_KEY);
+
             const response = await fetch("/api/class-subjects", {
-                headers: { Authorization: `Bearer ${token}` }
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
             });
+
             const data = await response.json();
+
             setClassSubjects(data || []);
+
         } catch (error) {
-            console.error("Error fetching class subjects:", error);
+            console.error(error);
         }
     };
 
+    /* ──────────────────────────────────────────────────────────
+       ADD SUBJECT
+    ────────────────────────────────────────────────────────── */
     const handleAddSubject = async (e) => {
         e.preventDefault();
+
         if (!subjectForm.name.trim() || !subjectForm.code.trim()) {
-            alert("Please fill all required fields");
+            showToast("Please fill in Name and Code.", "warning");
             return;
         }
+
         try {
             const token = localStorage.getItem(AUTH_TOKEN_KEY);
+
             const response = await fetch("/api/subjects", {
                 method: "POST",
                 headers: {
@@ -86,384 +160,709 @@ export default function AddSubjects() {
                 },
                 body: JSON.stringify(subjectForm)
             });
+
             if (response.ok) {
-                alert("Subject added successfully!");
-                setSubjectForm({ name: "", code: "", description: "" });
+                showToast("Subject added successfully!");
+
+                setSubjectForm({
+                    name: "",
+                    code: "",
+                });
+
                 fetchSubjects();
             }
+
         } catch (error) {
-            console.error("Error adding subject:", error);
-            alert("Failed to add subject");
+            console.error(error);
+            showToast("Failed to add subject.", "danger");
         }
     };
 
+    /* ──────────────────────────────────────────────────────────
+       ASSIGN SUBJECT
+    ────────────────────────────────────────────────────────── */
     const handleAssignSubject = async (e) => {
         e.preventDefault();
+
         if (!assignForm.subjectId || !assignForm.class) {
-            alert("Please select subject and class");
+            showToast("Please select Subject and Class.", "warning");
             return;
         }
+
         try {
             const token = localStorage.getItem(AUTH_TOKEN_KEY);
+
             const response = await fetch("/api/class-subjects", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                     Authorization: `Bearer ${token}`
                 },
-                body: JSON.stringify({
-                    subjectId: assignForm.subjectId,
-                    class: assignForm.class,
-                    optional: assignForm.optional
-                })
+                body: JSON.stringify(assignForm)
             });
+
             if (response.ok) {
-                alert("Subject assigned successfully!");
-                setAssignForm({ subjectId: "", class: "", optional: false });
+                showToast("Subject assigned successfully!");
+
+                setAssignForm({
+                    subjectId: "",
+                    class: "",
+                    optional: false
+                });
+
                 fetchClassSubjects();
             }
+
         } catch (error) {
-            console.error("Error assigning subject:", error);
-            alert("Failed to assign subject");
+            console.error(error);
+            showToast("Failed to assign subject.", "danger");
         }
     };
 
+    /* ──────────────────────────────────────────────────────────
+       DELETE SUBJECT
+    ────────────────────────────────────────────────────────── */
     const handleDeleteSubject = async (subjectId) => {
-        if (window.confirm("Are you sure you want to delete this subject?")) {
-            try {
-                const token = localStorage.getItem(AUTH_TOKEN_KEY);
-                const response = await fetch(`/api/subjects/${subjectId}`, {
-                    method: "DELETE",
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-                if (response.ok) {
-                    alert("Subject deleted successfully!");
-                    fetchSubjects();
+
+        if (!window.confirm("Delete this subject?")) return;
+
+        try {
+            const token = localStorage.getItem(AUTH_TOKEN_KEY);
+
+            const response = await fetch(`/api/subjects/${subjectId}`, {
+                method: "DELETE",
+                headers: {
+                    Authorization: `Bearer ${token}`
                 }
-            } catch (error) {
-                console.error("Error deleting subject:", error);
+            });
+
+            if (response.ok) {
+                showToast("Subject deleted successfully!");
+
+                fetchSubjects();
+                fetchClassSubjects();
             }
+
+        } catch (error) {
+            console.error(error);
+            showToast("Failed to delete subject.", "danger");
         }
     };
 
-    const handleDeleteAssignment = async (classSubjectId) => {
-        if (window.confirm("Are you sure you want to remove this assignment?")) {
-            try {
-                const token = localStorage.getItem(AUTH_TOKEN_KEY);
-                const response = await fetch(`/api/class-subjects/${classSubjectId}`, {
-                    method: "DELETE",
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-                if (response.ok) {
-                    alert("Assignment removed successfully!");
-                    fetchClassSubjects();
+    /* ──────────────────────────────────────────────────────────
+       DELETE ASSIGNMENT
+    ────────────────────────────────────────────────────────── */
+    const handleDeleteAssignment = async (assignmentId) => {
+
+        if (!window.confirm("Remove this assignment?")) return;
+
+        try {
+            const token = localStorage.getItem(AUTH_TOKEN_KEY);
+
+            const response = await fetch(`/api/class-subjects/${assignmentId}`, {
+                method: "DELETE",
+                headers: {
+                    Authorization: `Bearer ${token}`
                 }
-            } catch (error) {
-                console.error("Error removing assignment:", error);
+            });
+
+            if (response.ok) {
+                showToast("Assignment removed successfully!");
+
+                fetchClassSubjects();
             }
+
+        } catch (error) {
+            console.error(error);
+            showToast("Failed to remove assignment.", "danger");
         }
     };
 
-    const filteredSubjects = subjects.filter(subject =>
-        subject.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        subject.code.toLowerCase().includes(searchTerm.toLowerCase())
+    /* ──────────────────────────────────────────────────────────
+       FILTERING
+    ────────────────────────────────────────────────────────── */
+    const filteredSubjects = subjects.filter(sub =>
+        sub.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        sub.code?.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
+    /* ──────────────────────────────────────────────────────────
+       PAGINATION
+    ────────────────────────────────────────────────────────── */
     const indexOfLastItem = currentPage * itemsPerPage;
+
     const indexOfFirstItem = indexOfLastItem - itemsPerPage;
-    const currentItems = filteredSubjects.slice(indexOfFirstItem, indexOfLastItem);
 
-    const classOptions = ["Form 1", "Form 1A", "Form 1B", "Form 1C", "Form 1D", "Form 2", "Form 2A", "Form 2B", "Form 2C", "Form 2D", "Form 3", "Form 3A", "Form 3B", "Form 3C", "Form 3D", "Form 4", "Form 4A", "Form 4B", "Form 4C", "Form 4D"];
+    const currentItems = filteredSubjects.slice(
+        indexOfFirstItem,
+        indexOfLastItem
+    );
 
+    const totalPages = Math.ceil(
+        filteredSubjects.length / itemsPerPage
+    );
+
+    /* ──────────────────────────────────────────────────────────
+       RENDER
+    ────────────────────────────────────────────────────────── */
     return (
-        <div className="container-fluid">
-            <div className="row">
-                <div className="col-12">
-                    <h2 className="mb-4 text-center">Subject Management</h2>
+        <>
+            <ToastNote
+                show={toast.show}
+                onClose={hideToast}
+                message={toast.message}
+                variant={toast.variant}
+            />
 
-                    {/* Bootstrap Tabs */}
-                    <ul className="nav nav-tabs mb-4" id="subjectTabs" role="tablist">
-                        <li className="nav-item" role="presentation">
-                            <button
-                                className={`nav-link ${activeTab === 'add' ? 'active' : ''}`}
-                                id="add-tab"
-                                type="button"
-                                role="tab"
-                                onClick={() => setActiveTab('add')}
-                            >
-                                <i className="bi bi-plus-circle-fill me-2"></i>Add Subject
-                            </button>
-                        </li>
-                        <li className="nav-item" role="presentation">
-                            <button
-                                className={`nav-link ${activeTab === 'assign' ? 'active' : ''}`}
-                                id="assign-tab"
-                                type="button"
-                                role="tab"
-                                onClick={() => setActiveTab('assign')}
-                            >
-                                <i className="bi bi-diagram-2-fill me-2"></i>Assign Subject
-                            </button>
-                        </li>
-                        <li className="nav-item" role="presentation">
-                            <button
-                                className={`nav-link ${activeTab === 'list' ? 'active' : ''}`}
-                                id="list-tab"
-                                type="button"
-                                role="tab"
-                                onClick={() => setActiveTab('list')}
-                            >
-                                <i className="bi bi-list-check me-2"></i>Subject List ({subjects.length})
-                            </button>
-                        </li>
-                    </ul>
+            <div className="sr-wrapper">
 
-                    <div className="tab-content">
-                        {/* Add Subject Tab */}
-                        {activeTab === 'add' && (
-                            <div className="tab-pane fade show active">
-                                <form onSubmit={handleAddSubject} className="bg-light p-4 rounded shadow-sm">
-                                    <div className="row">
-                                        <div className="col-md-6 mb-3">
-                                            <label className="form-label fw-semibold">
-                                                <i className="bi bi-book me-2 text-primary"></i>Subject Name
-                                            </label>
-                                            <input
-                                                type="text"
-                                                className="form-control form-control-lg"
-                                                placeholder="e.g., Mathematics"
-                                                value={subjectForm.name}
-                                                onChange={(e) => setSubjectForm(prev => ({ ...prev, name: e.target.value }))}
-                                                required
-                                            />
-                                        </div>
-                                        <div className="col-md-6 mb-3">
-                                            <label className="form-label fw-semibold">
-                                                <i className="bi bi-tag me-2 text-success"></i>Subject Code
-                                            </label>
-                                            <input
-                                                type="text"
-                                                className="form-control form-control-lg"
-                                                placeholder="e.g., MATH001"
-                                                value={subjectForm.code}
-                                                onChange={(e) => setSubjectForm(prev => ({ ...prev, code: e.target.value }))}
-                                                required
-                                            />
-                                        </div>
-                                    </div>
-                                    <div className="row">
-                                        <div className="col-12 mb-3">
-                                            <label className="form-label fw-semibold">
-                                                <i className="bi bi-file-text me-2 text-info"></i>Description (Optional)
-                                            </label>
-                                            <textarea
-                                                className="form-control form-control-lg"
-                                                placeholder="Subject description..."
-                                                rows="3"
-                                                value={subjectForm.description}
-                                                onChange={(e) => setSubjectForm(prev => ({ ...prev, description: e.target.value }))}
-                                            ></textarea>
-                                        </div>
-                                    </div>
-                                    <div className="text-center">
-                                        <button type="submit" className="btn btn-primary btn-lg px-5">
-                                            <i className="bi bi-plus-circle me-2"></i>Add Subject
-                                        </button>
-                                    </div>
-                                </form>
+                {/* HEADER */}
+                <div className="sr-header">
+
+                    <div className="sr-header-left">
+
+                        <div className="sr-header-icon">
+                            <i className="bi bi-journal-plus"></i>
+                        </div>
+
+                        <div className="sr-header-text">
+                            <div className="sr-header-title">
+                                Subject Management
                             </div>
-                        )}
 
-                        {/* Assign Subject Tab */}
-                        {activeTab === 'assign' && (
-                            <div className="tab-pane fade show active">
-                                <form onSubmit={handleAssignSubject} className="bg-light p-4 rounded shadow-sm mb-4">
-                                    <div className="row">
-                                        <div className="col-md-6 mb-3">
-                                            <label className="form-label fw-semibold">
-                                                <i className="bi bi-book me-2 text-primary"></i>Subject
-                                            </label>
-                                            <select
-                                                className="form-select form-select-lg"
-                                                value={assignForm.subjectId}
-                                                onChange={(e) => setAssignForm(prev => ({ ...prev, subjectId: e.target.value }))}
-                                                required
-                                            >
-                                                <option value="">Select Subject</option>
-                                                {subjects.map(subject => (
-                                                    <option key={subject.id} value={subject.id}>
-                                                        {subject.name} ({subject.code})
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        <div className="col-md-6 mb-3">
-                                            <label className="form-label fw-semibold">
-                                                <i className="bi bi-mortarboard me-2 text-success"></i>Class
-                                            </label>
-                                            <select
-                                                className="form-select form-select-lg"
-                                                value={assignForm.class}
-                                                onChange={(e) => setAssignForm(prev => ({ ...prev, class: e.target.value }))}
-                                                required
-                                            >
-                                                <option value="">Select Class</option>
-                                                {classOptions.map(cls => (
-                                                    <option key={cls} value={cls}>{cls}</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                    </div>
-                                    <div className="row">
-                                        <div className="col-12 mb-3">
-                                            <div className="form-check">
-                                                <input
-                                                    className="form-check-input"
-                                                    type="checkbox"
-                                                    checked={assignForm.optional}
-                                                    onChange={(e) => setAssignForm(prev => ({ ...prev, optional: e.target.checked }))}
-                                                    id="optionalCheck"
-                                                />
-                                                <label className="form-check-label" htmlFor="optionalCheck">
-                                                    <i className="bi bi-star me-2"></i>Optional Subject
-                                                </label>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="text-center">
-                                        <button type="submit" className="btn btn-success btn-lg px-5">
-                                            <i className="bi bi-check-circle me-2"></i>Assign Subject
-                                        </button>
-                                    </div>
-                                </form>
-
-                                {/* Assignments Table */}
-                                {classSubjects.length > 0 && (
-                                    <div className="bg-white p-4 rounded shadow-sm">
-                                        <h5 className="mb-3">
-                                            <i className="bi bi-list-check me-2 text-info"></i>Current Assignments
-                                        </h5>
-                                        <div className="table-responsive">
-                                            <table className="table table-hover">
-                                                <thead className="table-light">
-                                                    <tr>
-                                                        <th><i className="bi bi-book me-1"></i>Subject</th>
-                                                        <th><i className="bi bi-mortarboard me-1"></i>Class</th>
-                                                        <th><i className="bi bi-star me-1"></i>Type</th>
-                                                        <th><i className="bi bi-gear me-1"></i>Actions</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {classSubjects.map(assignment => {
-                                                        const subject = subjects.find(s => s.id === assignment.subjectId);
-                                                        return (
-                                                            <tr key={assignment.id}>
-                                                                <td className="fw-semibold">{subject?.name}</td>
-                                                                <td>{assignment.class}</td>
-                                                                <td>
-                                                                    {assignment.optional ? (
-                                                                        <span className="badge bg-warning">Optional</span>
-                                                                    ) : (
-                                                                        <span className="badge bg-primary">Required</span>
-                                                                    )}
-                                                                </td>
-                                                                <td>
-                                                                    <button
-                                                                        className="btn btn-sm btn-danger"
-                                                                        onClick={() => handleDeleteAssignment(assignment.id)}
-                                                                        title="Remove Assignment"
-                                                                    >
-                                                                        <i className="bi bi-trash"></i>
-                                                                    </button>
-                                                                </td>
-                                                            </tr>
-                                                        );
-                                                    })}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </div>
-                                )}
+                            <div className="sr-header-sub">
+                                Add, Assign & Manage Subjects
                             </div>
-                        )}
+                        </div>
 
-                        {/* Subject List Tab */}
-                        {activeTab === 'list' && (
-                            <div className="tab-pane fade show active">
-                                <div className="bg-white p-4 rounded shadow-sm">
-                                    <div className="d-flex justify-content-between align-items-center mb-3">
-                                        <h5 className="mb-0">
-                                            <i className="bi bi-list-check me-2 text-primary"></i>All Subjects
-                                        </h5>
-                                        <div className="input-group" style={{ maxWidth: '300px' }}>
-                                            <span className="input-group-text">
-                                                <i className="bi bi-search"></i>
-                                            </span>
-                                            <input
-                                                type="text"
-                                                className="form-control"
-                                                placeholder="Search subjects..."
-                                                value={searchTerm}
-                                                onChange={(e) => setSearchTerm(e.target.value)}
-                                            />
-                                        </div>
+                    </div>
+
+                    <div className="sr-header-right">
+
+                        <div className="sr-badge">
+                            Total: {subjects.length}
+                        </div>
+
+                        <button
+                            className="sr-btn-action"
+                            title="Settings"
+                        >
+                            <i className="bi bi-gear"></i>
+                        </button>
+
+                    </div>
+
+                </div>
+
+                {/* TABS */}
+                <div className="sr-tabs">
+
+                    <button
+                        className={`sr-tab-btn ${
+                            activeTab === "add"
+                                ? "sr-tab-btn--active"
+                                : ""
+                        }`}
+                        onClick={() => setActiveTab("add")}
+                    >
+                        <i className="bi bi-plus-circle-fill"></i>
+                        Add Subject
+                    </button>
+
+                    <button
+                        className={`sr-tab-btn ${
+                            activeTab === "assign"
+                                ? "sr-tab-btn--active"
+                                : ""
+                        }`}
+                        onClick={() => setActiveTab("assign")}
+                    >
+                        <i className="bi bi-diagram-2"></i>
+                        Assign Subject
+                    </button>
+
+                    <button
+                        className={`sr-tab-btn ${
+                            activeTab === "list"
+                                ? "sr-tab-btn--active"
+                                : ""
+                        }`}
+                        onClick={() => setActiveTab("list")}
+                    >
+                        <i className="bi bi-list-check"></i>
+                        Subject List
+
+                        <span className="sr-tab-badge">
+                            {filteredSubjects.length}
+                        </span>
+                    </button>
+
+                </div>
+
+                {/* ADD SUBJECT */}
+                {activeTab === "add" && (
+
+                    <div className="sr-card fade-up">
+
+                        <div className="sr-card-head">
+                            <div>
+                                <div className="sr-card-title">
+                                    Add Subject
+                                </div>
+
+                                <div className="sr-card-sub">
+                                    Create a new subject
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="sr-card-body">
+
+                            <form
+                                onSubmit={handleAddSubject}
+                                className="sr-grid sr-grid-2"
+                            >
+
+                                <div className="sr-field">
+                                    <label className="sr-label">
+                                        Subject Name
+                                    </label>
+
+                                    <input
+                                        type="text"
+                                        className="sr-input"
+                                        placeholder="Mathematics"
+                                        value={subjectForm.name}
+                                        onChange={(e) =>
+                                            setSubjectForm({
+                                                ...subjectForm,
+                                                name: e.target.value
+                                            })
+                                        }
+                                    />
+                                </div>
+
+                                <div className="sr-field">
+                                    <label className="sr-label">
+                                        Subject Code
+                                    </label>
+
+                                    <input
+                                        type="text"
+                                        className="sr-input"
+                                        placeholder="MATH-101"
+                                        value={subjectForm.code}
+                                        onChange={(e) =>
+                                            setSubjectForm({
+                                                ...subjectForm,
+                                                code: e.target.value
+                                            })
+                                        }
+                                    />
+                                </div>
+
+                                <div
+                                    className="sr-field"
+                                    style={{ gridColumn: "1 / -1" }}
+                                >
+                                
+
+                                    
+                                </div>
+
+                                <div
+                                    className="sr-field"
+                                    style={{ gridColumn: "1 / -1" }}
+                                >
+                                    <div className="sr-actions">
+
+                                        <button
+                                            type="submit"
+                                            className="sr-btn sr-btn-primary"
+                                        >
+                                            <i className="bi bi-plus-circle"></i>
+                                            Create Subject
+                                        </button>
+
+                                    </div>
+                                </div>
+
+                            </form>
+
+                        </div>
+
+                    </div>
+                )}
+
+                {/* ASSIGN SUBJECT */}
+                {activeTab === "assign" && (
+
+                    <div className="sr-card fade-up">
+
+                        <div className="sr-card-head">
+
+                            <div>
+                                <div className="sr-card-title">
+                                    Assign Subject
+                                </div>
+
+                                <div className="sr-card-sub">
+                                    Link subjects to classes
+                                </div>
+                            </div>
+
+                        </div>
+
+                        <div className="sr-card-body">
+
+                            <form onSubmit={handleAssignSubject}>
+
+                                <div className="sr-grid sr-grid-2">
+
+                                    <div className="sr-field">
+                                        <label className="sr-label">
+                                            Subject
+                                        </label>
+
+                                        <select
+                                            className="sr-select"
+                                            value={assignForm.subjectId}
+                                            onChange={(e) =>
+                                                setAssignForm({
+                                                    ...assignForm,
+                                                    subjectId: e.target.value
+                                                })
+                                            }
+                                        >
+                                            <option value="">
+                                                Select Subject
+                                            </option>
+
+                                            {subjects.map(sub => (
+                                                <option
+                                                    key={sub.id}
+                                                    value={sub.id}
+                                                >
+                                                    {sub.name}
+                                                </option>
+                                            ))}
+                                        </select>
                                     </div>
 
-                                    <div className="table-responsive">
-                                        <table className="table table-striped table-hover">
-                                            <thead className="table-dark">
-                                                <tr>
-                                                    <th><i className="bi bi-hash me-1"></i>Code</th>
-                                                    <th><i className="bi bi-book me-1"></i>Name</th>
-                                                    <th><i className="bi bi-file-text me-1"></i>Description</th>
-                                                    <th><i className="bi bi-gear me-1"></i>Actions</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {currentItems.map(subject => (
-                                                    <tr key={subject.id}>
-                                                        <td className="fw-semibold">{subject.code}</td>
-                                                        <td>{subject.name}</td>
-                                                        <td>{subject.description || '-'}</td>
+                                    <div className="sr-field">
+                                        <label className="sr-label">
+                                            Class
+                                        </label>
+
+                                        <select
+                                            className="sr-select"
+                                            value={assignForm.class}
+                                            onChange={(e) =>
+                                                setAssignForm({
+                                                    ...assignForm,
+                                                    class: e.target.value
+                                                })
+                                            }
+                                        >
+                                            <option value="">
+                                                Select Class
+                                            </option>
+                                            
+
+                                            {classes.map(cls => (
+                                                <option
+                                                    key={cls.id}
+                                                    value={cls.id}
+                                                >
+                                                    {cls.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                </div>
+
+                                <div
+                                    style={{
+                                        marginTop: "18px"
+                                    }}
+                                >
+                                    <label
+                                        style={{
+                                            display: "flex",
+                                            gap: "10px",
+                                            alignItems: "center"
+                                        }}
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={assignForm.optional}
+                                            onChange={(e) =>
+                                                setAssignForm({
+                                                    ...assignForm,
+                                                    optional: e.target.checked
+                                                })
+                                            }
+                                        />
+
+                                        Optional Subject
+                                    </label>
+                                </div>
+
+                                <div className="sr-actions">
+
+                                    <button
+                                        type="submit"
+                                        className="sr-btn sr-btn-primary"
+                                    >
+                                        <i className="bi bi-diagram-2"></i>
+                                        Assign Subject
+                                    </button>
+
+                                </div>
+
+                            </form>
+
+                            {/* ASSIGNMENTS */}
+                            {classSubjects.length > 0 && (
+
+                                <div className="sr-table-wrap">
+
+                                    <table className="sr-table">
+
+                                        <thead>
+                                            <tr>
+                                                <th>Subject</th>
+                                                <th>Class</th>
+                                                <th>Type</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+
+                                        <tbody>
+
+                                            {classSubjects.map(assignment => {
+
+                                                const subject = subjects.find(
+                                                    s => s.id === assignment.subjectId
+                                                );
+
+                                                return (
+                                                    <tr key={assignment.id}>
+
                                                         <td>
+                                                            {subject?.name}
+                                                        </td>
+
+                                                        <td>
+                                                            {assignment.class}
+                                                        </td>
+
+                                                        <td>
+                                                            {assignment.optional
+                                                                ? "Optional"
+                                                                : "Required"}
+                                                        </td>
+
+                                                        <td>
+
                                                             <button
-                                                                className="btn btn-sm btn-danger"
-                                                                onClick={() => handleDeleteSubject(subject.id)}
-                                                                title="Delete Subject"
+                                                                className="sr-btn-ghost sr-btn-danger-ghost"
+                                                                onClick={() =>
+                                                                    handleDeleteAssignment(
+                                                                        assignment.id
+                                                                    )
+                                                                }
                                                             >
                                                                 <i className="bi bi-trash"></i>
                                                             </button>
+
                                                         </td>
+
                                                     </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
+                                                );
+                                            })}
 
-                                    {filteredSubjects.length === 0 && (
-                                        <div className="text-center py-5">
-                                            <i className="bi bi-search text-muted" style={{ fontSize: '3rem' }}></i>
-                                            <p className="text-muted mt-2">No subjects found.</p>
-                                        </div>
-                                    )}
+                                        </tbody>
 
-                                    {filteredSubjects.length > itemsPerPage && (
-                                        <nav className="mt-4">
-                                            <ul className="pagination justify-content-center">
-                                                {Array.from({ length: Math.ceil(filteredSubjects.length / itemsPerPage) }, (_, i) => (
-                                                    <li key={i} className={`page-item ${currentPage === i + 1 ? 'active' : ''}`}>
-                                                        <button className="page-link" onClick={() => setCurrentPage(i + 1)}>{i + 1}</button>
-                                                    </li>
-                                                ))}
-                                            </ul>
-                                        </nav>
-                                    )}
+                                    </table>
+
+                                </div>
+                            )}
+
+                        </div>
+
+                    </div>
+                )}
+
+                {/* SUBJECT LIST */}
+                {activeTab === "list" && (
+
+                    <div className="sr-card fade-up">
+
+                        <div className="sr-card-head">
+
+                            <div>
+                                <div className="sr-card-title">
+                                    All Subjects
+                                </div>
+
+                                <div className="sr-card-sub">
+                                    Manage existing subjects
                                 </div>
                             </div>
-                        )}
+
+                        </div>
+
+                        <div className="sr-card-body">
+
+                            {/* SEARCH */}
+                            <div
+                                className="sr-field"
+                                style={{ marginBottom: "18px" }}
+                            >
+                                <input
+                                    type="text"
+                                    className="sr-input"
+                                    placeholder="Search subjects..."
+                                    value={searchTerm}
+                                    onChange={(e) =>
+                                        setSearchTerm(e.target.value)
+                                    }
+                                />
+                            </div>
+
+                            {filteredSubjects.length > 0 ? (
+                                <>
+                                    <div className="sr-table-wrap">
+
+                                        <table className="sr-table">
+
+                                            <thead>
+                                                <tr>
+                                                    <th>Code</th>
+                                                    <th>Name</th>
+                                                    
+                                                    <th>Actions</th>
+                                                </tr>
+                                            </thead>
+
+                                            <tbody>
+
+                                                {currentItems.map(subject => (
+
+                                                    <tr key={subject.id}>
+
+                                                        <td>
+                                                            {subject.code}
+                                                        </td>
+
+                                                        <td>
+                                                            <strong>
+                                                                {subject.name}
+                                                            </strong>
+                                                        </td>
+
+                                                        
+
+                                                        <td>
+
+                                                            <button
+                                                                className="sr-btn-ghost sr-btn-danger-ghost"
+                                                                onClick={() =>
+                                                                    handleDeleteSubject(
+                                                                        subject.id
+                                                                    )
+                                                                }
+                                                            >
+                                                                <i className="bi bi-trash"></i>
+                                                            </button>
+
+                                                        </td>
+
+                                                    </tr>
+                                                ))}
+
+                                            </tbody>
+
+                                        </table>
+
+                                    </div>
+
+                                    {/* PAGINATION */}
+                                    <div className="sr-pagination">
+
+                                        <button
+                                            className="sr-page-btn"
+                                            disabled={currentPage === 1}
+                                            onClick={() =>
+                                                setCurrentPage(prev =>
+                                                    Math.max(prev - 1, 1)
+                                                )
+                                            }
+                                        >
+                                            <i className="bi bi-chevron-left"></i>
+                                        </button>
+
+                                        {Array.from(
+                                            { length: totalPages },
+                                            (_, i) => (
+                                                <button
+                                                    key={i + 1}
+                                                    className={`sr-page-btn ${
+                                                        currentPage === i + 1
+                                                            ? "sr-page-active"
+                                                            : ""
+                                                    }`}
+                                                    onClick={() =>
+                                                        setCurrentPage(i + 1)
+                                                    }
+                                                >
+                                                    {i + 1}
+                                                </button>
+                                            )
+                                        )}
+
+                                        <button
+                                            className="sr-page-btn"
+                                            disabled={
+                                                currentPage === totalPages
+                                            }
+                                            onClick={() =>
+                                                setCurrentPage(prev =>
+                                                    Math.min(
+                                                        prev + 1,
+                                                        totalPages
+                                                    )
+                                                )
+                                            }
+                                        >
+                                            <i className="bi bi-chevron-right"></i>
+                                        </button>
+
+                                    </div>
+                                </>
+                            ) : (
+
+                                <div className="sr-empty-state">
+
+                                    <i className="bi bi-search"></i>
+
+                                    <h3>No subjects found</h3>
+
+                                    <p>
+                                        Adjust your search term.
+                                    </p>
+
+                                </div>
+                            )}
+
+                        </div>
+
                     </div>
-                </div>
+                )}
+
             </div>
-        </div>
+        </>
     );
 }

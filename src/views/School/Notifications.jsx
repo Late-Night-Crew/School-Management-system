@@ -1,305 +1,509 @@
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useState, useRef, useEffect } from "react";
+import ToastNote from "../../components/ToastNote";
 
-const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+// ─── MOCK DATA ───────────────────────────────────────────────────────────────
+const MOCK_NOTIFICATIONS = [
+  {
+    id: 1,
+    type: "message",
+    title: "Admin Update",
+    message:
+      "The academic calendar for Term 3 has been finalized. Please review the attached PDF for specific dates and any schedule adjustments across all departments.",
+    sender: "Regional HQ",
+    avatar: "RH",
+    time: "10 min ago",
+    read: false,
+    replies: [
+      {
+        id: 101,
+        sender: "Me",
+        text: "Received. I will check the PDF immediately and circulate to staff.",
+        time: "5 min ago",
+        files: null,
+      },
+    ],
+  },
+  {
+    id: 2,
+    type: "message",
+    title: "Facility Inspection Notice",
+    message:
+      "Regarding the upcoming facility inspection — please ensure all departments are prepared. I have attached the inspection checklist below.",
+    sender: "Regional Inspector",
+    avatar: "RI",
+    time: "2 hrs ago",
+    read: false,
+    replies: [
+      {
+        id: 102,
+        sender: "Regional Inspector",
+        text: "Here are the documents you requested for the inspection.",
+        time: "2 hrs ago",
+        files: [
+          {
+            id: "f-102",
+            name: "Inspection_Checklist_Term3.xlsx",
+            size: 24500,
+            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 3,
+    type: "alert",
+    title: "Attendance Warning — Class 8A",
+    message:
+      "Class 8A attendance dropped below 85% this week. Immediate action is required. Attached is the detailed attendance breakdown report.",
+    sender: "System Monitor",
+    avatar: "SM",
+    time: "5 hrs ago",
+    read: true,
+    replies: [],
+  },
+  {
+    id: 4,
+    type: "transfer",
+    title: "Transfer Request Approved",
+    message:
+      "The transfer request for John Doe to Capital High School has been successfully processed and recorded in the system.",
+    sender: "System Admin",
+    avatar: "SA",
+    time: "Yesterday",
+    read: true,
+    replies: [],
+  },
+];
 
-/* SCOPED STYLING TO PREVENT GLOBAL CONFLICTS */
-/* All classes prefixed with .sn- */
-
-.sn-wrapper {
-  font-family: 'Plus Jakarta Sans', sans-serif;
-  background-color: #F3F4F6;
-  min-height: 100vh;
-  color: #1e293b;
-  padding: 2rem;
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+function getFileIcon(type = "", name = "") {
+  if (type.includes("image")) return "bi-file-image-fill";
+  if (type.includes("pdf") || name.endsWith(".pdf")) return "bi-file-pdf-fill";
+  if (name.match(/\.(xls|xlsx|csv)$/i)) return "bi-file-excel-fill";
+  if (name.match(/\.(doc|docx)$/i)) return "bi-file-word-fill";
+  if (name.match(/\.(zip|rar|7z)$/i)) return "bi-file-zip-fill";
+  return "bi-file-earmark-fill";
 }
 
-.sn-container {
-  max-width: 900px;
-  margin: 0 auto;
+function formatBytes(bytes = 0) {
+  if (!+bytes) return "0 B";
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${sizes[i]}`;
 }
 
-/* HEADER */
-.sn-header {
-  margin-bottom: 2rem;
+function typeConfig(type) {
+  switch (type) {
+    case "message":
+      return { icon: "bi-envelope-fill", cls: "nxp-icon--msg", label: "Message" };
+    case "alert":
+      return { icon: "bi-exclamation-triangle-fill", cls: "nxp-icon--alert", label: "Alert" };
+    case "transfer":
+      return { icon: "bi-arrow-left-right", cls: "nxp-icon--transfer", label: "Transfer" };
+    default:
+      return { icon: "bi-bell-fill", cls: "nxp-icon--msg", label: "Notice" };
+  }
 }
 
-.sn-header h1 {
-  font-size: 1.75rem;
-  font-weight: 800;
-  color: #0f172a;
-  margin: 0;
-  letter-spacing: -0.025em;
+// ─── FILE CHIP ────────────────────────────────────────────────────────────────
+function NxpFileChip({ file, downloadingFiles, onDownload }) {
+  const loading = downloadingFiles.has(file.id);
+  return (
+    <div className="nxp-filechip">
+      <div className="nxp-filechip__icon">
+        <i className={`bi ${getFileIcon(file.type, file.name)}`}></i>
+      </div>
+      <div className="nxp-filechip__info">
+        <span className="nxp-filechip__name" title={file.name}>{file.name}</span>
+        <span className="nxp-filechip__size">{formatBytes(file.size)}</span>
+      </div>
+      <button
+        className={`nxp-filechip__dl${loading ? " nxp-filechip__dl--spin" : ""}`}
+        onClick={() => !loading && onDownload(file.id)}
+        title="Download"
+      >
+        <i className={`bi ${loading ? "bi-arrow-repeat nxp-spin" : "bi-download"}`}></i>
+      </button>
+    </div>
+  );
 }
 
-.sn-header p {
-  color: #64748b;
-  margin: 0.5rem 0 0 0;
-  font-size: 0.875rem;
-}
+// ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
+export default function SchoolNotifications() {
+  const [notifications, setNotifications] = useState(MOCK_NOTIFICATIONS);
+  const [selectedId, setSelectedId] = useState(null);
+  const [replyText, setReplyText] = useState("");
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [downloadingFiles, setDownloadingFiles] = useState(new Set());
+  const [filterType, setFilterType] = useState("all");
+  const [toast, setToast] = useState({ show: false, message: "", variant: "success" });
 
-/* CARD & LIST */
-.sn-card {
-  background: white;
-  border-radius: 1.25rem;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-  border: 1px solid rgba(226, 232, 240, 0.8);
-  overflow: hidden;
-}
+  const fileInputRef = useRef(null);
+  const messagesEndRef = useRef(null);
+  const textareaRef = useRef(null);
 
-.sn-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
+  const selectedNotif = notifications.find((n) => n.id === selectedId);
+  const unreadCount = notifications.filter((n) => !n.read).length;
 
-.sn-item {
-  display: flex;
-  align-items: flex-start;
-  padding: 1.5rem;
-  border-bottom: 1px solid #f1f5f9;
-  cursor: pointer;
-  transition: background-color 0.2s;
-  position: relative;
-}
+  const visibleNotifs = notifications.filter((n) => {
+    if (filterType === "all") return true;
+    if (filterType === "unread") return !n.read;
+    return n.type === filterType;
+  });
 
-.sn-item:last-child {
-  border-bottom: none;
-}
+  // Auto-scroll to bottom on new reply
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [selectedNotif?.replies?.length]);
 
-.sn-item:hover {
-  background-color: #f8fafc;
-}
+  // Auto-resize textarea
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${Math.min(ta.scrollHeight, 120)}px`;
+  }, [replyText]);
 
-/* Unread indicator */
-.sn-item.unread .sn-title {
-  color: #0f172a;
-  font-weight: 700;
-}
+  // ── Handlers ────────────────────────────────────────────────────────────────
+  const openNotif = (id) => {
+    setSelectedId(id);
+    setNotifications((p) => p.map((n) => (n.id === id ? { ...n, read: true } : n)));
+  };
 
-.sn-item.unread::before {
-  content: '';
-  position: absolute;
-  left: 1.5rem;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 8px;
-  height: 8px;
-  background-color: #2563eb;
-  border-radius: 50%;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
-}
+  const closeThread = () => {
+    setSelectedId(null);
+    setReplyText("");
+    setSelectedFiles([]);
+  };
 
-/* ICONS */
-.sn-icon-box {
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.25rem;
-  margin-right: 1.25rem;
-  flex-shrink: 0;
-  position: relative; /* Z-index to handle the unread dot */
-}
+  const handleFileChange = (e) => {
+    if (e.target.files) setSelectedFiles((p) => [...p, ...Array.from(e.target.files)]);
+  };
 
-.icon-message { background-color: #eff6ff; color: #2563eb; }
-.icon-alert { background-color: #fee2e2; color: #ef4444; }
-.icon-transfer { background-color: #dcfce7; color: #16a34a; }
+  const removeFile = (i) => setSelectedFiles((p) => p.filter((_, idx) => idx !== i));
 
-/* CONTENT */
-.sn-content {
-  flex-grow: 1;
-}
+  const handleDownload = (fileId) => {
+    setDownloadingFiles((p) => new Set(p).add(fileId));
+    setTimeout(() => {
+      setDownloadingFiles((p) => { const s = new Set(p); s.delete(fileId); return s; });
+      setToast({ show: true, message: "File downloaded!", variant: "success" });
+    }, 2000);
+  };
 
-.sn-title {
-  font-size: 1rem;
-  font-weight: 600;
-  color: #334155;
-  margin-bottom: 0.25rem;
-  line-height: 1.4;
-}
+  const markAllRead = () => setNotifications((p) => p.map((n) => ({ ...n, read: true })));
 
-.sn-message {
-  font-size: 0.9rem;
-  color: #64748b;
-  line-height: 1.5;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
+  const sendReply = () => {
+    if (!replyText.trim() && selectedFiles.length === 0) {
+      setToast({ show: true, message: "Please type a message or attach a file.", variant: "warning" });
+      return;
+    }
+    setIsUploading(true);
+    setTimeout(() => {
+      const newReply = {
+        id: Date.now(),
+        sender: "Me",
+        text: replyText,
+        time: "Just now",
+        files: selectedFiles.length > 0
+          ? selectedFiles.map((f) => ({ id: `f-${Date.now()}-${Math.random()}`, name: f.name, size: f.size, type: f.type }))
+          : null,
+      };
+      setNotifications((p) =>
+        p.map((n) => n.id === selectedId ? { ...n, replies: [...(n.replies || []), newReply] } : n)
+      );
+      setReplyText("");
+      setSelectedFiles([]);
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      setToast({ show: true, message: "Reply sent!", variant: "success" });
+    }, 1500);
+  };
 
-/* TIME */
-.sn-time {
-  font-size: 0.8rem;
-  color: #94a3b8;
-  font-weight: 500;
-  white-space: nowrap;
-  margin-left: 1rem;
-  align-self: flex-start;
-}
+  const onKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendReply(); }
+  };
 
-/* BADGE */
-.sn-badge {
-  display: inline-block;
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  padding: 0.2rem 0.5rem;
-  border-radius: 4px;
-  margin-left: 0.5rem;
-  letter-spacing: 0.05em;
-}
+  const canSend = (replyText.trim() || selectedFiles.length > 0) && !isUploading;
 
-.badge-new { background-color: #2563eb; color: white; }
-.badge-msg { background-color: #dbeafe; color: #1e40af; }
-`;
+  // ── Render ───────────────────────────────────────────────────────────────────
+  return (
+    <>
+      <ToastNote
+        show={toast.show}
+        onClose={() => setToast((t) => ({ ...t, show: false }))}
+        message={toast.message}
+        variant={toast.variant}
+      />
 
-const SchoolNotifications = () => {
-    const navigate = useNavigate();
+      <div className={`nxp-shell${selectedId ? " nxp-shell--open" : ""}`}>
 
-    // Mock Data with Types
-    const [notifications, setNotifications] = useState([
-        { 
-            id: 1, 
-            type: 'message', 
-            title: 'Admin Update', 
-            message: 'The academic calendar for Term 3 has been finalized. Please review the attached PDF.', 
-            time: '10 minutes ago', 
-            read: false 
-        },
-        { 
-            id: 2, 
-            type: 'message', 
-            title: 'New Message from Regional Office', 
-            message: 'Regarding the upcoming inspection scheduled for next month, please confirm your availability.', 
-            time: '2 hours ago', 
-            read: false 
-        },
-        { 
-            id: 3, 
-            type: 'alert', 
-            title: 'Attendance Warning', 
-            message: 'Class 8A attendance dropped below 85% this week. Immediate action advised.', 
-            time: '5 hours ago', 
-            read: true 
-        },
-        { 
-            id: 4, 
-            type: 'transfer', 
-            title: 'Transfer Request Approved', 
-            message: 'John Doe transfer request to Capital High has been successfully approved.', 
-            time: 'Yesterday', 
-            read: true 
-        },
-        { 
-            id: 5, 
-            type: 'alert', 
-            title: 'System Maintenance', 
-            message: 'The server will be undergoing maintenance this Sunday at 2:00 AM.', 
-            time: '2 days ago', 
-            read: true 
-        },
-    ]);
-
-    const handleNotificationClick = (item) => {
-        // Mark as read logic (in a real app, this would be an API call)
-        const updated = notifications.map(n => 
-            n.id === item.id ? { ...n, read: true } : n
-        );
-        setNotifications(updated);
-
-        // Navigation Logic
-        if (item.type === 'message') {
-            console.log(`Navigating to Inbox: /inbox/conversation/${item.id}`);
-            alert(`Navigating to Inbox Conversation for: ${item.title}`);
-            // In a real router: navigate(`/inbox/conversation/${item.id}`);
-        } else if (item.type === 'transfer') {
-            console.log(`Navigating to Transfers: /school/transfers`);
-            navigate('/school/transfers'); // Example navigation
-        } else {
-            // Generic click
-            console.log(`Viewing notification details: ${item.id}`);
-        }
-    };
-
-    const getIconClass = (type) => {
-        switch(type) {
-            case 'message': return 'icon-message';
-            case 'alert': return 'icon-alert';
-            case 'transfer': return 'icon-transfer';
-            default: return 'icon-message';
-        }
-    };
-
-    const getIconSymbol = (type) => {
-        switch(type) {
-            case 'message': return 'bi-envelope';
-            case 'alert': return 'bi-exclamation-octagon';
-            case 'transfer': return 'bi-arrow-left-right';
-            default: return 'bi-bell';
-        }
-    };
-
-    return (
-        <>
-            <style>{CSS}</style>
-            <div className="sn-wrapper">
-                <div className="sn-container">
-                    
-                    {/* Header */}
-                    <div className="sn-header">
-                        <h1>School Notifications</h1>
-                        <p>Stay updated with system alerts, messages from HQ, and student activities.</p>
-                    </div>
-
-                    {/* Notifications List */}
-                    <div className="sn-card">
-                        <ul className="sn-list">
-                            {notifications.map((item) => (
-                                <li 
-                                    key={item.id} 
-                                    className={`sn-item ${!item.read ? 'unread' : ''}`}
-                                    onClick={() => handleNotificationClick(item)}
-                                >
-                                    {/* Icon */}
-                                    <div className={`sn-icon-box ${getIconClass(item.type)}`}>
-                                        <i className={`bi ${getIconSymbol(item.type)}`}></i>
-                                    </div>
-
-                                    {/* Text Content */}
-                                    <div className="sn-content">
-                                        <div className="sn-title">
-                                            {item.title}
-                                            {!item.read && <span className="sn-badge badge-new">NEW</span>}
-                                        </div>
-                                        <div className="sn-message">{item.message}</div>
-                                    </div>
-
-                                    {/* Time */}
-                                    <div className="sn-time">
-                                        {item.time}
-                                    </div>
-                                </li>
-                            ))}
-                        </ul>
-                        
-                        {/* Empty State (if list is empty) */}
-                        {notifications.length === 0 && (
-                            <div style={{ padding: '4rem', textAlign: 'center', color: '#94a3b8' }}>
-                                <i className="bi bi-check-circle" style={{ fontSize: '3rem', marginBottom: '1rem', display: 'block', opacity: 0.5 }}></i>
-                                <p>You are all caught up!</p>
-                            </div>
-                        )}
-                    </div>
-
-                </div>
+        {/* ── HEADER ──────────────────────────────────────────────────────── */}
+        <header className="nxp-topbar">
+          <div className="nxp-topbar__brand">
+            <div className="nxp-topbar__logobox">
+              <i className="bi bi-bell-fill"></i>
+              {unreadCount > 0 && <span className="nxp-topbar__ping"></span>}
             </div>
-        </>
-    );
-};
+            <div>
+              <h1 className="nxp-topbar__title">Notifications</h1>
+              <p className="nxp-topbar__sub">School communication hub</p>
+            </div>
+          </div>
 
-export default SchoolNotifications;
+          <div className="nxp-topbar__right">
+            {unreadCount > 0 && (
+              <span className="nxp-badge">{unreadCount} unread</span>
+            )}
+            {unreadCount > 0 && (
+              <button className="nxp-ghost-btn" onClick={markAllRead}>
+                <i className="bi bi-check2-all"></i>
+                <span>Mark all read</span>
+              </button>
+            )}
+          </div>
+        </header>
+
+        {/* ── FILTER BAR ──────────────────────────────────────────────────── */}
+        <nav className="nxp-filterbar">
+          {[
+            { key: "all",      icon: "bi-grid-fill",                  label: "All" },
+            { key: "unread",   icon: "bi-record-circle-fill",         label: "Unread" },
+            { key: "message",  icon: "bi-envelope-fill",              label: "Messages" },
+            { key: "alert",    icon: "bi-exclamation-triangle-fill",  label: "Alerts" },
+            { key: "transfer", icon: "bi-arrow-left-right",           label: "Transfers" },
+          ].map(({ key, icon, label }) => (
+            <button
+              key={key}
+              className={`nxp-filtertab${filterType === key ? " nxp-filtertab--active" : ""}`}
+              onClick={() => setFilterType(key)}
+            >
+              <i className={`bi ${icon}`}></i>
+              <span>{label}</span>
+              {key === "unread" && unreadCount > 0 && (
+                <span className="nxp-filtertab__badge">{unreadCount}</span>
+              )}
+            </button>
+          ))}
+        </nav>
+
+        {/* ── MAIN CONTENT ────────────────────────────────────────────────── */}
+        <div className="nxp-canvas">
+
+          {/* ── LEFT PANEL: LIST ────────────────────────────────────────── */}
+          <aside className="nxp-listpanel">
+            <div className="nxp-listpanel__scroll">
+
+              {visibleNotifs.length === 0 && (
+                <div className="nxp-empty-state">
+                  <div className="nxp-empty-state__orb">
+                    <i className="bi bi-check2-circle"></i>
+                  </div>
+                  <p className="nxp-empty-state__title">All caught up!</p>
+                  <p className="nxp-empty-state__sub">No notifications here.</p>
+                </div>
+              )}
+
+              {visibleNotifs.map((item, idx) => {
+                const cfg = typeConfig(item.type);
+                return (
+                  <div
+                    key={item.id}
+                    className={`nxp-card${selectedId === item.id ? " nxp-card--active" : ""}${!item.read ? " nxp-card--unread" : ""}`}
+                    onClick={() => openNotif(item.id)}
+                    style={{ animationDelay: `${idx * 0.06}s` }}
+                  >
+                    {/* Icon */}
+                    <div className={`nxp-card__iconbox ${cfg.cls}`}>
+                      <i className={`bi ${cfg.icon}`}></i>
+                      {!item.read && <span className="nxp-card__dot"></span>}
+                    </div>
+
+                    {/* Content */}
+                    <div className="nxp-card__content">
+                      <div className="nxp-card__toprow">
+                        <span className="nxp-card__sender">{item.sender}</span>
+                        <span className="nxp-card__time">{item.time}</span>
+                      </div>
+                      <p className="nxp-card__title">{item.title}</p>
+                      <p className="nxp-card__preview">{item.message}</p>
+                      <div className="nxp-card__tags">
+                        <span className={`nxp-typetag nxp-typetag--${item.type}`}>{cfg.label}</span>
+                        {item.replies?.length > 0 && (
+                          <span className="nxp-replytag">
+                            <i className="bi bi-chat-dots-fill"></i>
+                            {item.replies.length} {item.replies.length === 1 ? "reply" : "replies"}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Arrow */}
+                    <div className="nxp-card__arrow">
+                      <i className="bi bi-chevron-right"></i>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </aside>
+
+          {/* ── RIGHT PANEL: THREAD ─────────────────────────────────────── */}
+          {selectedId && selectedNotif ? (
+            <section className="nxp-threadpanel">
+
+              {/* Thread Topbar */}
+              <div className="nxp-thread-topbar">
+                <div className="nxp-thread-topbar__who">
+                  <div className={`nxp-thread-topbar__avatar ${typeConfig(selectedNotif.type).cls}`}>
+                    {selectedNotif.avatar}
+                  </div>
+                  <div className="nxp-thread-topbar__meta">
+                    <p className="nxp-thread-topbar__name">{selectedNotif.sender}</p>
+                    <p className="nxp-thread-topbar__detail">
+                      {typeConfig(selectedNotif.type).label} · {selectedNotif.time}
+                    </p>
+                  </div>
+                </div>
+                <button className="nxp-closebtn" onClick={closeThread} title="Close">
+                  <i className="bi bi-x-lg"></i>
+                </button>
+              </div>
+
+              {/* Messages */}
+              <div className="nxp-msgscroll">
+
+                {/* Original message */}
+                <div className="nxp-bubble nxp-bubble--in">
+                  <div className="nxp-bubble__header">
+                    <div className="nxp-bubble__avatar">{selectedNotif.avatar}</div>
+                    <div className="nxp-bubble__who">
+                      <span className="nxp-bubble__name">{selectedNotif.sender}</span>
+                      <span className="nxp-bubble__timestamp">Original Message</span>
+                    </div>
+                  </div>
+                  <div className="nxp-bubble__body">
+                    <p className="nxp-bubble__text">{selectedNotif.message}</p>
+                  </div>
+                </div>
+
+                {/* Thread divider */}
+                {selectedNotif.replies?.length > 0 && (
+                  <div className="nxp-divider">
+                    <span>
+                      {selectedNotif.replies.length} {selectedNotif.replies.length === 1 ? "Reply" : "Replies"}
+                    </span>
+                  </div>
+                )}
+
+                {/* Replies */}
+                {selectedNotif.replies?.map((reply) => {
+                  const isMe = reply.sender === "Me";
+                  return (
+                    <div key={reply.id} className={`nxp-bubble${isMe ? " nxp-bubble--out" : " nxp-bubble--in"}`}>
+                      <div className="nxp-bubble__header">
+                        <div className={`nxp-bubble__avatar${isMe ? " nxp-bubble__avatar--me" : ""}`}>
+                          {reply.sender.substring(0, 2)}
+                        </div>
+                        <div className="nxp-bubble__who">
+                          <span className="nxp-bubble__name">{reply.sender}</span>
+                          <span className="nxp-bubble__timestamp">{reply.time}</span>
+                        </div>
+                      </div>
+                      <div className="nxp-bubble__body">
+                        {reply.text && <p className="nxp-bubble__text">{reply.text}</p>}
+                        {/* Single file (legacy shape) */}
+                        {reply.file && (
+                          <NxpFileChip file={reply.file} downloadingFiles={downloadingFiles} onDownload={handleDownload} />
+                        )}
+                        {/* Multiple files */}
+                        {reply.files?.map((f) => (
+                          <NxpFileChip key={f.id} file={f} downloadingFiles={downloadingFiles} onDownload={handleDownload} />
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Compose Dock */}
+              <div className="nxp-compose">
+
+                {/* Staged files preview */}
+                {selectedFiles.length > 0 && (
+                  <div className="nxp-staged">
+                    {selectedFiles.map((f, i) => (
+                      <div key={i} className="nxp-staged__chip">
+                        <i className={`bi ${getFileIcon(f.type, f.name)} nxp-staged__fileicon`}></i>
+                        <span className="nxp-staged__filename" title={f.name}>{f.name}</span>
+                        <span className="nxp-staged__filesize">{formatBytes(f.size)}</span>
+                        <button className="nxp-staged__remove" onClick={() => removeFile(i)}>
+                          <i className="bi bi-x"></i>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Input row */}
+                <div className="nxp-compose__inputrow">
+                  <button
+                    className="nxp-compose__attachbtn"
+                    onClick={() => fileInputRef.current?.click()}
+                    title="Attach files"
+                  >
+                    <i className="bi bi-paperclip"></i>
+                  </button>
+
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    multiple
+                    className="nxp-compose__fileinput"
+                    onChange={handleFileChange}
+                  />
+
+                  <textarea
+                    ref={textareaRef}
+                    className="nxp-compose__textarea"
+                    placeholder="Write a reply… (Enter to send, Shift+Enter for new line)"
+                    value={replyText}
+                    rows={1}
+                    onChange={(e) => setReplyText(e.target.value)}
+                    onKeyDown={onKeyDown}
+                  />
+
+                  <button
+                    className={`nxp-compose__sendbtn${!canSend ? " nxp-compose__sendbtn--off" : ""}`}
+                    onClick={sendReply}
+                    disabled={!canSend}
+                    title="Send"
+                  >
+                    {isUploading
+                      ? <i className="bi bi-arrow-repeat nxp-spin"></i>
+                      : <i className="bi bi-send-fill"></i>}
+                  </button>
+                </div>
+              </div>
+
+            </section>
+          ) : (
+            /* ── EMPTY STATE (no thread selected) ── */
+            <div className="nxp-placeholder">
+              <div className="nxp-placeholder__glow"></div>
+              <div className="nxp-placeholder__orb">
+                <i className="bi bi-chat-square-dots"></i>
+              </div>
+              <p className="nxp-placeholder__title">Open a conversation</p>
+              <p className="nxp-placeholder__sub">Select a notification on the left to view and reply to the thread.</p>
+            </div>
+          )}
+
+        </div>
+      </div>
+    </>
+  );
+}

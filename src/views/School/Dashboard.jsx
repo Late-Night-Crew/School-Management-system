@@ -312,7 +312,7 @@ const SchoolDashboard = () => {
             <div className="sd-wrapper">
                 <div className="sd-container">
                     
-                    {/* HEADER */}
+                    
                     <div className="sd-header">
                         <div className="sd-title">
                             <h1>School Overview</h1>
@@ -346,7 +346,9 @@ const SchoolDashboard = () => {
                                 </div>
                                 <div className="sd-stat-item">
                                     <i className="bi bi-person-wheelchair text-disabled"></i>
-                                    <span>14</span>
+                                    -
+                                    <span> <i className="bi bi-gender-male text-male"></i> 7</span>
+                                    <span><i className="bi bi-gender-female text-female"></i> 7</span>
                                 </div>
                             </div>
                         </div>
@@ -355,7 +357,7 @@ const SchoolDashboard = () => {
                         <div className="sd-card">
                             <div className="sd-card-header">
                                 <div className="sd-icon-box icon-purple">
-                                    <i className="bi bi-arrow-left-right-circle-fill"></i>
+                                    <i className="bi bi-arrow-left-right"></i>
                                 </div>
                             </div>
                             <div className="sd-label">Transfer Requests</div>
@@ -386,7 +388,7 @@ const SchoolDashboard = () => {
                                 </div>
                             </div>
                             <div className="sd-label">Academic Year</div>
-                            <div className="sd-main-value" style={{fontSize: '1.4rem'}}>24/25</div> {/* Shortened text */}
+                            <div className="sd-main-value" style={{fontSize: '1.4rem'}}>2026 - 2027</div> 
                             
                             {/* Compact One Line Stats */}
                             <div className="sd-breakdown">
@@ -414,10 +416,10 @@ const SchoolDashboard = () => {
                             
                             {/* Compact Grid Stats */}
                             <div className="sd-breakdown" style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem'}}>
-                                <div className="sd-stat-item">F1: 89%</div>
-                                <div className="sd-stat-item">F2: 85%</div>
-                                <div className="sd-stat-item">F3: 82%</div>
-                                <div className="sd-stat-item">F4: 92%</div>
+                                <div className="sd-stat-item">Form1: 89%</div>
+                                <div className="sd-stat-item">Form2: 85%</div>
+                                <div className="sd-stat-item">Form3: 82%</div>
+                                <div className="sd-stat-item">Form4: 92%</div>
                             </div>
                         </div>
 

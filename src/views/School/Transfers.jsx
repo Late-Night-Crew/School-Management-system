@@ -2,468 +2,101 @@ import React, { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import ToastNote from "../../components/ToastNote";
 
-// --- MOCK DATA ---
-const MOCK_DISTRICTS = [
-    { id: 1, name: "Lilongwe" },
-    { id: 2, name: "Blenyre" },
-    { id: 3, name: "Blantyre" },
-    { id: 4, name: "Bwana" },
-    { id: 5, name: "Chitipa" },
-    { id: 6, name: "Mbare" },
-    { id: 7, name: "Chipata" }
-];
 
-const MOCK_SCHOOLS = [
-    { id: 1, name: "Capital High School", district_id: 1 },
-    { id: 2, name: "City High School", district_id: 1 },
-    { id: 3, name: "Valley High School", district_id: 1 },
-    { id: 4, name: "Springfield High School", district_id: 1 },
-    { id: 5, name: "Hillview High School", district_id: 2 },
-    { id: 6, name: "Lake Side High School", district_id: 2 },
-    { id: 7, name: "Summit High School", district_id: 3 }
-];
+import SchoolService from "./services/schoolService";
+import SchoolStudentService from "./services/studentService";
 
-const MOCK_STUDENTS = [
-    { id: 1, student_number: "2024-001", firstname: "John", middlename: "James", lastname: "Banda", form_level: "Form 1", subject_ids: [1, 2, 3], gender: "Male", date_of_birth: "2000-01-01", guardian_name: "Robert Johnson", guardian_phone: "071234567", school_name: "Capital High School" },
-    { id: 2, student_number: "2024-002", firstname: "Jane", middlename: "Marie", lastname: "Smith", form_level: "Form 1", subject_ids: [1, 2, 4], gender: "Female", date_of_birth: "2000-05-15", guardian_name: "Jane Smith", guardian_phone: "098765432", school_name: "City High School" },
-    { id: 3, student_number: "2024-003", firstname: "Alice", middlename: "Beth", lastname: "Brown", form_level: "Form 2", subject_ids: [1, 3], gender: "Female", date_of_birth: "2000-05-20", guardian_name: "Michael Brown", guardian_phone: "0912345678", school_name: "Valley High School" },
-    { id: 4, student_number: "2024-004", firstname: "Bob", middlename: "Lee", lastname: "White", form_level: "Form 2", subject_ids: [1, 2, 3], gender: "Male", date_of_birth: "2000-06-01", guardian_name: "William Davis", guardian_phone: "012345678", school_name: "Springfield High School" },
-];
-
-const MOCK_TRANSFERS = [
-    { id: 101, student_id: 1, student_number: "2024-001", firstname: "John", lastname: "Doe", from_school_name: "Lilongwe Academy", to_school_name: "City High School", to_school_id: 2, transfer_date: "2024-01-10", status: "completed", reason: "Family relocation", date_initiated: "2024-01-10T12:00:00", created_at: "2024-01-10T12:00:00", updated_at: "2024-01-10T12:01:00" },
-    { id: 102, student_id: 2, student_number: "2024-002", firstname: "Jane", lastname: "Smith", from_school_name: "Blantyre Secondary", to_school_name: "Hillview High School", to_school_id: 3, transfer_date: "2024-02-05", status: "approved", reason: "School performance", date_initiated: "2024-02-05T10:12:00", created_at: "2024-02-05T10:12:01", updated_at: "2024-02-05T10:12:00" },
-    { id: 103, student_id: 3, student_number: "2024-003", firstname: "Alice", lastname: "Brown", from_school_name: "Chitiri Primary", to_school_name: "Valley High School", to_school_id: 4, transfer_date: "2024-03-01", status: "rejected", reason: "Personal reasons", date_initiated: "2024-03-01T12:00:00", created_at: "2024-03-01T12:00:00" },
-    { id: 104, student_id: 4, student_number: "2024-004", firstname: "Bob", middlename: "Lee", lastname: "White", from_school_name: "Bwana Secondary", to_school_name: "Capital High School", to_school_id: 5, transfer_date: "2024-04-05", status: "initiated", reason: "", date_initiated: "", created_at: "" },
-    { id: 105, student_id: 1, student_number: "2024-005", firstname: "Charlie", middlename: "Ray", lastname: "Chaplin", from_school_name: "Mitundu Secondary", to_school_name: "Lake Side High School", to_school_id: 6, transfer_date: "2024-05-05", status: "completed", reason: "Distance", date_initiated: "2024-05-05T10:12:00", created_at: "2024-05-05T10:12:00" },
-    { id: 106, student_id: 2, firstname: "David", middlename: "Paul", lastname: "Miller", from_school_name: "Summit High School", to_school_name: "Self", to_school_id: 7, transfer_date: "2024-06-01", status: "completed", reason: "Personal reasons", date_initiated: "2024-06-01T12:00:00", created_at: "2024-06-01T12:00:00" },
-];
-
-const MOCK_TRANSFER_DATA = [...MOCK_TRANSFERS];
-const MOCK_INBOUND = [...MOCK_STUDENTS];
-
-const MOCK_SUBJECTS = [
-    { id: 1, name: "Mathematics" },
-    { id: 2, name: "English" },
-    { id: 3, name: "Combined Science" },
-    { id: 4, name: "History" },
-    { id: 5, name: "Geography" },
-    { id: 6, name: "Biology" },
-    { id: 7, name: "Civic Education" }
-];
-
-// --- MOCK SERVICES ---
-const SchoolService = {
-    fetchAllSchools: async () => new Promise(resolve => setTimeout(() => resolve(MOCK_SCHOOLS), 100)),
-    fetchDistricts: async () => new Promise(resolve => setTimeout(() => resolve(MOCK_DISTRICTS), 100)),
-    fetchStudentsForSchool: async () => new Promise(resolve => setTimeout(() => resolve(MOCK_STUDENTS), 100)),
-};
-
-const TransferService = {
-    createTransferRequest: async (data) => new Promise(resolve => setTimeout(() => { MOCK_TRANSFER_DATA.push({ ...data, id: Date.now() }); resolve(); }, 100)),
-    getOutgoingTransfers: async () => {
-        const outgoing = MOCK_TRANSFER_DATA.filter(t => t.to_school_name && t.to_school_name.toLowerCase() !== "self" && t.status !== 'initiated');
-        return new Promise(resolve => setTimeout(() => resolve(outgoing), 100));
-    },
-    getIncomingTransfers: async () => {
-        const incoming = MOCK_TRANSFER_DATA.filter(t => t.to_school_name && t.to_school_name.toLowerCase() === "self" || t.status === 'initiated' || t.status === 'approved');
-        return new Promise(resolve => setTimeout(() => resolve(incoming), 100));
-    },
-    getOutgoingRequests: async () => {
-        const outgoing = MOCK_TRANSFER_DATA.filter(t => t.to_school_name && t.to_school_name.toLowerCase() !== "self");
-        return new Promise(resolve => setTimeout(() => resolve(outgoing), 100));
-    },
-    getIncomingRequests: async () => {
-        const incoming = MOCK_TRANSFER_DATA.filter(t => t.to_school_name && t.to_school_name.toLowerCase() === "self" || t.status === 'initiated');
-        return new Promise(resolve => setTimeout(() => resolve(incoming), 100));
-    },
-    approveTransfer: async (id) => {
-        const reqIndex = MOCK_TRANSFER_DATA.findIndex(t => t.id === id);
-        if (reqIndex !== -1) { MOCK_TRANSFER_DATA[reqIndex] = { ...MOCK_TRANSFER_DATA[reqIndex], status: "approved", updated_at: new Date() }; return new Promise(resolve => setTimeout(() => resolve(), 100)); }
-    },
-    rejectTransfer: async (id) => {
-        const reqIndex = MOCK_TRANSFER_DATA.findIndex(t => t.id === id);
-        if (reqIndex !== -1) { MOCK_TRANSFER_DATA[reqIndex] = { ...MOCK_TRANSFER_DATA[reqIndex], status: "rejected", updated_at: new Date() }; return new Promise(resolve => setTimeout(() => resolve(), 100)); }
-    },
-    finaliseTransfer: async (id) => {
-        const reqIndex = MOCK_TRANSFER_DATA.findIndex(t => t.id === id);
-        if (reqIndex !== -1) { MOCK_TRANSFER_DATA[reqIndex] = { ...MOCK_TRANSFER_DATA[reqIndex], status: "completed", updated_at: new Date() }; return new Promise(resolve => setTimeout(() => resolve(), 100)); }
-    }
-};
-
-const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
-
-/* GLOBAL RESET & THEME */
-body {
-  background-color: #F3F4F6;
-  font-family: 'Plus Jakarta Sans', sans-serif;
-  color: #1e293b;
-}
-
-/* LAYOUT */
-.se-container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 2rem;
-}
-
-/* HEADER */
-.page-header {
-  margin-bottom: 2rem;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.header-title h1 {
-  font-size: 1.75rem;
-  font-weight: 800;
-  color: #0f172a;
-  margin: 0;
-  letter-spacing: -0.025em;
-}
-.header-title p {
-  color: #64748b;
-  margin: 0.5rem 0 0 0;
-  font-size: 0.875rem;
-}
-
-/* TABS */
-.modern-tabs {
-  background: #ffffff;
-  padding: 0.5rem;
-  border-radius: 1rem;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-  display: inline-flex;
-  gap: 0.5rem;
-  margin-bottom: 2rem;
-}
-
-.tab-btn {
-  border: none;
-  background: transparent;
-  padding: 0.6rem 1.5rem;
-  border-radius: 0.75rem;
-  font-family: inherit;
-  font-weight: 600;
-  color: #64748b;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.9rem;
-}
-
-.tab-btn:hover {
-  background-color: #f8fafc;
-  color: #334155;
-}
-
-.tab-btn.active {
-  background-color: #2563eb;
-  color: white;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
-}
-
-/* CARDS */
-.modern-card {
-  background: white;
-  border-radius: 1.25rem;
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025);
-  border: 1px solid rgba(226, 232, 240, 0.8);
-  overflow: hidden;
-  margin-bottom: 2rem;
-  transition: transform 0.2s ease;
-}
-
-.modern-card-header {
-  padding: 1.5rem 2rem;
-  border-bottom: 1px solid #f1f5f9;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.modern-card-header h3 {
-  margin: 0;
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: #1e293b;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.modern-card-body {
-  padding: 2rem;
-}
-
-/* TABLES */
-.table-wrapper {
-  overflow-x: auto;
-}
-
-.modern-table {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-}
-
-.modern-table thead th {
-  background-color: #f8fafc;
-  color: #64748b;
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-weight: 700;
-  padding: 1rem 1.5rem;
-  text-align: left;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-.modern-table tbody tr {
-  transition: background-color 0.2s;
-}
-
-.modern-table tbody tr:hover {
-  background-color: #f8fafc;
-}
-
-.modern-table td {
-  padding: 1.25rem 1.5rem;
-  border-bottom: 1px solid #f1f5f9;
-  vertical-align: middle;
-  color: #334155;
-  font-size: 0.9rem;
-}
-
-.modern-table tr:last-child td {
-  border-bottom: none;
-}
-
-/* BADGES */
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.25rem 0.75rem;
-  border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.025em;
-}
-
-.status-completed { background-color: #dcfce7; color: #166534; }
-.status-approved { background-color: #dbeafe; color: #1e40af; }
-.status-rejected { background-color: #fee2e2; color: #991b1b; }
-.status-initiated { background-color: #ffedd5; color: #9a3412; }
-
-/* FORMS & INPUTS */
-.modern-input-group {
-  margin-bottom: 1.5rem;
-}
-
-.modern-label {
-  display: block;
-  margin-bottom: 0.5rem;
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: #475569;
-}
-
-.modern-input, .modern-select {
-  width: 100%;
-  padding: 0.75rem 1rem;
-  border-radius: 0.75rem;
-  border: 1px solid #cbd5e1;
-  font-family: inherit;
-  font-size: 0.95rem;
-  color: #1e293b;
-  transition: all 0.2s;
-  background-color: #fff;
-}
-
-.modern-input:focus, .modern-select:focus {
-  outline: none;
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-}
-
-.modern-input:disabled {
-  background-color: #f1f5f9;
-  color: #94a3b8;
-}
-
-/* BUTTONS */
-.btn-modern {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.75rem 1.5rem;
-  border-radius: 0.75rem;
-  font-weight: 600;
-  font-size: 0.9rem;
-  cursor: pointer;
-  transition: all 0.2s;
-  border: none;
-  gap: 0.5rem;
-}
-
-.btn-primary {
-  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-  color: white;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
-}
-
-.btn-primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
-}
-
-.btn-secondary {
-  background-color: #f1f5f9;
-  color: #475569;
-}
-
-.btn-secondary:hover {
-  background-color: #e2e8f0;
-}
-
-.btn-icon-only {
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  border: none;
-  transition: all 0.2s;
-}
-
-.btn-icon-only:hover {
-  background-color: #f1f5f9;
-}
-
-/* AVATARS */
-.avatar-circle {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  color: white;
-  font-size: 0.9rem;
-  margin-right: 1rem;
-  text-transform: uppercase;
-}
-
-.bg-gradient-1 { background: linear-gradient(135deg, #3b82f6, #2563eb); }
-.bg-gradient-2 { background: linear-gradient(135deg, #ec4899, #db2777); }
-.bg-gradient-3 { background: linear-gradient(135deg, #10b981, #059669); }
-.bg-gradient-4 { background: linear-gradient(135deg, #f59e0b, #d97706); }
-
-/* LIST ITEMS (Search Results) */
-.search-result-item {
-  padding: 1rem;
-  border-bottom: 1px solid #f1f5f9;
-  cursor: pointer;
-  transition: background-color 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.search-result-item:hover {
-  background-color: #f8fafc;
-}
-
-.search-result-item:last-child {
-  border-bottom: none;
-}
-
-/* ANIMATIONS */
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.fade-in {
-  animation: fadeIn 0.4s ease-out forwards;
-}
-`;
+// --- HELPER COMPONENTS ---
+const initials = (fn, ln) => `${(fn||'?')[0]}${(ln||'?')[0]}`.toUpperCase();
 
 export default function SchoolTransfers() {
     const { schoolId } = useParams();
+   
     const [activeTab, setActiveTab] = useState("initiate");
-    
     const [incomingRequests, setIncomingRequests] = useState([]);
     const [outgoingTransfers, setOutgoingTransfers] = useState([]);
     const [schools, setSchools] = useState([]);
     const [districts, setDistricts] = useState([]);
     const [filteredSchools, setFilteredSchools] = useState([]);
-    const [studentSearch, setStudentSearch] = useState("");
+    const [students, setStudents] = useState([]); // Replaces MOCK_STUDENTS for search
     
+    const [studentSearch, setStudentSearch] = useState("");
     const [selectedStudent, setSelectedStudent] = useState(null);
     const [viewStudent, setViewStudent] = useState(null); 
-    const [initiateForm, setInitiateForm] = useState({ studentId: "", toSchoolId: "", districtId: "", reason: "", transferDate: "" });
+    
+    const [initiateForm, setInitiateForm] = useState({ 
+        studentId: "", toSchoolId: "", districtId: "", reason: "", transferDate: "" 
+    });
+    
     const [toast, setToast] = useState({ show: false, message: "", variant: "success" });
     
     const [incomingPage, setIncomingPage] = useState(1);
     const [outgoingPage, setOutgoingPage] = useState(1);
     const itemsPerPage = 7;
 
+    // --- DATA FETCHING ---
     useEffect(() => {
-        fetchSchools();
         fetchDistricts();
+        fetchStudents();
         fetchIncomingRequests();
         fetchOutgoingTransfers();
     }, [schoolId]);
 
-    const fetchSchools = async () => {
-        try { setSchools(await SchoolService.fetchAllSchools()); } 
-        catch (error) { console.error(error); }
+    const fetchStudents = async () => {
+        try {
+            const data = await SchoolStudentService.fetchStudentsForSchool();
+            setStudents(Array.isArray(data) ? data : []);
+        } catch (error) { console.error("Error fetching students", error); }
     };
 
     const fetchDistricts = async () => {
-        try { setDistricts(await SchoolService.fetchDistricts()); } 
-        catch (error) { console.error(error); }
+        try {
+            const data = await SchoolService.fetchDistricts();
+            setDistricts(Array.isArray(data) ? data : []);
+        } catch (error) { console.error("Error fetching districts", error); }
+    };
+
+    const fetchSchoolsByDistrict = async (districtId) => {
+        try {
+            const data = await SchoolService.fetchSchoolsByDistrict(districtId);
+            setFilteredSchools(Array.isArray(data) ? data : []);
+        } catch (error) { console.error("Error fetching schools", error); }
     };
 
     const fetchIncomingRequests = async () => {
-        try { setIncomingRequests(await TransferService.getIncomingRequests(schoolId)); } 
-        catch (error) { console.error(error); }
+        try {
+            // Assuming TransferService.getIncomingRequests exists
+            // const data = await TransferService.getIncomingRequests(schoolId);
+            // setIncomingRequests(data);
+            setIncomingRequests([]); // Placeholder until service is connected
+        } catch (error) { console.error(error); }
     };
 
     const fetchOutgoingTransfers = async () => {
-        try { setOutgoingTransfers(await TransferService.getOutgoingTransfers(schoolId)); } 
-        catch (error) { console.error(error); }
+        try {
+            // const data = await TransferService.getOutgoingTransfers(schoolId);
+            // setOutgoingTransfers(data);
+            setOutgoingTransfers([]); // Placeholder
+        } catch (error) { console.error(error); }
     };
 
+    // --- HANDLERS ---
     const handleDistrictChange = (id) => {
-        if (!id) { setFilteredSchools(schools); return; }
-        setFilteredSchools(schools.filter(s => s.district_id === parseInt(id)));
+        setInitiateForm(prev => ({ ...prev, districtId: id, toSchoolId: "" }));
+        if (!id) {
+            setFilteredSchools([]); 
+            return;
+        }
+        fetchSchoolsByDistrict(id);
     };
 
-    const indexOfLastIncomingItem = incomingPage * itemsPerPage;
-    const indexOfFirstIncomingItem = indexOfLastIncomingItem - itemsPerPage;
-    const currentIncomingItems = incomingRequests.slice(indexOfFirstIncomingItem, indexOfLastIncomingItem);
-
-    const indexOfLastOutgoingItem = outgoingPage * itemsPerPage;
-    const indexOfFirstOutgoingItem = indexOfLastOutgoingItem - itemsPerPage;
-    const currentOutgoingItems = outgoingTransfers.slice(indexOfFirstOutgoingItem, indexOfLastOutgoingItem);
-
-    const getStatusBadge = (status) => {
+    const getStatusBadgeClass = (status) => {
         switch(status?.toLowerCase()) {
-            case 'completed': return 'status-completed';
-            case 'approved': return 'status-approved';
-            case 'rejected': return 'status-rejected';
-            case 'initiated': return 'status-initiated';
-            default: return 'status-initiated';
+            case 'completed': return 'st-badge-success';
+            case 'approved': return 'st-badge-primary';
+            case 'rejected': return 'st-badge-danger';
+            case 'initiated': return 'st-badge-warning';
+            default: return 'st-badge-muted';
         }
     };
 
@@ -487,14 +120,14 @@ export default function SchoolTransfers() {
             return;
         }
         try {
-            await TransferService.createTransferRequest({
-                student_id: selectedStudent.id,
-                to_school_id: parseInt(initiateForm.toSchoolId),
-                date_initiated: initiateForm.transferDate,
-                reason: initiateForm.reason
-            });
+            // await TransferService.createTransferRequest({
+            //     student_id: selectedStudent.id,
+            //     to_school_id: parseInt(initiateForm.toSchoolId),
+            //     date_initiated: initiateForm.transferDate,
+            //     reason: initiateForm.reason
+            // });
             setToast({ show: true, message: "Transfer request submitted successfully!", variant: "success" });
-            setInitiateForm(prev => ({ ...prev, studentId: "", toSchoolId: "", districtId: "", reason: "", transferDate: "" }));
+            setInitiateForm({ studentId: "", toSchoolId: "", districtId: "", reason: "", transferDate: "" });
             setSelectedStudent(null);
             fetchOutgoingTransfers();
         } catch (error) {
@@ -503,11 +136,11 @@ export default function SchoolTransfers() {
         }
     };
 
-    const handleAcceptTransfer = async (transferId, action) => {
+    const handleTransferAction = async (transferId, action) => {
         try {
-            if (action === "accept") await TransferService.approveTransfer(transferId);
-            else if (action === "reject") await TransferService.rejectTransfer(transferId);
-            else if (action === "finalize") await TransferService.finaliseTransfer(transferId);
+            // if (action === "accept") await TransferService.approveTransfer(transferId);
+            // else if (action === "reject") await TransferService.rejectTransfer(transferId);
+            // else if (action === "finalize") await TransferService.finaliseTransfer(transferId);
 
             setToast({ show: true, message: `Transfer ${action}ed successfully!`, variant: "success" });
             fetchIncomingRequests();
@@ -518,56 +151,64 @@ export default function SchoolTransfers() {
         }
     };
 
+    // Pagination Logic
+    const indexOfLastIncomingItem = incomingPage * itemsPerPage;
+    const indexOfFirstIncomingItem = indexOfLastIncomingItem - itemsPerPage;
+    const currentIncomingItems = incomingRequests.slice(indexOfFirstIncomingItem, indexOfLastIncomingItem);
+
+    const indexOfLastOutgoingItem = outgoingPage * itemsPerPage;
+    const indexOfFirstOutgoingItem = indexOfLastOutgoingItem - itemsPerPage;
+    const currentOutgoingItems = outgoingTransfers.slice(indexOfFirstOutgoingItem, indexOfLastOutgoingItem);
+
     const filteredTransfers = outgoingTransfers.filter(t => {
         if (!studentSearch) return true;
-        return t.reason?.toLowerCase().includes(studentSearch.toLowerCase()) || t.status?.toLowerCase().includes(studentSearch.toLowerCase());
+        return t.reason?.toLowerCase().includes(studentSearch.toLowerCase()) || 
+               t.status?.toLowerCase().includes(studentSearch.toLowerCase()) ||
+               (t.firstname && t.firstname.toLowerCase().includes(studentSearch.toLowerCase()));
     });
 
     return (
         <>
-            <style>{CSS}</style>
             <ToastNote show={toast.show} onClose={() => setToast({ ...toast, show: false })} message={toast.message} variant={toast.variant} />
             
-            <div className="se-container">
+            <div className="st-wrapper">
                 {/* HEADER */}
-                <div className="page-header">
-                    <div className="header-title">
-                        <h1>School Transfers</h1>
-                        <p>Manage student movement between institutions seamlessly.</p>
+                <div className="st-header">
+                    <div className="st-header-content">
+                        <div className="st-header-text">
+                            <div className="st-header-title">School Transfers</div>
+                            <div className="st-header-sub">Manage student movement between institutions seamlessly.</div>
+                        </div>
+                       
                     </div>
-                    <button className="btn-icon-only" style={{ width: '48px', height: '48px', backgroundColor: '#fff', border: '1px solid #e2e8f0', fontSize: '1.2rem' }}>
-                        <i className="bi bi-gear"></i>
-                    </button>
                 </div>
 
                 {/* TABS */}
-                <div className="modern-tabs">
-                    <button className={`tab-btn ${activeTab === 'initiate' ? 'active' : ''}`} onClick={() => setActiveTab('initiate')}>
+                <div className="st-tabs-bar">
+                    <button className={`st-tab ${activeTab === 'initiate' ? 'st-active' : ''}`} onClick={() => setActiveTab('initiate')}>
                         <i className="bi bi-send"></i> Initiate Transfer
                     </button>
-                    <button className={`tab-btn ${activeTab === 'accept' ? 'active' : ''}`} onClick={() => setActiveTab('accept')}>
+                    <button className={`st-tab ${activeTab === 'accept' ? 'st-active' : ''}`} onClick={() => setActiveTab('accept')}>
                         <i className="bi bi-inbox"></i> Incoming Requests
-                        {incomingRequests.length > 0 && <span style={{ marginLeft: '8px', background: 'rgba(255,255,255,0.2)', padding: '2px 8px', borderRadius: '10px', fontSize: '0.75rem' }}>{incomingRequests.length}</span>}
+                        {incomingRequests.length > 0 && <span className="st-tab-badge">{incomingRequests.length}</span>}
                     </button>
-                    <button className={`tab-btn ${activeTab === 'transfers' ? 'active' : ''}`} onClick={() => setActiveTab('transfers')}>
+                    <button className={`st-tab ${activeTab === 'transfers' ? 'st-active' : ''}`} onClick={() => setActiveTab('transfers')}>
                         <i className="bi bi-clock-history"></i> Transfer History
                     </button>
                 </div>
 
                 {/* INITIATE TAB */}
                 {activeTab === 'initiate' && (
-                    <div className="fade-in">
+                    <div className="st-fade-up">
                         {/* Search Section */}
-                        <div className="modern-card">
-                            <div className="modern-card-body">
-                                <div className="modern-input-group">
-                                    <label className="modern-label">Find Student</label>
-                                    <div style={{ position: 'relative' }}>
-                                        <i className="bi bi-search" style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }}></i>
+                        <div className="st-card">
+                            <div className="st-card-body">
+                                <div className="st-field">
+                                    <label className="st-label">Find Student</label>
+                                    <div className="st-search-wrapper">
                                         <input
                                             type="text"
-                                            className="modern-input"
-                                            style={{ paddingLeft: '3rem' }}
+                                            className="st-input"
                                             placeholder="Search by name or student number..."
                                             value={studentSearch}
                                             onChange={(e) => setStudentSearch(e.target.value)}
@@ -577,28 +218,30 @@ export default function SchoolTransfers() {
 
                                 {/* Search Results Dropdown */}
                                 {studentSearch && !selectedStudent && (
-                                    <div style={{ border: '1px solid #e2e8f0', borderRadius: '0.75rem', marginTop: '1rem', overflow: 'hidden', maxHeight: '300px', overflowY: 'auto', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)' }}>
-                                        {MOCK_STUDENTS.filter(s => 
-                                            (s.firstname + " " + s.lastname).toLowerCase().includes(studentSearch.toLowerCase())
+                                    <div className="st-search-results">
+                                        {students.filter(s => 
+                                            (s.firstname + " " + s.lastname).toLowerCase().includes(studentSearch.toLowerCase()) ||
+                                            (s.student_number && s.student_number.includes(studentSearch))
                                         ).length > 0 ? (
-                                            MOCK_STUDENTS.filter(s => 
-                                                (s.firstname + " " + s.lastname).toLowerCase().includes(studentSearch.toLowerCase())
+                                            students.filter(s => 
+                                                (s.firstname + " " + s.lastname).toLowerCase().includes(studentSearch.toLowerCase()) ||
+                                                (s.student_number && s.student_number.includes(studentSearch))
                                             ).map(s => (
-                                                <div key={s.id} className="search-result-item" onClick={() => handleSelectStudent(s)}>
-                                                    <div style={{ display: 'flex', alignItems: 'center' }}>
-                                                        <div className={`avatar-circle bg-gradient-${s.id % 4 + 1}`}>
-                                                            {s.firstname[0]}{s.lastname[0]}
+                                                <div key={s.id} className="st-result-item" onClick={() => handleSelectStudent(s)}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                                        <div className="st-avatar st-avatar-sm">
+                                                            {initials(s.firstname, s.lastname)}
                                                         </div>
                                                         <div>
-                                                            <div style={{ fontWeight: '600', color: '#1e293b' }}>{s.firstname} {s.lastname}</div>
-                                                            <div style={{ fontSize: '0.85rem', color: '#64748b' }}>{s.student_number} &bull; {s.form_level}</div>
+                                                            <div className="st-result-name">{s.firstname} {s.lastname}</div>
+                                                            <div className="st-result-meta">{s.student_number} • {s.form_level}</div>
                                                         </div>
                                                     </div>
                                                     <i className="bi bi-chevron-right" style={{ color: '#cbd5e1' }}></i>
                                                 </div>
                                             ))
                                         ) : (
-                                            <div style={{ padding: '1.5rem', textAlign: 'center', color: '#64748b' }}>No students found.</div>
+                                            <div className="st-empty-message">No students found matching "{studentSearch}"</div>
                                         )}
                                     </div>
                                 )}
@@ -607,58 +250,61 @@ export default function SchoolTransfers() {
 
                         {/* Selected Student Form */}
                         {selectedStudent && (
-                            <div className="modern-card fade-in">
-                                <div className="modern-card-header" style={{ background: 'linear-gradient(to right, #f8fafc, white)' }}>
-                                    <h3><i className="bi bi-person-check-fill" style={{ color: '#2563eb' }}></i> Initiate Transfer for {selectedStudent.firstname}</h3>
-                                    <button className="btn-icon-only" onClick={clearStudentSelection} title="Clear Selection">
+                            <div className="st-card">
+                                <div className="st-card-head">
+                                    <div className="st-head-title">
+                                        <i className="bi bi-person-check-fill" style={{ color: '#198754', marginRight: 8 }}></i> 
+                                        Initiate Transfer for {selectedStudent.firstname}
+                                    </div>
+                                    <button className="st-btn-icon-sm" onClick={clearStudentSelection} title="Clear Selection">
                                         <i className="bi bi-x-lg"></i>
                                     </button>
                                 </div>
-                                <div className="modern-card-body">
+                                <div className="st-card-body">
                                     <form onSubmit={handleInitiateTransfer}>
-                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem' }}>
-                                            <div className="modern-input-group">
-                                                <label className="modern-label">Transfer Date</label>
+                                        <div className="st-grid st-grid-2">
+                                            <div className="st-field">
+                                                <label className="st-label">Transfer Date</label>
                                                 <input 
                                                     type="date" 
-                                                    className="modern-input" 
+                                                    className="st-input" 
                                                     value={initiateForm.transferDate} 
                                                     onChange={e => setInitiateForm({...initiateForm, transferDate: e.target.value})} 
                                                     required 
                                                 />
                                             </div>
                                             
-                                            <div className="modern-input-group">
-                                                <label className="modern-label">District</label>
+                                            <div className="st-field">
+                                                <label className="st-label">District</label>
                                                 <select 
-                                                    className="modern-select" 
+                                                    className="st-select" 
                                                     value={initiateForm.districtId} 
-                                                    onChange={e => { setInitiateForm({...initiateForm, districtId: e.target.value}); handleDistrictChange(e.target.value); }}
+                                                    onChange={e => handleDistrictChange(e.target.value)}
                                                 >
                                                     <option value="">Select District</option>
                                                     {districts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                                                 </select>
                                             </div>
 
-                                            <div className="modern-input-group">
-                                                <label className="modern-label">Destination School</label>
+                                            <div className="st-field">
+                                                <label className="st-label">Destination School</label>
                                                 <select 
-                                                    className="modern-select" 
+                                                    className="st-select" 
                                                     value={initiateForm.toSchoolId} 
                                                     onChange={e => setInitiateForm({...initiateForm, toSchoolId: e.target.value})} 
                                                     required 
                                                     disabled={!initiateForm.districtId}
                                                 >
                                                     <option value="">Select School</option>
-                                                    {(initiateForm.districtId ? filteredSchools : schools).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                                    {filteredSchools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                                                 </select>
                                             </div>
 
-                                            <div className="modern-input-group" style={{ gridColumn: '1 / -1' }}>
-                                                <label className="modern-label">Reason for Transfer</label>
+                                            <div className="st-field" style={{ gridColumn: '1 / -1' }}>
+                                                <label className="st-label">Reason for Transfer</label>
                                                 <input 
                                                     type="text" 
-                                                    className="modern-input" 
+                                                    className="st-input" 
                                                     placeholder="e.g. Relocation, Academic preference..." 
                                                     value={initiateForm.reason} 
                                                     onChange={e => setInitiateForm({...initiateForm, reason: e.target.value})} 
@@ -666,8 +312,8 @@ export default function SchoolTransfers() {
                                                 />
                                             </div>
                                         </div>
-                                        <div style={{ marginTop: '2rem', textAlign: 'right' }}>
-                                            <button type="submit" className="btn-modern btn-primary">
+                                        <div className="st-form-actions">
+                                            <button type="submit" className="st-btn st-btn-primary">
                                                 <i className="bi bi-send"></i> Submit Transfer Request
                                             </button>
                                         </div>
@@ -680,21 +326,21 @@ export default function SchoolTransfers() {
 
                 {/* ACCEPT TAB */}
                 {activeTab === 'accept' && (
-                    <div className="fade-in">
-                        <div className="modern-card">
-                             <div className="modern-card-body">
-                                <div className="modern-input-group" style={{ marginBottom: '2rem' }}>
+                    <div className="st-fade-up">
+                        <div className="st-card">
+                             <div className="st-card-body">
+                                <div className="st-field">
                                     <input
                                         type="text"
-                                        className="modern-input"
-                                        placeholder="Filter requests..."
+                                        className="st-input"
+                                        placeholder="Filter requests by name or status..."
                                         value={studentSearch}
                                         onChange={(e) => setStudentSearch(e.target.value)}
                                     />
                                 </div>
                             </div>
-                            <div className="table-wrapper">
-                                <table className="modern-table">
+                            <div className="st-table-wrapper">
+                                <table className="st-table">
                                     <thead>
                                         <tr>
                                             <th>Student</th>
@@ -708,62 +354,69 @@ export default function SchoolTransfers() {
                                         {currentIncomingItems.length > 0 ? currentIncomingItems.map(request => (
                                             <tr key={request.id}>
                                                 <td>
-                                                    <div style={{ display: 'flex', alignItems: 'center' }}>
-                                                        <div className={`avatar-circle bg-gradient-${request.id % 4 + 1}`} style={{ width: '36px', height: '36px', fontSize: '0.8rem' }}>
-                                                            {request.firstname ? request.firstname[0] : 'S'}
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                                        <div className="st-avatar st-avatar-sm">
+                                                            {initials(request.firstname, request.lastname)}
                                                         </div>
                                                         <div>
-                                                            <div style={{ fontWeight: '600', color: '#0f172a' }}>{request.firstname} {request.lastname}</div>
-                                                            <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{request.student_number}</div>
+                                                            <div className="st-table-name">{request.firstname} {request.lastname}</div>
+                                                            <div className="st-table-sub">{request.student_number}</div>
                                                         </div>
                                                     </div>
                                                 </td>
                                                 <td>{request.from_school_name || '-'}</td>
                                                 <td>{request.date_initiated ? new Date(request.date_initiated).toLocaleDateString() : '-'}</td>
-                                                <td><span className={`status-badge ${getStatusBadge(request.status)}`}>{request.status}</span></td>
+                                                <td><span className={`st-badge ${getStatusBadgeClass(request.status)}`}>{request.status}</span></td>
                                                 <td style={{ textAlign: 'right' }}>
-                                                    <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                                                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                                                         {request.status === 'initiated' && (
                                                             <>
-                                                                <button className="btn-modern btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} onClick={() => handleAcceptTransfer(request.id, 'reject')}>Reject</button>
-                                                                <button className="btn-modern btn-primary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} onClick={() => handleAcceptTransfer(request.id, 'accept')}>Approve</button>
+                                                                <button className="st-btn st-btn-ghost st-btn-sm" onClick={() => handleTransferAction(request.id, 'reject')}>Reject</button>
+                                                                <button className="st-btn st-btn-primary st-btn-sm" onClick={() => handleTransferAction(request.id, 'accept')}>Approve</button>
                                                             </>
                                                         )}
                                                         {request.status === 'approved' && (
-                                                            <button className="btn-modern btn-primary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', background: '#10b981' }} onClick={() => handleAcceptTransfer(request.id, 'finalize')}>Finalize</button>
+                                                            <button className="st-btn st-btn-success st-btn-sm" onClick={() => handleTransferAction(request.id, 'finalize')}>Finalize</button>
                                                         )}
                                                     </div>
                                                 </td>
                                             </tr>
                                         )) : (
                                             <tr>
-                                                <td colSpan="5" style={{ textAlign: 'center', padding: '3rem', color: '#94a3b8' }}>
-                                                    <i className="bi bi-inbox" style={{ fontSize: '2rem', marginBottom: '0.5rem', display: 'block' }}></i>
-                                                    No incoming requests found.
+                                                <td colSpan="5">
+                                                    <div className="st-table-empty">
+                                                        <i className="bi bi-inbox"></i>
+                                                        <div>No incoming requests found.</div>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         )}
                                     </tbody>
                                 </table>
                             </div>
+                            {incomingRequests.length > itemsPerPage && (
+                                <div className="st-pagination">
+                                    {/* Simple pagination controls could go here */}
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}
 
                 {/* TRANSFERS HISTORY TAB */}
                 {activeTab === 'transfers' && (
-                    <div className="fade-in">
-                        <div className="modern-card">
-                            <div className="modern-card-header">
-                                <h3>Outgoing Transfers</h3>
-                                <select className="modern-select" style={{ width: 'auto', padding: '0.4rem 2rem 0.4rem 1rem', fontSize: '0.85rem' }}>
+                    <div className="st-fade-up">
+                        <div className="st-card">
+                            <div className="st-card-head">
+                                <div className="st-head-title">Outgoing Transfers</div>
+                                <select className="st-select st-select-sm">
                                     <option>All Status</option>
                                     <option>Completed</option>
                                     <option>Pending</option>
                                 </select>
                             </div>
-                            <div className="table-wrapper">
-                                <table className="modern-table">
+                            <div className="st-table-wrapper">
+                                <table className="st-table">
                                     <thead>
                                         <tr>
                                             <th>Student</th>
@@ -777,28 +430,30 @@ export default function SchoolTransfers() {
                                         {filteredTransfers.length > 0 ? filteredTransfers.map(transfer => (
                                             <tr key={transfer.id}>
                                                 <td>
-                                                    <div style={{ display: 'flex', alignItems: 'center' }}>
-                                                        <div className={`avatar-circle bg-gradient-${transfer.id % 4 + 1}`} style={{ width: '36px', height: '36px', fontSize: '0.8rem' }}>
-                                                            {transfer.firstname ? transfer.firstname[0] : 'S'}
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                                        <div className="st-avatar st-avatar-sm">
+                                                            {initials(transfer.firstname, transfer.lastname)}
                                                         </div>
                                                         <div>
-                                                            <div style={{ fontWeight: '600', color: '#0f172a' }}>{transfer.firstname} {transfer.lastname}</div>
-                                                            <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{transfer.student_number}</div>
+                                                            <div className="st-table-name">{transfer.firstname} {transfer.lastname}</div>
+                                                            <div className="st-table-sub">{transfer.student_number}</div>
                                                         </div>
                                                     </div>
                                                 </td>
                                                 <td>{transfer.to_school_name || 'N/A'}</td>
                                                 <td>{transfer.transfer_date || '-'}</td>
-                                                <td><span className={`status-badge ${getStatusBadge(transfer.status)}`}>{transfer.status}</span></td>
+                                                <td><span className={`st-badge ${getStatusBadgeClass(transfer.status)}`}>{transfer.status}</span></td>
                                                 <td style={{ textAlign: 'right' }}>
-                                                    <button className="btn-icon-only" title="View Details"><i className="bi bi-eye"></i></button>
+                                                    <button className="st-icon-btn" title="View Details"><i className="bi bi-eye"></i></button>
                                                 </td>
                                             </tr>
                                         )) : (
                                             <tr>
-                                                <td colSpan="5" style={{ textAlign: 'center', padding: '3rem', color: '#94a3b8' }}>
-                                                    <i className="bi bi-table" style={{ fontSize: '2rem', marginBottom: '0.5rem', display: 'block' }}></i>
-                                                    No transfer history found.
+                                                <td colSpan="5">
+                                                    <div className="st-table-empty">
+                                                        <i className="bi bi-table"></i>
+                                                        <div>No transfer history found.</div>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         )}

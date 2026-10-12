@@ -9,11 +9,11 @@ const getAuthHeaders = () => {
 };
 
 const AcademicYearService = {
-  // Fetch all academic years
-  fetchAllAcademicYears: async () => {
+  // Fetch all academic years for a specific school
+  fetchAllAcademicYears: async (schoolId) => {
     try {
       const response = await axios.get(
-        `${NSMS_URL}/admin/academic_years`,
+        `${NSMS_URL}/school/${schoolId}/AcademicYear`,
         { headers: getAuthHeaders() }
       );
       return Array.isArray(response.data) ? response.data : [];
@@ -23,10 +23,10 @@ const AcademicYearService = {
     }
   },
 
-  // Get the active academic year
-  getActiveAcademicYear: async () => {
+  // Get the active academic year for a specific school
+  getActiveAcademicYear: async (schoolId) => {
     try {
-      const years = await AcademicYearService.fetchAllAcademicYears();
+      const years = await AcademicYearService.fetchAllAcademicYears(schoolId);
       const active = years.find(y => y.status && y.status.toLowerCase() === "active");
       return active || null;
     } catch (error) {
@@ -35,16 +35,61 @@ const AcademicYearService = {
     }
   },
 
-  // Get academic year by ID
-  getAcademicYearById: async (yearId) => {
+  // Get academic year by ID for a specific school
+  getAcademicYearById: async (schoolId, yearId) => {
     try {
       const response = await axios.get(
-        `${NSMS_URL}/admin/academic_years/${yearId}`,
+        `${NSMS_URL}/school/${schoolId}/AcademicYear/${yearId}`,
         { headers: getAuthHeaders() }
       );
       return response.data;
     } catch (error) {
       console.error(`Error fetching academic year ${yearId}:`, error);
+      throw error;
+    }
+  },
+
+  // Create a new academic year for a specific school
+  createAcademicYear: async (schoolId, data) => {
+    try {
+      const response = await axios.post(
+        `${NSMS_URL}/school/${schoolId}/AcademicYear`,
+        data,
+        { headers: getAuthHeaders() }
+      );
+      return response.data;
+    } catch (error) {
+      console.error("Error creating academic year:", error);
+      throw error;
+    }
+  },
+
+  // Update an academic year for a specific school
+  updateAcademicYear: async (schoolId, id, data) => {
+    try {
+      const response = await axios.put(
+        `${NSMS_URL}/school/${schoolId}/AcademicYear/${id}`,
+        data,
+        { headers: getAuthHeaders() }
+      );
+      return response.data;
+    } catch (error) {
+      console.error(`Error updating academic year ${id}:`, error);
+      throw error;
+    }
+  },
+
+  // Delete an academic year for a specific school
+  deleteAcademicYear: async (schoolId, id) => {
+    try {
+      const response = await axios.delete(
+        `${NSMS_URL}/school/${schoolId}/AcademicYear/${id}`,
+        { headers: getAuthHeaders() }
+        
+      );
+      return response.data;
+    } catch (error) {
+      console.error(`Error deleting academic year ${id}:`, error);
       throw error;
     }
   },
