@@ -81,8 +81,7 @@ func DeleteSchool(schoolService services.SchoolService, logger logging.Logger) f
 			return problemdetail.BadRequest(ctx, "invalid school ID")
 		}
 		if err := schoolService.DeleteSchool(ctx.Context(), schoolID); err != nil {
-			logger.Error("failed to delete school: ", "error", err)
-			return problemdetail.ServerErrorProblem(ctx, "Failed to delete school")
+			return structureErrorResponse(ctx, logger, err, "Failed to delete school")
 		}
 		return ctx.SendStatus(fiber.StatusNoContent)
 	}

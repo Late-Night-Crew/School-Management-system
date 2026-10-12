@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"errors"
+
 	"github.com/gofiber/fiber/v2"
 	"nsms/common"
 	"nsms/logging"
@@ -46,6 +48,12 @@ func CreateStudent(studentService services.StudentService, logger logging.Logger
 			return problemdetail.BadRequest(ctx, err.Error())
 		}
 		student, err := studentService.CreateStudent(ctx.Context(), &req)
+		if errors.Is(err, services.ErrSchoolClosed) {
+			return problemdetail.Conflict(ctx, err.Error())
+		}
+		if errors.Is(err, services.ErrNotFound) {
+			return problemdetail.BadRequest(ctx, "The chosen school does not exist")
+		}
 		if err != nil {
 			logger.Error("failed to create student: ", "error", err)
 			return problemdetail.ServerErrorProblem(ctx, "Failed to create student")
@@ -66,6 +74,12 @@ func UpdateStudent(studentService services.StudentService,logger logging.Logger)
 		}
 		req.ID = studentID
 		student, err := studentService.UpdateStudent(ctx.Context(), &req)
+		if errors.Is(err, services.ErrSchoolClosed) {
+			return problemdetail.Conflict(ctx, err.Error())
+		}
+		if errors.Is(err, services.ErrNotFound) {
+			return problemdetail.BadRequest(ctx, "The chosen school does not exist")
+		}
 		if err != nil {
 			logger.Error("failed to update student: ", "error", err)
 			return problemdetail.ServerErrorProblem(ctx, "Failed to update student")

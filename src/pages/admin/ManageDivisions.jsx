@@ -1,9 +1,21 @@
 import { useEffect, useState } from "react";
 
-import { createRegion, deleteRegion, getRegion, listRegions, updateRegion } from "../../api/regions";
-import ConfirmModal from "../../components/ConfirmModal";
+import { createRegion, deleteRegion, getRegion, getRegionUsage, listRegions, moveRegionDistricts, updateRegion } from "../../api/regions";
 import DataState from "../../components/DataState";
+import ToastNote from "../../components/ToastNote";
 import { Button, Card, Dialog, Field, IconButton, Input, Page, SearchInput, Table } from "../../components/ui";
+import { DeleteContainerDialog } from "./StructureDialogs";
+
+// A division can only be deleted once its districts have moved to another division
+const DELETE_CONFIG = {
+  noun: "division",
+  childNoun: "district",
+  getUsage: getRegionUsage,
+  childCount: (usage) => usage.districts,
+  extra: (usage) => (usage.schools ? ` with ${usage.schools} school${usage.schools === 1 ? "" : "s"}` : ""),
+  move: moveRegionDistricts,
+  remove: deleteRegion,
+};
 
 export default function ManageDivisions() {
   const [searchTerm, setSearchTerm] = useState("");
@@ -14,6 +26,7 @@ export default function ManageDivisions() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(null);
   const [formData, setFormData] = useState({ name: "" });
+  const [toast, setToast] = useState({ show: false, message: "", variant: "success" });
 
   useEffect(() => { loadRegions(); }, []);
 
@@ -66,15 +79,11 @@ export default function ManageDivisions() {
     } finally { setSaving(false); }
   };
 
-  const handleDeleteDivision = async () => {
-    const id = deleting.id;
-    setDeleting(null);
-    try {
-      await deleteRegion(id);
-      setRegions((prev) => prev.filter((r) => r.id !== id));
-    } catch (error) {
-      console.error("Error deleting division:", error);
-      alert(`Failed to delete division: ${error.message}`);
+  const handleDeleteChanged = (message, deleted) => {
+    setToast({ show: true, message, variant: "success" });
+    if (deleted) {
+      setRegions((prev) => prev.filter((r) => r.id !== deleting.id));
+      setDeleting(null);
     }
   };
 
@@ -94,6 +103,8 @@ export default function ManageDivisions() {
         </Button>
       }
     >
+      <ToastNote {...toast} onClose={() => setToast((t) => ({ ...t, show: false }))} />
+
       <Card
         accent="blue"
         icon="bi-list-ul"
@@ -154,13 +165,13 @@ export default function ManageDivisions() {
         </Field>
       </Dialog>
 
-      <ConfirmModal
-        show={!!deleting}
+      <DeleteContainerDialog
+        item={deleting}
+        config={DELETE_CONFIG}
+        targets={regions.filter((r) => r.id !== deleting?.id).map((r) => ({ id: r.id, label: r.name }))}
+        accountsPath="/admin/accounts"
         onHide={() => setDeleting(null)}
-        onConfirm={handleDeleteDivision}
-        title="Delete Division"
-        confirmLabel="Delete"
-        body={deleting && `Are you sure you want to delete the ${deleting.name} division?`}
+        onChanged={handleDeleteChanged}
       />
     </Page>
   );

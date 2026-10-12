@@ -123,6 +123,48 @@ func (q *Queries) ChangeOwnPassword(ctx context.Context, arg ChangeOwnPasswordPa
 	return err
 }
 
+const closeSchool = `-- name: CloseSchool :one
+WITH closed AS (
+    UPDATE schools SET closed_at = CURRENT_TIMESTAMP
+    WHERE id = $1::int AND closed_at IS NULL
+    RETURNING id, name
+),
+deactivated AS (
+    UPDATE users SET is_activated = FALSE, updated_at = CURRENT_TIMESTAMP
+    WHERE school_id IN (SELECT id FROM closed) AND is_activated AND deleted_at IS NULL
+    RETURNING id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'school', closed.id, 'Closed', a.id, a.name, a.role, a.school_id, $2::text
+    FROM closed LEFT JOIN users a ON a.id = $3::int
+    UNION ALL
+    SELECT 'user', deactivated.id, 'Deactivated', a.id, a.name, a.role, a.school_id, 'School closed'
+    FROM deactivated LEFT JOIN users a ON a.id = $3::int
+)
+SELECT closed.id, (SELECT COUNT(*) FROM deactivated)::int AS accounts_deactivated FROM closed
+`
+
+type CloseSchoolParams struct {
+	SchoolID    int32
+	Note        sql.NullString
+	ActorUserID int32
+}
+
+type CloseSchoolRow struct {
+	ID                  int32
+	AccountsDeactivated int32
+}
+
+// Closes a school, deactivates its active accounts and audits both, in one statement.
+// Returns no row if the school does not exist or is already closed.
+func (q *Queries) CloseSchool(ctx context.Context, arg CloseSchoolParams) (CloseSchoolRow, error) {
+	row := q.db.QueryRowContext(ctx, closeSchool, arg.SchoolID, arg.Note, arg.ActorUserID)
+	var i CloseSchoolRow
+	err := row.Scan(&i.ID, &i.AccountsDeactivated)
+	return i, err
+}
+
 const countActiveRegionalAdmins = `-- name: CountActiveRegionalAdmins :one
 SELECT COUNT(*) FROM users
 WHERE role = 'REGIONAL_ADMIN' AND region_id = $1 AND COALESCE(is_activated, FALSE)
@@ -149,10 +191,10 @@ SELECT (
         OR ($1::text = 'REGIONAL_ADMIN' AND rg.id = $2::int))
     +
     (SELECT COUNT(*) FROM schools sc JOIN districts d ON d.id = sc.district_id
-     WHERE $1::text = 'SCHOOLS_ALL'
+     WHERE sc.closed_at IS NULL AND ($1::text = 'SCHOOLS_ALL'
         OR ($1::text = 'SCHOOLS_IN_REGION' AND d.region_id = $2::int)
         OR ($1::text = 'SCHOOLS_IN_DISTRICT' AND d.id = $2::int)
-        OR ($1::text = 'SCHOOL' AND sc.id = $2::int))
+        OR ($1::text = 'SCHOOL' AND sc.id = $2::int)))
 )::int AS count
 `
 
@@ -633,10 +675,10 @@ audience AS (
     UNION ALL
     SELECT 'SCHOOL'::text, sc.id
     FROM schools sc JOIN districts d ON d.id = sc.district_id
-    WHERE $7::text = 'SCHOOLS_ALL'
+    WHERE sc.closed_at IS NULL AND ($7::text = 'SCHOOLS_ALL'
         OR ($7::text = 'SCHOOLS_IN_REGION' AND d.region_id = $8::int)
         OR ($7::text = 'SCHOOLS_IN_DISTRICT' AND d.id = $8::int)
-        OR ($7::text = 'SCHOOL' AND sc.id = $8::int)
+        OR ($7::text = 'SCHOOL' AND sc.id = $8::int))
 ),
 recipients AS (
     INSERT INTO notice_recipients (notice_id, party_type, party_id)
@@ -770,7 +812,8 @@ VALUES
     ($1, $2, $3) RETURNING id,
     school_number,
     name,
-    district_id
+    district_id,
+    closed_at
 `
 
 type CreateSchoolParams struct {
@@ -784,6 +827,7 @@ type CreateSchoolRow struct {
 	SchoolNumber string
 	Name         string
 	DistrictID   int32
+	ClosedAt     sql.NullTime
 }
 
 func (q *Queries) CreateSchool(ctx context.Context, arg CreateSchoolParams) (CreateSchoolRow, error) {
@@ -794,6 +838,7 @@ func (q *Queries) CreateSchool(ctx context.Context, arg CreateSchoolParams) (Cre
 		&i.SchoolNumber,
 		&i.Name,
 		&i.DistrictID,
+		&i.ClosedAt,
 	)
 	return i, err
 }
@@ -1418,7 +1463,8 @@ SELECT
     id,
     school_number,
     name,
-    district_id
+    district_id,
+    closed_at
 FROM
     schools
 WHERE
@@ -1430,6 +1476,7 @@ type FindSchoolByIdRow struct {
 	SchoolNumber string
 	Name         string
 	DistrictID   int32
+	ClosedAt     sql.NullTime
 }
 
 func (q *Queries) FindSchoolById(ctx context.Context, id int32) (FindSchoolByIdRow, error) {
@@ -1440,6 +1487,7 @@ func (q *Queries) FindSchoolById(ctx context.Context, id int32) (FindSchoolByIdR
 		&i.SchoolNumber,
 		&i.Name,
 		&i.DistrictID,
+		&i.ClosedAt,
 	)
 	return i, err
 }
@@ -1747,6 +1795,24 @@ func (q *Queries) GetDistrictRegionID(ctx context.Context, districtID int32) (in
 	return region_id, err
 }
 
+const getDistrictUsage = `-- name: GetDistrictUsage :one
+SELECT
+    (SELECT COUNT(*) FROM schools WHERE district_id = $1::int)::int AS schools,
+    (SELECT COUNT(*) FROM users WHERE district_id = $1::int AND is_activated AND deleted_at IS NULL)::int AS active_accounts
+`
+
+type GetDistrictUsageRow struct {
+	Schools        int32
+	ActiveAccounts int32
+}
+
+func (q *Queries) GetDistrictUsage(ctx context.Context, districtID int32) (GetDistrictUsageRow, error) {
+	row := q.db.QueryRowContext(ctx, getDistrictUsage, districtID)
+	var i GetDistrictUsageRow
+	err := row.Scan(&i.Schools, &i.ActiveAccounts)
+	return i, err
+}
+
 const getExamResultBySchoolIDAndAcademicYear = `-- name: GetExamResultBySchoolIDAndAcademicYear :one
 SELECT
     id,
@@ -2024,6 +2090,37 @@ func (q *Queries) GetRegionName(ctx context.Context, regionID int32) (string, er
 	return name, err
 }
 
+const getRegionUsage = `-- name: GetRegionUsage :one
+SELECT
+    (SELECT COUNT(*) FROM districts WHERE region_id = $1::int)::int AS districts,
+    (SELECT COUNT(*) FROM schools sc JOIN districts d ON d.id = sc.district_id WHERE d.region_id = $1::int)::int AS schools,
+    (SELECT COUNT(*) FROM users WHERE region_id = $1::int AND is_activated AND deleted_at IS NULL)::int AS active_accounts
+`
+
+type GetRegionUsageRow struct {
+	Districts      int32
+	Schools        int32
+	ActiveAccounts int32
+}
+
+func (q *Queries) GetRegionUsage(ctx context.Context, regionID int32) (GetRegionUsageRow, error) {
+	row := q.db.QueryRowContext(ctx, getRegionUsage, regionID)
+	var i GetRegionUsageRow
+	err := row.Scan(&i.Districts, &i.Schools, &i.ActiveAccounts)
+	return i, err
+}
+
+const getSchoolClosedAt = `-- name: GetSchoolClosedAt :one
+SELECT closed_at FROM schools WHERE id = $1::int
+`
+
+func (q *Queries) GetSchoolClosedAt(ctx context.Context, schoolID int32) (sql.NullTime, error) {
+	row := q.db.QueryRowContext(ctx, getSchoolClosedAt, schoolID)
+	var closed_at sql.NullTime
+	err := row.Scan(&closed_at)
+	return closed_at, err
+}
+
 const getSchoolDashboardStats = `-- name: GetSchoolDashboardStats :one
 SELECT
     (SELECT COUNT(*) FROM students s WHERE s.school_id = $1) AS student_count,
@@ -2195,6 +2292,49 @@ func (q *Queries) GetSchoolScope(ctx context.Context, schoolID int32) (GetSchool
 		&i.Name,
 		&i.DistrictID,
 		&i.RegionID,
+	)
+	return i, err
+}
+
+const getSchoolUsage = `-- name: GetSchoolUsage :one
+
+SELECT
+    (SELECT COUNT(*) FROM students WHERE school_id = $1::int)::int AS students,
+    (SELECT COUNT(*) FROM student_marks WHERE school_id = $1::int)::int AS marks,
+    (SELECT COUNT(*) FROM transfers WHERE from_school = $1::int OR to_school = $1::int)::int AS transfers,
+    (SELECT COUNT(*) FROM transfers WHERE to_school = $1::int AND status IN ('Pending', 'Accepted'))::int AS unfinished_incoming_transfers,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1::int
+        AND EXISTS (SELECT 1 FROM transfers t WHERE t.student_id = s.id AND t.status = 'Pending'))::int AS students_with_pending_transfers,
+    (SELECT COUNT(*) FROM exam_results WHERE school_id = $1::int)::int AS exam_results,
+    (SELECT COUNT(*) FROM users WHERE school_id = $1::int AND is_activated AND deleted_at IS NULL)::int AS active_accounts
+`
+
+type GetSchoolUsageRow struct {
+	Students                     int32
+	Marks                        int32
+	Transfers                    int32
+	UnfinishedIncomingTransfers  int32
+	StudentsWithPendingTransfers int32
+	ExamResults                  int32
+	ActiveAccounts               int32
+}
+
+// ============================================================================
+// Deleting, moving and closing schools, districts and divisions. Nothing with records
+// under it can be deleted (the foreign keys refuse too); these counts say what is in
+// the way so the screens can explain it.
+// ============================================================================
+func (q *Queries) GetSchoolUsage(ctx context.Context, schoolID int32) (GetSchoolUsageRow, error) {
+	row := q.db.QueryRowContext(ctx, getSchoolUsage, schoolID)
+	var i GetSchoolUsageRow
+	err := row.Scan(
+		&i.Students,
+		&i.Marks,
+		&i.Transfers,
+		&i.UnfinishedIncomingTransfers,
+		&i.StudentsWithPendingTransfers,
+		&i.ExamResults,
+		&i.ActiveAccounts,
 	)
 	return i, err
 }
@@ -2924,6 +3064,7 @@ SELECT sc.id, sc.name, d.name AS district_name, d.region_id, rg.name AS region_n
 FROM schools sc
     JOIN districts d ON d.id = sc.district_id
     JOIN regions rg ON rg.id = d.region_id
+WHERE sc.closed_at IS NULL
 ORDER BY rg.name, d.name, sc.name
 `
 
@@ -3243,6 +3384,7 @@ FROM
     schools sc
     JOIN districts d ON d.id = sc.district_id
     JOIN regions rg ON rg.id = d.region_id
+WHERE sc.closed_at IS NULL
 ORDER BY rg.name, d.name, sc.name
 `
 
@@ -3287,6 +3429,42 @@ func (q *Queries) ListDirectorySchools(ctx context.Context) ([]ListDirectoryScho
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDistrictNameClashes = `-- name: ListDistrictNameClashes :many
+SELECT a.name FROM districts a
+JOIN districts b ON b.name = a.name AND b.region_id = $1::int
+WHERE a.region_id = $2::int
+ORDER BY a.name
+`
+
+type ListDistrictNameClashesParams struct {
+	ToRegionID   int32
+	FromRegionID int32
+}
+
+// Districts in one division whose names are already taken in another.
+func (q *Queries) ListDistrictNameClashes(ctx context.Context, arg ListDistrictNameClashesParams) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listDistrictNameClashes, arg.ToRegionID, arg.FromRegionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		items = append(items, name)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -3833,12 +4011,49 @@ func (q *Queries) ListReportedConversations(ctx context.Context) ([]ListReported
 	return items, nil
 }
 
+const listSchoolNameClashes = `-- name: ListSchoolNameClashes :many
+SELECT a.name FROM schools a
+JOIN schools b ON b.name = a.name AND b.district_id = $1::int
+WHERE a.district_id = $2::int
+ORDER BY a.name
+`
+
+type ListSchoolNameClashesParams struct {
+	ToDistrictID   int32
+	FromDistrictID int32
+}
+
+// Schools in one district whose names are already taken in another (names are unique per district).
+func (q *Queries) ListSchoolNameClashes(ctx context.Context, arg ListSchoolNameClashesParams) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listSchoolNameClashes, arg.ToDistrictID, arg.FromDistrictID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		items = append(items, name)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSchools = `-- name: ListSchools :many
 SELECT
     id,
     school_number,
     name,
-    district_id
+    district_id,
+    closed_at
 FROM
     schools
 ORDER BY
@@ -3850,6 +4065,7 @@ type ListSchoolsRow struct {
 	SchoolNumber string
 	Name         string
 	DistrictID   int32
+	ClosedAt     sql.NullTime
 }
 
 func (q *Queries) ListSchools(ctx context.Context) ([]ListSchoolsRow, error) {
@@ -3866,6 +4082,7 @@ func (q *Queries) ListSchools(ctx context.Context) ([]ListSchoolsRow, error) {
 			&i.SchoolNumber,
 			&i.Name,
 			&i.DistrictID,
+			&i.ClosedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -3885,7 +4102,8 @@ SELECT
     id,
     school_number,
     name,
-    district_id
+    district_id,
+    closed_at
 FROM
     schools
 WHERE
@@ -3899,6 +4117,7 @@ type ListSchoolsByDistrictIdRow struct {
 	SchoolNumber string
 	Name         string
 	DistrictID   int32
+	ClosedAt     sql.NullTime
 }
 
 func (q *Queries) ListSchoolsByDistrictId(ctx context.Context, districtID int32) ([]ListSchoolsByDistrictIdRow, error) {
@@ -3915,6 +4134,7 @@ func (q *Queries) ListSchoolsByDistrictId(ctx context.Context, districtID int32)
 			&i.SchoolNumber,
 			&i.Name,
 			&i.DistrictID,
+			&i.ClosedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -4746,6 +4966,76 @@ func (q *Queries) MarkNoticeRead(ctx context.Context, arg MarkNoticeReadParams) 
 	return id, err
 }
 
+const moveDistrictSchools = `-- name: MoveDistrictSchools :one
+WITH moved AS (
+    UPDATE schools SET district_id = $1::int
+    WHERE district_id = $2::int
+    RETURNING id
+),
+synced AS (
+    UPDATE users
+    SET district_id = $1::int,
+        region_id = (SELECT region_id FROM districts WHERE id = $1::int)
+    WHERE school_id IN (SELECT id FROM moved)
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'district', $2::int, 'Schools moved', u.id, u.name, u.role, u.school_id,
+        (SELECT COUNT(*) FROM moved) || ' school(s) moved to ' || (SELECT name FROM districts WHERE id = $1::int)
+    FROM (SELECT 1) AS one LEFT JOIN users u ON u.id = $3::int
+)
+SELECT COUNT(*)::int FROM moved
+`
+
+type MoveDistrictSchoolsParams struct {
+	ToDistrictID   int32
+	FromDistrictID int32
+	ActorUserID    int32
+}
+
+// Moves every school in a district to another, keeps their managers' accounts in step
+// and writes the audit entry, all in one statement.
+func (q *Queries) MoveDistrictSchools(ctx context.Context, arg MoveDistrictSchoolsParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, moveDistrictSchools, arg.ToDistrictID, arg.FromDistrictID, arg.ActorUserID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const moveRegionDistricts = `-- name: MoveRegionDistricts :one
+WITH moved AS (
+    UPDATE districts SET region_id = $1::int
+    WHERE region_id = $2::int
+    RETURNING id
+),
+synced AS (
+    UPDATE users SET region_id = $1::int
+    WHERE district_id IN (SELECT id FROM moved)
+        OR school_id IN (SELECT sc.id FROM schools sc WHERE sc.district_id IN (SELECT id FROM moved))
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'region', $2::int, 'Districts moved', u.id, u.name, u.role, u.school_id,
+        (SELECT COUNT(*) FROM moved) || ' district(s) moved to ' || (SELECT name FROM regions WHERE id = $1::int)
+    FROM (SELECT 1) AS one LEFT JOIN users u ON u.id = $3::int
+)
+SELECT COUNT(*)::int FROM moved
+`
+
+type MoveRegionDistrictsParams struct {
+	ToRegionID   int32
+	FromRegionID int32
+	ActorUserID  int32
+}
+
+// Moves every district in a division to another, with the accounts scoped to them.
+func (q *Queries) MoveRegionDistricts(ctx context.Context, arg MoveRegionDistrictsParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, moveRegionDistricts, arg.ToRegionID, arg.FromRegionID, arg.ActorUserID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const recordLogin = `-- name: RecordLogin :exec
 UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1
 `
@@ -4821,6 +5111,33 @@ func (q *Queries) RejectTransferForSchool(ctx context.Context, arg RejectTransfe
 		arg.SchoolID,
 		arg.ActorUserID,
 	)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
+
+const reopenSchool = `-- name: ReopenSchool :one
+WITH reopened AS (
+    UPDATE schools SET closed_at = NULL
+    WHERE id = $1::int AND closed_at IS NOT NULL
+    RETURNING id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id)
+    SELECT 'school', reopened.id, 'Reopened', a.id, a.name, a.role, a.school_id
+    FROM reopened LEFT JOIN users a ON a.id = $2::int
+)
+SELECT id FROM reopened
+`
+
+type ReopenSchoolParams struct {
+	SchoolID    int32
+	ActorUserID int32
+}
+
+// Reopens a closed school. Its accounts stay deactivated until someone reactivates them.
+func (q *Queries) ReopenSchool(ctx context.Context, arg ReopenSchoolParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, reopenSchool, arg.SchoolID, arg.ActorUserID)
 	var id int32
 	err := row.Scan(&id)
 	return id, err
@@ -4925,6 +5242,87 @@ func (q *Queries) SetAccountActive(ctx context.Context, arg SetAccountActivePara
 	var id int32
 	err := row.Scan(&id)
 	return id, err
+}
+
+const syncSchoolAccountScopes = `-- name: SyncSchoolAccountScopes :exec
+UPDATE users u
+SET district_id = sc.district_id, region_id = d.region_id
+FROM schools sc
+JOIN districts d ON d.id = sc.district_id
+WHERE u.school_id = sc.id
+    AND (u.district_id IS DISTINCT FROM sc.district_id OR u.region_id IS DISTINCT FROM d.region_id)
+`
+
+// School managers' accounts copy their school's district and division; run after a
+// school changes district or a district changes division.
+func (q *Queries) SyncSchoolAccountScopes(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, syncSchoolAccountScopes)
+	return err
+}
+
+const transferAllStudents = `-- name: TransferAllStudents :one
+WITH movable AS (
+    SELECT s.id FROM students s
+    WHERE s.school_id = $1::int
+        AND NOT EXISTS (SELECT 1 FROM transfers t WHERE t.student_id = s.id AND t.status = 'Pending')
+    FOR UPDATE OF s
+),
+created AS (
+    INSERT INTO transfers (student_id, from_school, to_school, status, date_initiated, date_accepted, reason)
+    SELECT movable.id, $1::int, $2::int, 'Completed',
+        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $3::text
+    FROM movable
+    RETURNING id
+),
+moved AS (
+    UPDATE students SET school_id = $2::int, updated_at = CURRENT_TIMESTAMP
+    WHERE id IN (SELECT id FROM movable)
+    RETURNING id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'transfer', created.id, step.action, u.id, u.name, u.role, u.school_id,
+        'Whole-school transfer: ' || $3::text
+    FROM created
+        CROSS JOIN (VALUES ('Created'), ('Completed')) AS step(action)
+        LEFT JOIN users u ON u.id = $4::int
+    UNION ALL
+    SELECT 'school', $1::int, 'Students transferred', u.id, u.name, u.role, u.school_id,
+        (SELECT COUNT(*) FROM moved) || ' student(s) transferred to '
+            || (SELECT name FROM schools WHERE id = $2::int) || ': ' || $3::text
+    FROM (SELECT 1) AS one LEFT JOIN users u ON u.id = $4::int
+)
+SELECT
+    (SELECT COUNT(*) FROM created)::int AS transferred,
+    (SELECT COUNT(*) FROM students WHERE school_id = $1::int)::int
+        - (SELECT COUNT(*) FROM movable)::int AS skipped
+`
+
+type TransferAllStudentsParams struct {
+	FromSchoolID int32
+	ToSchoolID   int32
+	Reason       string
+	ActorUserID  int32
+}
+
+type TransferAllStudentsRow struct {
+	Transferred int32
+	Skipped     int32
+}
+
+// Moves every student of one school to another as completed transfers, so each
+// student's history shows the move. Students with a pending transfer are left for that
+// transfer to finish. Audited per transfer and once for the school, in one statement.
+func (q *Queries) TransferAllStudents(ctx context.Context, arg TransferAllStudentsParams) (TransferAllStudentsRow, error) {
+	row := q.db.QueryRowContext(ctx, transferAllStudents,
+		arg.FromSchoolID,
+		arg.ToSchoolID,
+		arg.Reason,
+		arg.ActorUserID,
+	)
+	var i TransferAllStudentsRow
+	err := row.Scan(&i.Transferred, &i.Skipped)
+	return i, err
 }
 
 const updateAcademicYear = `-- name: UpdateAcademicYear :one
@@ -5179,7 +5577,8 @@ WHERE
     id = $1 RETURNING id,
     school_number,
     name,
-    district_id
+    district_id,
+    closed_at
 `
 
 type UpdateSchoolParams struct {
@@ -5194,6 +5593,7 @@ type UpdateSchoolRow struct {
 	SchoolNumber string
 	Name         string
 	DistrictID   int32
+	ClosedAt     sql.NullTime
 }
 
 func (q *Queries) UpdateSchool(ctx context.Context, arg UpdateSchoolParams) (UpdateSchoolRow, error) {
@@ -5209,6 +5609,7 @@ func (q *Queries) UpdateSchool(ctx context.Context, arg UpdateSchoolParams) (Upd
 		&i.SchoolNumber,
 		&i.Name,
 		&i.DistrictID,
+		&i.ClosedAt,
 	)
 	return i, err
 }

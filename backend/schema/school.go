@@ -5,6 +5,8 @@ type School struct{
 	Name     string `json:"name"`
 	DistrictID int64  `json:"district_id"`
 	SchoolNumber string  `json:"school_number"`
+	// ClosedAt is set when the school has been closed (see SchoolService.CloseSchool)
+	ClosedAt string `json:"closed_at,omitempty"`
 }
 type GetSchoolListRequest struct {
 	IDs        []int64 `json:"ids"`

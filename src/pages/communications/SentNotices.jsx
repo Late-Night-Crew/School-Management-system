@@ -294,7 +294,9 @@ export function NewNoticeDialog({ session, onHide, onSent }) {
   // A regional admin only sees the districts and schools of their own region
   const districts = isSuper ? allDistricts : allDistricts.filter((d) => d.region_id === ownRegionId);
   const districtIds = new Set(districts.map((d) => d.id));
-  const schools = isSuper ? allSchools : allSchools.filter((s) => districtIds.has(s.district_id));
+  // Closed schools receive no notices
+  const openSchools = allSchools.filter((s) => !s.closed_at);
+  const schools = isSuper ? openSchools : openSchools.filter((s) => districtIds.has(s.district_id));
 
   const [form, setForm] = useState({
     audience_type: audiences[0].value,

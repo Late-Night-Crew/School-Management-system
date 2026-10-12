@@ -80,10 +80,8 @@ func DeleteDistrict(districtService services.DistrictService, logger logging.Log
 		if err != nil {
 			return problemdetail.BadRequest(ctx, "Invalid district ID")
 		}
-		err = districtService.DeleteDistrict(ctx.Context(), districtID)
-		if err != nil {
-			logger.Error("failed to delete district: ", "error", err)
-			return problemdetail.ServerErrorProblem(ctx, "Failed to delete district")
+		if err := districtService.DeleteDistrict(ctx.Context(), districtID); err != nil {
+			return structureErrorResponse(ctx, logger, err, "Failed to delete district")
 		}
 		return ctx.SendStatus(fiber.StatusNoContent)
 	}

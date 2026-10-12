@@ -121,7 +121,7 @@ export default function SchoolTransfers() {
         .map((district) => ({
             district,
             schools: schools
-                .filter((s) => s.district_id === district.id && s.id !== Number(schoolId))
+                .filter((s) => s.district_id === district.id && s.id !== Number(schoolId) && !s.closed_at)
                 .sort((a, b) => a.name.localeCompare(b.name)),
         }))
         .filter((group) => group.schools.length > 0);

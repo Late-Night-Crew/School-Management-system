@@ -6,7 +6,7 @@ import { createStudent, deleteStudent, listStudents, updateStudent } from "../..
 import { listAcademicYears } from "../../api/academicYears";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
-import ConfirmModal from "../../components/ConfirmModal";
+import TypeToConfirm from "../../components/TypeToConfirm";
 import TablePagination from "../../components/TablePagination";
 import { formatNumber } from "../../utils/format";
 import {
@@ -480,11 +480,15 @@ const ManageStudents = () => {
           <Field label="School" required>
             <Select name="school_id" value={newStudent.school_id} onChange={handleNewStudentChange} required>
               <option value="">Select School</option>
-              {schools.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
+              {/* Closed schools take no new students; keep the student's own school listed */}
+              {schools
+                .filter((s) => !s.closed_at || String(s.id) === String(newStudent.school_id))
+                .map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                    {s.closed_at ? " (closed)" : ""}
+                  </option>
+                ))}
             </Select>
           </Field>
           <Field label="Academic Year" required>
@@ -512,17 +516,17 @@ const ManageStudents = () => {
         </div>
       </Dialog>
 
-      <ConfirmModal
+      <TypeToConfirm
         show={!!deleting}
         onHide={() => setDeleting(null)}
         onConfirm={handleDeleteStudent}
+        name={deleting ? `${deleting.first_name} ${deleting.last_name}` : ""}
         title="Delete Student"
-        confirmLabel="Delete"
-        body={
-          deleting &&
-          `Delete ${deleting.first_name} ${deleting.last_name}? Their marks and transfers are deleted too.`
-        }
-      />
+        confirmLabel="Delete student"
+      >
+        Deleting <strong>{deleting?.first_name} {deleting?.last_name}</strong> permanently erases their marks, subject
+        choices and transfer history. If the student has moved to another school, transfer them instead.
+      </TypeToConfirm>
     </Page>
   );
 };

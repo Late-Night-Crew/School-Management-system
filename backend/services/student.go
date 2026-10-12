@@ -257,6 +257,9 @@ func (s *studentService) loadStudentSubjectIDs(ctx context.Context, studentIDs [
 }
 
 func (s *studentService) CreateStudent(ctx context.Context, req *schema.CreateStudentRequest) (*schema.Student, error) {
+	if err := checkSchoolOpen(ctx, s.queries, req.SchoolID); err != nil {
+		return nil, err
+	}
 	guardianName := req.GuardianName
 	if guardianName == "" {
 		guardianName = strings.TrimSpace(req.GuardianFirstname + " " + req.GuardianLastname)
@@ -322,6 +325,16 @@ func (s *studentService) CreateStudent(ctx context.Context, req *schema.CreateSt
 }
 
 func (s *studentService) UpdateStudent(ctx context.Context, req *schema.UpdateStudentRequest) (*schema.Student, error) {
+	// A student can stay at a closed school but cannot be moved into one
+	current, err := s.queries.GetStudentByID(ctx, int32(req.ID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up student %d: %w", req.ID, err)
+	}
+	if int64(current.SchoolID) != req.SchoolID {
+		if err := checkSchoolOpen(ctx, s.queries, req.SchoolID); err != nil {
+			return nil, err
+		}
+	}
 	guardianName := req.GuardianName
 	if guardianName == "" {
 		guardianName = strings.TrimSpace(req.GuardianFirstname + " " + req.GuardianLastname)

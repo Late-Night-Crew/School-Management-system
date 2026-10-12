@@ -645,6 +645,7 @@ function CreateTransferForm({ onCreated, onError }) {
               {schools.map((school) => (
                 <option key={school.id} value={school.id}>
                   {school.name}
+                  {school.closed_at ? " (closed)" : ""}
                 </option>
               ))}
             </Select>
@@ -652,7 +653,8 @@ function CreateTransferForm({ onCreated, onError }) {
           <Field label="To School" required error={sameSchool ? "Choose a different school from the origin" : null}>
             <Select name="to_school" value={formData.to_school} onChange={handleFormChange} required>
               <option value="">Select destination school...</option>
-              {schools.map((school) => (
+              {/* Closed schools can send students but not receive them */}
+              {schools.filter((school) => !school.closed_at).map((school) => (
                 <option key={school.id} value={school.id}>
                   {school.name}
                 </option>

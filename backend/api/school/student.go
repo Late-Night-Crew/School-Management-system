@@ -38,12 +38,14 @@ func transferErrorResponse(ctx *fiber.Ctx, logger logging.Logger, err error, fal
 	case errors.Is(err, services.ErrNotFound):
 		return problemdetail.NotFound(ctx, "Transfer not found")
 	case errors.Is(err, services.ErrStudentNotInSchool),
-		errors.Is(err, services.ErrTransferSameSchool):
+		errors.Is(err, services.ErrTransferSameSchool),
+		errors.Is(err, services.ErrTransferTargetMissing):
 		return problemdetail.BadRequest(ctx, err.Error())
 	case errors.Is(err, services.ErrTransferWrongSchool):
 		return problemdetail.Forbidden(ctx, err.Error())
 	case errors.Is(err, services.ErrTransferAlreadyPending),
-		errors.Is(err, services.ErrTransferInvalidState):
+		errors.Is(err, services.ErrTransferInvalidState),
+		errors.Is(err, services.ErrSchoolClosed):
 		return problemdetail.Conflict(ctx, err.Error())
 	}
 	logger.Error(loggedmodule.Transfers, fallback, "error", err)

@@ -34,7 +34,9 @@ export default function AccountsPage() {
   const [regions = [], districts = [], allSchools = []] = places || [];
   // A regional admin can only add managers to schools in their own division
   const ownDistrictIds = new Set(districts.filter((d) => d.region_id === Number(session.regionId)).map((d) => d.id));
-  const schools = isSuper ? allSchools : allSchools.filter((s) => ownDistrictIds.has(s.district_id));
+  // Closed schools take no new accounts
+  const openSchools = allSchools.filter((s) => !s.closed_at);
+  const schools = isSuper ? openSchools : openSchools.filter((s) => ownDistrictIds.has(s.district_id));
 
   const [search, setSearch] = useState("");
   const [role, setRole] = useState("");

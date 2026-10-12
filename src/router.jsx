@@ -72,7 +72,7 @@ const router = createHashRouter([
           { path: "notifications", element: <AdminNotifications /> },
           { path: "contacts", element: <ContactsPage /> },
           { path: "accounts", element: <AccountsPage /> },
-          { path: "settings", element: <AdminSettings /> },
+          { path: "settings", element: <AdminSettings /> }, 
         ],
       },
 

@@ -49,6 +49,7 @@ var (
 	ErrEmailInUse         = errors.New("another account already uses this email address")
 	ErrRegionHasAdmin     = errors.New("this division already has an active regional admin; deactivate them first")
 	ErrAccountScope       = errors.New("choose the division for a regional admin, or the school for a school manager")
+	ErrAccountScopeGone   = errors.New("this account's school or division has been deleted, so it cannot be reactivated; create a new account instead")
 	ErrWrongPassword      = errors.New("your current password is not correct")
 	ErrWeakPassword       = errors.New("the new password must be at least 8 characters and include letters and numbers")
 	ErrSamePassword       = errors.New("the new password must be different from the current one")
@@ -236,6 +237,9 @@ func (s *accountService) CreateAccount(ctx context.Context, actor schema.Actor, 
 		if !allowed {
 			return nil, ErrAccountForbidden
 		}
+		if err := checkSchoolOpen(ctx, s.queries, req.SchoolID); err != nil {
+			return nil, err
+		}
 		params.RegionID = nullID(int64(school.RegionID))
 		params.DistrictID = nullID(int64(school.DistrictID))
 		params.SchoolID = nullID(int64(school.ID))
@@ -302,7 +306,18 @@ func (s *accountService) SetAccountActive(ctx context.Context, actor schema.Acto
 		return nil, err
 	}
 	if active && account.Role == schema.RoleRegionalAdmin {
+		if account.RegionID == 0 {
+			return nil, ErrAccountScopeGone
+		}
 		if err := s.checkRegionFree(ctx, account.RegionID, accountID); err != nil {
+			return nil, err
+		}
+	}
+	if active && account.Role == schema.RoleSchoolManager {
+		if account.SchoolID == 0 {
+			return nil, ErrAccountScopeGone
+		}
+		if err := checkSchoolOpen(ctx, s.queries, account.SchoolID); err != nil {
 			return nil, err
 		}
 	}

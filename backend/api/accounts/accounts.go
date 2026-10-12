@@ -31,10 +31,11 @@ func errorResponse(ctx *fiber.Ctx, logger logging.Logger, err error, fallback st
 		return problemdetail.NotFound(ctx, "Not found")
 	case errors.Is(err, services.ErrAccountForbidden), errors.Is(err, services.ErrContactForbidden):
 		return problemdetail.Forbidden(ctx, err.Error())
-	case errors.Is(err, services.ErrEmailInUse), errors.Is(err, services.ErrRegionHasAdmin):
+	case errors.Is(err, services.ErrEmailInUse), errors.Is(err, services.ErrRegionHasAdmin), errors.Is(err, services.ErrSchoolClosed):
 		return problemdetail.Conflict(ctx, err.Error())
 	case errors.Is(err, common.ErrInvalidPhone),
 		errors.Is(err, services.ErrAccountScope),
+		errors.Is(err, services.ErrAccountScopeGone),
 		errors.Is(err, services.ErrWrongPassword),
 		errors.Is(err, services.ErrWeakPassword),
 		errors.Is(err, services.ErrSamePassword):

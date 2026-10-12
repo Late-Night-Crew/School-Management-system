@@ -88,6 +88,12 @@ func (s *transferService) CreateTransferRequest(ctx context.Context, req *schema
 	if req.FromSchoolID == req.ToSchoolID {
 		return nil, ErrTransferSameSchool
 	}
+	if err := checkSchoolOpen(ctx, s.queries, req.ToSchoolID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, ErrTransferTargetMissing
+		}
+		return nil, err
+	}
 
 	_, err := s.queries.GetStudentByIDAndSchoolID(ctx, dbsqlc.GetStudentByIDAndSchoolIDParams{
 		ID:       int32(req.StudentID),

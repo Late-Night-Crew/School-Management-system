@@ -1,11 +1,36 @@
 import { useEffect, useState, useMemo } from "react";
 
-import { createSchool, deleteSchool, listSchools, updateSchool } from "../../api/schools";
+import {
+  closeSchool,
+  createSchool,
+  deleteSchool,
+  getSchoolUsage,
+  listSchools,
+  reopenSchool,
+  transferAllStudents,
+  updateSchool,
+} from "../../api/schools";
 import { listRegions } from "../../api/regions";
 import { listDistricts } from "../../api/districts";
-import ConfirmModal from "../../components/ConfirmModal";
 import DataState from "../../components/DataState";
-import { Badge, Button, Card, Dialog, Field, IconButton, Input, Page, SearchInput, Select, Table } from "../../components/ui";
+import ToastNote from "../../components/ToastNote";
+import { Badge, Button, Card, Dialog, Field, IconButton, Input, Page, SearchInput, Segmented, Select, Table, Tip } from "../../components/ui";
+import { formatDate } from "../../utils/format";
+import { SchoolDialog } from "./StructureDialogs";
+
+const SCHOOL_API = {
+  getUsage: getSchoolUsage,
+  remove: deleteSchool,
+  close: closeSchool,
+  reopen: reopenSchool,
+  transferAll: transferAllStudents,
+};
+
+const STATUS_FILTERS = [
+  { value: "open", label: "Open" },
+  { value: "closed", label: "Closed" },
+  { value: "all", label: "All" },
+];
 
 // The form uses camelCase schoolNumber; the API expects school_number
 const toSchoolPayload = (form) => ({
@@ -30,12 +55,10 @@ export default function ManageSchools() {
     district_id: "",
   });
 
-  // Confirmation modal state
-  const [confirmModal, setConfirmModal] = useState({
-    show: false,
-    message: "",
-    onConfirm: null,
-  });
+  const [statusFilter, setStatusFilter] = useState("open");
+  // { school, mode: "delete" | "close" | "reopen" } while the dialog is open
+  const [acting, setActing] = useState(null);
+  const [toast, setToast] = useState({ show: false, message: "", variant: "success" });
 
   useEffect(() => {
     loadSchools();
@@ -117,38 +140,20 @@ export default function ManageSchools() {
     }
   };
 
-  const handleDeleteSchool = async (id) => {
-    try {
-      setLoadingSchools(true);
-      await deleteSchool(id);
-      await loadSchools();
-    } catch (error) {
-      alert(error.message);
-    } finally {
-      setLoadingSchools(false);
-    }
-  };
-
-  // Show confirmation modal
-  const showConfirm = (message, onConfirm) => {
-    setConfirmModal({ show: true, message, onConfirm });
-  };
-
-  const handleConfirm = () => {
-    if (confirmModal.onConfirm) confirmModal.onConfirm();
-    setConfirmModal({ ...confirmModal, show: false });
-  };
-
-  const handleCancel = () => {
-    setConfirmModal({ ...confirmModal, show: false });
+  const handleActionDone = async (message) => {
+    setActing(null);
+    setToast({ show: true, message, variant: "success" });
+    await loadSchools();
   };
 
   const filteredSchools = useMemo(
     () =>
-      schools.filter((school) =>
-        school.name.toLowerCase().includes(searchTerm.toLowerCase())
+      schools.filter(
+        (school) =>
+          school.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
+          (statusFilter === "all" || (statusFilter === "closed") === Boolean(school.closed_at))
       ),
-    [schools, searchTerm]
+    [schools, searchTerm, statusFilter]
   );
 
   const filteredDistricts = useMemo(
@@ -174,25 +179,35 @@ export default function ManageSchools() {
       icon="bi-building-fill"
       title="Schools"
       subtitle="Every registered school, with the district and division it belongs to."
-      stats={[{ label: "Schools", value: schools.length }]}
+      stats={[
+        { label: "Open", value: schools.filter((s) => !s.closed_at).length },
+        { label: "Closed", value: schools.filter((s) => s.closed_at).length },
+      ]}
       actions={
         <Button variant="ghost" icon="bi-plus-lg" onClick={() => handleShowModal()}>
           Add School
         </Button>
       }
     >
+      <ToastNote {...toast} onClose={() => setToast((t) => ({ ...t, show: false }))} />
+
       <Card
         accent="blue"
         icon="bi-list-ul"
         title="All Schools"
         subtitle={`${filteredSchools.length} of ${schools.length} shown`}
-        actions={<SearchInput value={searchTerm} onChange={setSearchTerm} placeholder="Search schools…" />}
+        actions={
+          <>
+            <Segmented options={STATUS_FILTERS} value={statusFilter} onChange={setStatusFilter} />
+            <SearchInput value={searchTerm} onChange={setSearchTerm} placeholder="Search schools…" />
+          </>
+        }
         flush
       >
         <DataState
           loading={loadingSchools}
           empty={filteredSchools.length === 0}
-          emptyMessage={searchTerm ? "No schools match your search." : "No schools found."}
+          emptyMessage={searchTerm || statusFilter !== "all" ? "No schools match your search." : "No schools found."}
         >
           <Table>
             <thead>
@@ -201,6 +216,7 @@ export default function ManageSchools() {
                 <th>School Number</th>
                 <th>Division</th>
                 <th>District</th>
+                <th>Status</th>
                 <th className="end">Actions</th>
               </tr>
             </thead>
@@ -211,18 +227,44 @@ export default function ManageSchools() {
                   <td>{school.school_number ? <Badge tone="blue">{school.school_number}</Badge> : "-"}</td>
                   <td>{getRegionName(school.district_id)}</td>
                   <td>{getDistrictName(school.district_id)}</td>
+                  <td>
+                    {school.closed_at ? (
+                      <Tip text={`Closed on ${formatDate(school.closed_at)}`}>
+                        <span>
+                          <Badge tone="slate">Closed</Badge>
+                        </span>
+                      </Tip>
+                    ) : (
+                      <Badge tone="green">Open</Badge>
+                    )}
+                  </td>
                   <td className="end">
-                    <IconButton kind="edit" title={`Edit ${school.name}`} onClick={() => handleShowModal(school)} />
+                    <IconButton kind="edit" title={`Edit ${school.name}`} tip="Edit school" onClick={() => handleShowModal(school)} />
                     <IconButton
-                      kind="delete"
-                      title={`Delete ${school.name}`}
-                      onClick={() =>
-                        showConfirm(
-                          "Are you sure you want to delete this school?",
-                          () => handleDeleteSchool(school.id)
-                        )
-                      }
+                      kind="view"
+                      icon="bi-people"
+                      title={`Transfer all students from ${school.name}`}
+                      tip="Transfer all students"
+                      onClick={() => setActing({ school, mode: "transfer" })}
                     />
+                    {school.closed_at ? (
+                      <IconButton
+                        kind="save"
+                        icon="bi-door-open"
+                        title={`Reopen ${school.name}`}
+                        tip="Reopen school"
+                        onClick={() => setActing({ school, mode: "reopen" })}
+                      />
+                    ) : (
+                      <IconButton
+                        kind="view"
+                        icon="bi-door-closed"
+                        title={`Close ${school.name}`}
+                        tip="Close school"
+                        onClick={() => setActing({ school, mode: "close" })}
+                      />
+                    )}
+                    <IconButton kind="delete" title={`Delete ${school.name}`} tip="Delete school" onClick={() => setActing({ school, mode: "delete" })} />
                   </td>
                 </tr>
               ))}
@@ -300,13 +342,16 @@ export default function ManageSchools() {
         </div>
       </Dialog>
 
-      <ConfirmModal
-        show={confirmModal.show}
-        onHide={handleCancel}
-        onConfirm={handleConfirm}
-        title="Delete School"
-        confirmLabel="Delete"
-        body={confirmModal.message}
+      <SchoolDialog
+        school={acting?.school}
+        mode={acting?.mode}
+        api={SCHOOL_API}
+        targets={schools
+          .filter((s) => !s.closed_at)
+          .map((s) => ({ id: s.id, label: `${s.name} (${getDistrictName(s.district_id)})` }))
+          .sort((a, b) => a.label.localeCompare(b.label))}
+        onHide={() => setActing(null)}
+        onChanged={handleActionDone}
       />
     </Page>
   );

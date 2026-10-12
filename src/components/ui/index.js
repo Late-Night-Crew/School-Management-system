@@ -10,3 +10,4 @@ export { default as StatTile } from "./StatTile";
 export { default as Notice } from "./Notice";
 export { default as EmptyState } from "./EmptyState";
 export { default as Dialog } from "./Dialog";
+export { default as Tip } from "./Tip";

@@ -11,7 +11,7 @@ import {
     updateSchoolStudent,
 } from "../../api/schoolPortal";
 import ToastNote from "../../components/ToastNote";
-import ConfirmModal from "../../components/ConfirmModal";
+import TypeToConfirm from "../../components/TypeToConfirm";
 import TablePagination from "../../components/TablePagination";
 import {
     Badge,
@@ -51,7 +51,7 @@ export default function StudentEnroll() {
     const [currentPage,          setCurrentPage]          = useState(1);
     const [activeTab,            setActiveTab]            = useState("form");
     const [toast,                setToast]                = useState({ show:false, message:"", variant:"success" });
-    const [modal,                setModal]                = useState({ show:false, studentId:null });
+    const [modal,                setModal]                = useState({ show:false, student:null });
     const [isEditing,            setIsEditing]            = useState(false);
     const [editingId,            setEditingId]            = useState(null);
     const [form,                 setForm]                 = useState(BLANK);
@@ -150,11 +150,11 @@ export default function StudentEnroll() {
         setActiveTab('form');
     };
 
-    const handleDelete = (id) => setModal({ show:true, studentId:id });
+    const handleDelete = (student) => setModal({ show:true, student });
     const confirmDelete = async () => {
-        try { await deleteSchoolStudent(schoolId, modal.studentId); setToast({ show:true, message:"Student deleted.", variant:"success" }); fetchStudents(); }
+        try { await deleteSchoolStudent(schoolId, modal.student.id); setToast({ show:true, message:"Student deleted.", variant:"success" }); fetchStudents(); }
         catch(e) { setToast({ show:true, message:e.message, variant:"danger" }); }
-        finally { setModal({ show:false, studentId:null }); }
+        finally { setModal({ show:false, student:null }); }
     };
 
     const PER_PAGE   = 8;
@@ -188,7 +188,17 @@ export default function StudentEnroll() {
             onTabChange={setActiveTab}
         >
             <ToastNote show={toast.show} onClose={()=>setToast({...toast,show:false})} message={toast.message} variant={toast.variant}/>
-            <ConfirmModal show={modal.show} onHide={()=>setModal({show:false,studentId:null})} onConfirm={confirmDelete} title="Delete Student" confirmLabel="Delete" body="This action cannot be undone. Are you sure you want to delete this student?"/>
+            <TypeToConfirm
+                show={modal.show}
+                onHide={()=>setModal({show:false,student:null})}
+                onConfirm={confirmDelete}
+                name={modal.student ? `${modal.student.first_name} ${modal.student.last_name}` : ""}
+                title="Delete Student"
+                confirmLabel="Delete student"
+            >
+                Deleting <strong>{modal.student?.first_name} {modal.student?.last_name}</strong> permanently erases their marks,
+                subject choices and transfer history. If the student is moving to another school, start a transfer instead.
+            </TypeToConfirm>
 
             {/* ══ ENROLLMENT FORM ══ */}
             {activeTab === 'form' && (
@@ -376,8 +386,8 @@ export default function StudentEnroll() {
                                         <td className="num">{s.guardian_phone||'—'}</td>
                                         <td><Badge tone="amber">{s.subject_ids?.length||0} subj.</Badge></td>
                                         <td className="end">
-                                            <IconButton kind="edit" title="Edit" onClick={()=>handleEdit(s)}/>
-                                            <IconButton kind="delete" title="Delete" onClick={()=>handleDelete(s.id)}/>
+                                            <IconButton kind="edit" title={`Edit ${s.first_name} ${s.last_name}`} tip="Edit student" onClick={()=>handleEdit(s)}/>
+                                            <IconButton kind="delete" title={`Delete ${s.first_name} ${s.last_name}`} tip="Delete student" onClick={()=>handleDelete(s)}/>
                                         </td>
                                     </tr>
                                 ))}

@@ -5,6 +5,7 @@ import (
 
 	"nsms/common"
 	"nsms/logging"
+	"nsms/logging/loggedmodule"
 	"nsms/pkg/problemdetail"
 	"nsms/schema"
 	"nsms/services"
@@ -16,7 +17,7 @@ func GetGradingScale(gradingService services.GradingService, logger logging.Logg
 	return func(ctx *fiber.Ctx) error {
 		scale, err := gradingService.GetGradingScale(ctx.Context())
 		if err != nil {
-			logger.Error("failed to get grading scale: ", "error", err)
+			logger.Error(loggedmodule.AdminRequests, "failed to get grading scale", "error", err)
 			return problemdetail.ServerErrorProblem(ctx, "Failed to get grading scale")
 		}
 		return ctx.Status(fiber.StatusOK).JSON(scale)
@@ -35,7 +36,7 @@ func SaveGradingScale(gradingService services.GradingService, logger logging.Log
 			return problemdetail.BadRequest(ctx, err.Error())
 		}
 		if err != nil {
-			logger.Error("failed to save grading scale: ", "error", err)
+			logger.Error(loggedmodule.AdminRequests, "failed to save grading scale", "error", err)
 			return problemdetail.ServerErrorProblem(ctx, "Failed to save grading scale")
 		}
 		return ctx.Status(fiber.StatusOK).JSON(scale)

@@ -1,11 +1,21 @@
 import { useEffect, useState } from "react";
 
 import { listRegions } from "../../api/regions";
-import { createDistrict, deleteDistrict, listDistricts, updateDistrict } from "../../api/districts";
-import ConfirmModal from "../../components/ConfirmModal";
+import { createDistrict, deleteDistrict, getDistrictUsage, listDistricts, moveDistrictSchools, updateDistrict } from "../../api/districts";
 import DataState from "../../components/DataState";
 import TablePagination from "../../components/TablePagination";
 import { Button, Card, Dialog, Field, IconButton, Input, Notice, Page, SearchInput, Select, Table } from "../../components/ui";
+import { DeleteContainerDialog } from "./StructureDialogs";
+
+// A district can only be deleted once its schools have moved to another district
+const DELETE_CONFIG = {
+  noun: "district",
+  childNoun: "school",
+  getUsage: getDistrictUsage,
+  childCount: (usage) => usage.schools,
+  move: moveDistrictSchools,
+  remove: deleteDistrict,
+};
 
 const NOTICE_TONES = { success: "green", warning: "amber", danger: "red" };
 
@@ -21,7 +31,7 @@ export default function ManageDistricts() {
   const itemsPerPage = 8; // fewer items per page to avoid overflow
 
   const [alert, setAlert] = useState({ show: false, message: "", variant: "success" });
-  const [confirmModal, setConfirmModal] = useState({ show: false, message: "", onConfirm: null });
+  const [deleting, setDeleting] = useState(null);
 
   useEffect(() => {
     loadDistricts();
@@ -96,28 +106,11 @@ export default function ManageDistricts() {
     }
   };
 
-  const handleDeleteDistrict = (id) => {
-    setConfirmModal({
-      show: true,
-      message: "Are you sure you want to delete this district?",
-      onConfirm: async () => {
-        try {
-          setLoading(true);
-          await deleteDistrict(id);
-          await loadDistricts();
-          showAlert("District deleted successfully!", "success");
-        } catch (error) {
-          showAlert(`Failed to delete district: ${error.message}`, "danger");
-        } finally {
-          setLoading(false);
-          setConfirmModal({ ...confirmModal, show: false });
-        }
-      },
-    });
+  const handleDeleteChanged = async (message, deleted) => {
+    showAlert(message, "success", 5000);
+    if (deleted) setDeleting(null);
+    await loadDistricts();
   };
-
-  const handleConfirm = () => { if (confirmModal.onConfirm) confirmModal.onConfirm(); };
-  const handleCancelConfirm = () => { setConfirmModal({ ...confirmModal, show: false }); };
 
   // Filtering & pagination
   const filteredDistricts = districts.filter((d) => d.name.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -172,7 +165,7 @@ export default function ManageDistricts() {
                   <td>{getRegionName(district.region_id)}</td>
                   <td className="end">
                     <IconButton kind="edit" title={`Edit ${district.name}`} onClick={() => handleShowModal(district)} />
-                    <IconButton kind="delete" title={`Delete ${district.name}`} onClick={() => handleDeleteDistrict(district.id)} />
+                    <IconButton kind="delete" title={`Delete ${district.name}`} onClick={() => setDeleting(district)} />
                   </td>
                 </tr>
               ))}
@@ -217,13 +210,16 @@ export default function ManageDistricts() {
         </div>
       </Dialog>
 
-      <ConfirmModal
-        show={confirmModal.show}
-        onHide={handleCancelConfirm}
-        onConfirm={handleConfirm}
-        title="Delete District"
-        confirmLabel="Delete"
-        body={confirmModal.message}
+      <DeleteContainerDialog
+        item={deleting}
+        config={DELETE_CONFIG}
+        targets={districts
+          .filter((d) => d.id !== deleting?.id)
+          .map((d) => ({ id: d.id, label: `${d.name} (${getRegionName(d.region_id)})` }))
+          .sort((a, b) => a.label.localeCompare(b.label))}
+        accountsPath="/admin/accounts"
+        onHide={() => setDeleting(null)}
+        onChanged={handleDeleteChanged}
       />
     </Page>
   );

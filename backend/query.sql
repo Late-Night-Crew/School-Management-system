@@ -121,14 +121,16 @@ VALUES
     ($1, $2, $3) RETURNING id,
     school_number,
     name,
-    district_id;
+    district_id,
+    closed_at;
 
 -- name: ListSchools :many
 SELECT
     id,
     school_number,
     name,
-    district_id
+    district_id,
+    closed_at
 FROM
     schools
 ORDER BY
@@ -145,7 +147,8 @@ SELECT
     id,
     school_number,
     name,
-    district_id
+    district_id,
+    closed_at
 FROM
     schools
 WHERE
@@ -162,14 +165,16 @@ WHERE
     id = $1 RETURNING id,
     school_number,
     name,
-    district_id;
+    district_id,
+    closed_at;
 
 -- name: ListSchoolsByDistrictId :many
 SELECT
     id,
     school_number,
     name,
-    district_id
+    district_id,
+    closed_at
 FROM
     schools
 WHERE
@@ -1315,10 +1320,10 @@ SELECT (
         OR (sqlc.arg(audience_type)::text = 'REGIONAL_ADMIN' AND rg.id = sqlc.narg(audience_id)::int))
     +
     (SELECT COUNT(*) FROM schools sc JOIN districts d ON d.id = sc.district_id
-     WHERE sqlc.arg(audience_type)::text = 'SCHOOLS_ALL'
+     WHERE sc.closed_at IS NULL AND (sqlc.arg(audience_type)::text = 'SCHOOLS_ALL'
         OR (sqlc.arg(audience_type)::text = 'SCHOOLS_IN_REGION' AND d.region_id = sqlc.narg(audience_id)::int)
         OR (sqlc.arg(audience_type)::text = 'SCHOOLS_IN_DISTRICT' AND d.id = sqlc.narg(audience_id)::int)
-        OR (sqlc.arg(audience_type)::text = 'SCHOOL' AND sc.id = sqlc.narg(audience_id)::int))
+        OR (sqlc.arg(audience_type)::text = 'SCHOOL' AND sc.id = sqlc.narg(audience_id)::int)))
 )::int AS count;
 
 -- Sends a notice: the notice, one recipient row per region or school in the audience,
@@ -1345,10 +1350,10 @@ audience AS (
     UNION ALL
     SELECT 'SCHOOL'::text, sc.id
     FROM schools sc JOIN districts d ON d.id = sc.district_id
-    WHERE sqlc.arg(audience_type)::text = 'SCHOOLS_ALL'
+    WHERE sc.closed_at IS NULL AND (sqlc.arg(audience_type)::text = 'SCHOOLS_ALL'
         OR (sqlc.arg(audience_type)::text = 'SCHOOLS_IN_REGION' AND d.region_id = sqlc.narg(audience_id)::int)
         OR (sqlc.arg(audience_type)::text = 'SCHOOLS_IN_DISTRICT' AND d.id = sqlc.narg(audience_id)::int)
-        OR (sqlc.arg(audience_type)::text = 'SCHOOL' AND sc.id = sqlc.narg(audience_id)::int)
+        OR (sqlc.arg(audience_type)::text = 'SCHOOL' AND sc.id = sqlc.narg(audience_id)::int))
 ),
 recipients AS (
     INSERT INTO notice_recipients (notice_id, party_type, party_id)
@@ -1728,6 +1733,7 @@ SELECT sc.id, sc.name, d.name AS district_name, d.region_id, rg.name AS region_n
 FROM schools sc
     JOIN districts d ON d.id = sc.district_id
     JOIN regions rg ON rg.id = d.region_id
+WHERE sc.closed_at IS NULL
 ORDER BY rg.name, d.name, sc.name;
 
 -- name: ListContactRegions :many
@@ -1956,6 +1962,7 @@ FROM
     schools sc
     JOIN districts d ON d.id = sc.district_id
     JOIN regions rg ON rg.id = d.region_id
+WHERE sc.closed_at IS NULL
 ORDER BY rg.name, d.name, sc.name;
 
 -- name: ListDirectoryPeople :many
@@ -2025,3 +2032,177 @@ INSERT INTO
     grade_bands (grade, min_mark, is_pass, description)
 VALUES
     ($1, $2, $3, $4);
+
+-- ============================================================================
+-- Deleting, moving and closing schools, districts and divisions. Nothing with records
+-- under it can be deleted (the foreign keys refuse too); these counts say what is in
+-- the way so the screens can explain it.
+-- ============================================================================
+
+-- name: GetSchoolUsage :one
+SELECT
+    (SELECT COUNT(*) FROM students WHERE school_id = sqlc.arg(school_id)::int)::int AS students,
+    (SELECT COUNT(*) FROM student_marks WHERE school_id = sqlc.arg(school_id)::int)::int AS marks,
+    (SELECT COUNT(*) FROM transfers WHERE from_school = sqlc.arg(school_id)::int OR to_school = sqlc.arg(school_id)::int)::int AS transfers,
+    (SELECT COUNT(*) FROM transfers WHERE to_school = sqlc.arg(school_id)::int AND status IN ('Pending', 'Accepted'))::int AS unfinished_incoming_transfers,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = sqlc.arg(school_id)::int
+        AND EXISTS (SELECT 1 FROM transfers t WHERE t.student_id = s.id AND t.status = 'Pending'))::int AS students_with_pending_transfers,
+    (SELECT COUNT(*) FROM exam_results WHERE school_id = sqlc.arg(school_id)::int)::int AS exam_results,
+    (SELECT COUNT(*) FROM users WHERE school_id = sqlc.arg(school_id)::int AND is_activated AND deleted_at IS NULL)::int AS active_accounts;
+
+-- name: GetDistrictUsage :one
+SELECT
+    (SELECT COUNT(*) FROM schools WHERE district_id = sqlc.arg(district_id)::int)::int AS schools,
+    (SELECT COUNT(*) FROM users WHERE district_id = sqlc.arg(district_id)::int AND is_activated AND deleted_at IS NULL)::int AS active_accounts;
+
+-- name: GetRegionUsage :one
+SELECT
+    (SELECT COUNT(*) FROM districts WHERE region_id = sqlc.arg(region_id)::int)::int AS districts,
+    (SELECT COUNT(*) FROM schools sc JOIN districts d ON d.id = sc.district_id WHERE d.region_id = sqlc.arg(region_id)::int)::int AS schools,
+    (SELECT COUNT(*) FROM users WHERE region_id = sqlc.arg(region_id)::int AND is_activated AND deleted_at IS NULL)::int AS active_accounts;
+
+-- name: GetSchoolClosedAt :one
+SELECT closed_at FROM schools WHERE id = sqlc.arg(school_id)::int;
+
+-- name: ListSchoolNameClashes :many
+-- Schools in one district whose names are already taken in another (names are unique per district).
+SELECT a.name FROM schools a
+JOIN schools b ON b.name = a.name AND b.district_id = sqlc.arg(to_district_id)::int
+WHERE a.district_id = sqlc.arg(from_district_id)::int
+ORDER BY a.name;
+
+-- name: ListDistrictNameClashes :many
+-- Districts in one division whose names are already taken in another.
+SELECT a.name FROM districts a
+JOIN districts b ON b.name = a.name AND b.region_id = sqlc.arg(to_region_id)::int
+WHERE a.region_id = sqlc.arg(from_region_id)::int
+ORDER BY a.name;
+
+-- name: MoveDistrictSchools :one
+-- Moves every school in a district to another, keeps their managers' accounts in step
+-- and writes the audit entry, all in one statement.
+WITH moved AS (
+    UPDATE schools SET district_id = sqlc.arg(to_district_id)::int
+    WHERE district_id = sqlc.arg(from_district_id)::int
+    RETURNING id
+),
+synced AS (
+    UPDATE users
+    SET district_id = sqlc.arg(to_district_id)::int,
+        region_id = (SELECT region_id FROM districts WHERE id = sqlc.arg(to_district_id)::int)
+    WHERE school_id IN (SELECT id FROM moved)
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'district', sqlc.arg(from_district_id)::int, 'Schools moved', u.id, u.name, u.role, u.school_id,
+        (SELECT COUNT(*) FROM moved) || ' school(s) moved to ' || (SELECT name FROM districts WHERE id = sqlc.arg(to_district_id)::int)
+    FROM (SELECT 1) AS one LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int
+)
+SELECT COUNT(*)::int FROM moved;
+
+-- name: MoveRegionDistricts :one
+-- Moves every district in a division to another, with the accounts scoped to them.
+WITH moved AS (
+    UPDATE districts SET region_id = sqlc.arg(to_region_id)::int
+    WHERE region_id = sqlc.arg(from_region_id)::int
+    RETURNING id
+),
+synced AS (
+    UPDATE users SET region_id = sqlc.arg(to_region_id)::int
+    WHERE district_id IN (SELECT id FROM moved)
+        OR school_id IN (SELECT sc.id FROM schools sc WHERE sc.district_id IN (SELECT id FROM moved))
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'region', sqlc.arg(from_region_id)::int, 'Districts moved', u.id, u.name, u.role, u.school_id,
+        (SELECT COUNT(*) FROM moved) || ' district(s) moved to ' || (SELECT name FROM regions WHERE id = sqlc.arg(to_region_id)::int)
+    FROM (SELECT 1) AS one LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int
+)
+SELECT COUNT(*)::int FROM moved;
+
+-- name: SyncSchoolAccountScopes :exec
+-- School managers' accounts copy their school's district and division; run after a
+-- school changes district or a district changes division.
+UPDATE users u
+SET district_id = sc.district_id, region_id = d.region_id
+FROM schools sc
+JOIN districts d ON d.id = sc.district_id
+WHERE u.school_id = sc.id
+    AND (u.district_id IS DISTINCT FROM sc.district_id OR u.region_id IS DISTINCT FROM d.region_id);
+
+-- name: CloseSchool :one
+-- Closes a school, deactivates its active accounts and audits both, in one statement.
+-- Returns no row if the school does not exist or is already closed.
+WITH closed AS (
+    UPDATE schools SET closed_at = CURRENT_TIMESTAMP
+    WHERE id = sqlc.arg(school_id)::int AND closed_at IS NULL
+    RETURNING id, name
+),
+deactivated AS (
+    UPDATE users SET is_activated = FALSE, updated_at = CURRENT_TIMESTAMP
+    WHERE school_id IN (SELECT id FROM closed) AND is_activated AND deleted_at IS NULL
+    RETURNING id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'school', closed.id, 'Closed', a.id, a.name, a.role, a.school_id, sqlc.narg(note)::text
+    FROM closed LEFT JOIN users a ON a.id = sqlc.arg(actor_user_id)::int
+    UNION ALL
+    SELECT 'user', deactivated.id, 'Deactivated', a.id, a.name, a.role, a.school_id, 'School closed'
+    FROM deactivated LEFT JOIN users a ON a.id = sqlc.arg(actor_user_id)::int
+)
+SELECT closed.id, (SELECT COUNT(*) FROM deactivated)::int AS accounts_deactivated FROM closed;
+
+-- name: ReopenSchool :one
+-- Reopens a closed school. Its accounts stay deactivated until someone reactivates them.
+WITH reopened AS (
+    UPDATE schools SET closed_at = NULL
+    WHERE id = sqlc.arg(school_id)::int AND closed_at IS NOT NULL
+    RETURNING id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id)
+    SELECT 'school', reopened.id, 'Reopened', a.id, a.name, a.role, a.school_id
+    FROM reopened LEFT JOIN users a ON a.id = sqlc.arg(actor_user_id)::int
+)
+SELECT id FROM reopened;
+
+-- name: TransferAllStudents :one
+-- Moves every student of one school to another as completed transfers, so each
+-- student's history shows the move. Students with a pending transfer are left for that
+-- transfer to finish. Audited per transfer and once for the school, in one statement.
+WITH movable AS (
+    SELECT s.id FROM students s
+    WHERE s.school_id = sqlc.arg(from_school_id)::int
+        AND NOT EXISTS (SELECT 1 FROM transfers t WHERE t.student_id = s.id AND t.status = 'Pending')
+    FOR UPDATE OF s
+),
+created AS (
+    INSERT INTO transfers (student_id, from_school, to_school, status, date_initiated, date_accepted, reason)
+    SELECT movable.id, sqlc.arg(from_school_id)::int, sqlc.arg(to_school_id)::int, 'Completed',
+        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, sqlc.arg(reason)::text
+    FROM movable
+    RETURNING id
+),
+moved AS (
+    UPDATE students SET school_id = sqlc.arg(to_school_id)::int, updated_at = CURRENT_TIMESTAMP
+    WHERE id IN (SELECT id FROM movable)
+    RETURNING id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'transfer', created.id, step.action, u.id, u.name, u.role, u.school_id,
+        'Whole-school transfer: ' || sqlc.arg(reason)::text
+    FROM created
+        CROSS JOIN (VALUES ('Created'), ('Completed')) AS step(action)
+        LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int
+    UNION ALL
+    SELECT 'school', sqlc.arg(from_school_id)::int, 'Students transferred', u.id, u.name, u.role, u.school_id,
+        (SELECT COUNT(*) FROM moved) || ' student(s) transferred to '
+            || (SELECT name FROM schools WHERE id = sqlc.arg(to_school_id)::int) || ': ' || sqlc.arg(reason)::text
+    FROM (SELECT 1) AS one LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int
+)
+SELECT
+    (SELECT COUNT(*) FROM created)::int AS transferred,
+    (SELECT COUNT(*) FROM students WHERE school_id = sqlc.arg(from_school_id)::int)::int
+        - (SELECT COUNT(*) FROM movable)::int AS skipped;

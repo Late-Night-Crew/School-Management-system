@@ -137,6 +137,7 @@ type School struct {
 	PostalAddress    sql.NullString
 	HeadTeacherName  sql.NullString
 	HeadTeacherPhone sql.NullString
+	ClosedAt         sql.NullTime
 }
 
 type Student struct {

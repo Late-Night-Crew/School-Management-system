@@ -65,10 +65,8 @@ func DeleteRegion(regionService services.RegionService,logger logging.Logger) fi
 		if err != nil {
 			return problemdetail.BadRequest(ctx, "Invalid region ID")
 		}
-		err = regionService.DeleteRegion(ctx.Context(), regionID)
-		if err != nil {
-			logger.Error("failed to delete region", "error", err)
-			return problemdetail.ServerErrorProblem(ctx, "Failed to delete region")
+		if err := regionService.DeleteRegion(ctx.Context(), regionID); err != nil {
+			return structureErrorResponse(ctx, logger, err, "Failed to delete division")
 		}
 		return ctx.SendStatus(fiber.StatusNoContent)
 	}
