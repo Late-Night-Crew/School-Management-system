@@ -2206,3 +2206,148 @@ SELECT
     (SELECT COUNT(*) FROM created)::int AS transferred,
     (SELECT COUNT(*) FROM students WHERE school_id = sqlc.arg(from_school_id)::int)::int
         - (SELECT COUNT(*) FROM movable)::int AS skipped;
+
+-- ============================================================================
+-- School registration requests (see migrations 20-21). Division officers create, edit,
+-- submit and delete their own division's requests; the super admin accepts them.
+-- Changes are scoped by region in the WHERE clause and audited in the same statement.
+-- ============================================================================
+
+-- name: ListSchoolRequests :many
+SELECT
+    r.id, r.status, r.region_id, COALESCE(rg.name, '')::text AS region_name,
+    r.district_id, COALESCE(d.name, '')::text AS district_name, r.school_name,
+    r.submitted_at, COALESCE(su.name, '')::text AS submitted_by_name,
+    r.decided_at, COALESCE(du.name, '')::text AS decided_by_name,
+    r.registration_number, r.school_id, r.created_at, r.updated_at
+FROM school_requests r
+    LEFT JOIN regions rg ON rg.id = r.region_id
+    LEFT JOIN districts d ON d.id = r.district_id
+    LEFT JOIN users su ON su.id = r.submitted_by
+    LEFT JOIN users du ON du.id = r.decided_by
+WHERE (sqlc.narg(region_id)::int IS NULL OR r.region_id = sqlc.narg(region_id)::int)
+    AND (sqlc.narg(status)::text IS NULL OR r.status = sqlc.narg(status)::text)
+ORDER BY COALESCE(r.submitted_at, r.updated_at) DESC, r.id DESC;
+
+-- name: GetSchoolRequest :one
+SELECT
+    r.id, r.status, r.region_id, COALESCE(rg.name, '')::text AS region_name,
+    r.district_id, COALESCE(d.name, '')::text AS district_name, r.school_name, r.form,
+    COALESCE(cu.name, '')::text AS created_by_name,
+    r.submitted_at, COALESCE(su.name, '')::text AS submitted_by_name,
+    r.decided_at, COALESCE(du.name, '')::text AS decided_by_name,
+    r.registration_number, r.school_id, r.created_at, r.updated_at
+FROM school_requests r
+    LEFT JOIN regions rg ON rg.id = r.region_id
+    LEFT JOIN districts d ON d.id = r.district_id
+    LEFT JOIN users cu ON cu.id = r.created_by
+    LEFT JOIN users su ON su.id = r.submitted_by
+    LEFT JOIN users du ON du.id = r.decided_by
+WHERE r.id = sqlc.arg(request_id)::int;
+
+-- name: CreateSchoolRequest :one
+WITH created AS (
+    INSERT INTO school_requests (region_id, district_id, school_name, form, created_by)
+    VALUES (sqlc.arg(region_id)::int, sqlc.narg(district_id)::int, sqlc.arg(school_name)::text,
+        sqlc.arg(form)::jsonb, sqlc.arg(actor_user_id)::int)
+    RETURNING id, school_name
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'school_request', created.id, 'Created', u.id, u.name, u.role, u.school_id, created.school_name
+    FROM created LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int
+)
+SELECT id FROM created;
+
+-- name: UpdateSchoolRequest :one
+WITH updated AS (
+    UPDATE school_requests
+    SET district_id = sqlc.narg(district_id)::int, school_name = sqlc.arg(school_name)::text,
+        form = sqlc.arg(form)::jsonb, updated_at = CURRENT_TIMESTAMP
+    WHERE id = sqlc.arg(request_id)::int AND region_id = sqlc.arg(region_id)::int AND status = 'Draft'
+    RETURNING id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id)
+    SELECT 'school_request', updated.id, 'Updated', u.id, u.name, u.role, u.school_id
+    FROM updated LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int
+)
+SELECT id FROM updated;
+
+-- name: SubmitSchoolRequest :one
+WITH submitted AS (
+    UPDATE school_requests
+    SET status = 'Submitted', submitted_by = sqlc.arg(actor_user_id)::int, submitted_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = sqlc.arg(request_id)::int AND region_id = sqlc.arg(region_id)::int AND status = 'Draft'
+    RETURNING id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id)
+    SELECT 'school_request', submitted.id, 'Submitted', u.id, u.name, u.role, u.school_id
+    FROM submitted LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int
+)
+SELECT id FROM submitted;
+
+-- name: DeleteSchoolRequest :one
+WITH deleted AS (
+    DELETE FROM school_requests
+    WHERE id = sqlc.arg(request_id)::int AND region_id = sqlc.arg(region_id)::int AND status = 'Draft'
+    RETURNING id, school_name
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'school_request', deleted.id, 'Deleted', u.id, u.name, u.role, u.school_id, deleted.school_name
+    FROM deleted LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int
+)
+SELECT id FROM deleted;
+
+-- name: AcceptSchoolRequest :one
+-- Creates the school from the request (name, district, registration number, address
+-- and head teacher) and marks the request accepted, in one statement.
+WITH req AS (
+    SELECT * FROM school_requests
+    WHERE id = sqlc.arg(request_id)::int AND status = 'Submitted' AND district_id IS NOT NULL
+    FOR UPDATE
+),
+created AS (
+    INSERT INTO schools (name, school_number, district_id, postal_address, head_teacher_name, head_teacher_phone)
+    SELECT req.school_name, sqlc.arg(registration_number)::text, req.district_id,
+        NULLIF(LEFT(req.form->>'address', 255), ''),
+        NULLIF(LEFT(req.form->'head_teacher'->>'name', 150), ''),
+        NULLIF(LEFT(req.form->'head_teacher'->>'phone', 20), '')
+    FROM req
+    RETURNING id, name
+),
+accepted AS (
+    UPDATE school_requests
+    SET status = 'Accepted', decided_by = sqlc.arg(actor_user_id)::int, decided_at = CURRENT_TIMESTAMP,
+        registration_number = sqlc.arg(registration_number)::text,
+        school_id = (SELECT id FROM created), updated_at = CURRENT_TIMESTAMP
+    WHERE id IN (SELECT id FROM req)
+    RETURNING id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'school_request', accepted.id, 'Accepted', u.id, u.name, u.role, u.school_id,
+        'Registration number ' || sqlc.arg(registration_number)::text
+    FROM accepted LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int
+    UNION ALL
+    SELECT 'school', created.id, 'Created', u.id, u.name, u.role, u.school_id,
+        'Registered from school request ' || sqlc.arg(request_id)::int
+    FROM created LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int
+)
+SELECT id FROM created;
+
+-- name: CountSchoolsWithNumber :one
+SELECT COUNT(*)::int FROM schools WHERE LOWER(school_number) = LOWER(sqlc.arg(school_number)::text);
+
+-- name: CountSchoolsWithNameInDistrict :one
+SELECT COUNT(*)::int FROM schools WHERE name = sqlc.arg(name)::text AND district_id = sqlc.arg(district_id)::int;
+
+-- name: ListSchoolRequestHistory :many
+SELECT action, COALESCE(actor_name, '')::text AS actor_name, COALESCE(actor_role, '')::text AS actor_role,
+    COALESCE(note, '')::text AS note, created_at
+FROM audit_logs
+WHERE entity_type = 'school_request' AND entity_id = sqlc.arg(request_id)::int
+ORDER BY created_at, id;

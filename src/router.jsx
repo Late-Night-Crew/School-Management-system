@@ -6,6 +6,9 @@ import AccountsPage from "./pages/accounts/AccountsPage";
 import ContactsPage from "./pages/contacts/ContactsPage";
 import AdminSettings from "./pages/admin/AdminSettings";
 import LoginPage from "./pages/auth/LoginPage";
+import SchoolRequestForm from "./pages/requests/SchoolRequestForm";
+import SchoolRequestsPage from "./pages/requests/SchoolRequestsPage";
+import SchoolRequestView from "./pages/requests/SchoolRequestView";
 
 // Super admin
 import AdminDashboard from "./pages/admin/AdminDashboard";
@@ -72,6 +75,8 @@ const router = createHashRouter([
           { path: "notifications", element: <AdminNotifications /> },
           { path: "contacts", element: <ContactsPage /> },
           { path: "accounts", element: <AccountsPage /> },
+          { path: "school-requests", element: <SchoolRequestsPage /> },
+          { path: "school-requests/:requestId", element: <SchoolRequestView /> },
           { path: "settings", element: <AdminSettings /> }, 
         ],
       },
@@ -90,6 +95,10 @@ const router = createHashRouter([
           { path: "notifications", element: <RegionalNotifications /> },
           { path: "contacts", element: <ContactsPage /> },
           { path: "accounts", element: <AccountsPage /> },
+          { path: "school-requests", element: <SchoolRequestsPage /> },
+          { path: "school-requests/new", element: <SchoolRequestForm /> },
+          { path: "school-requests/:requestId", element: <SchoolRequestView /> },
+          { path: "school-requests/:requestId/edit", element: <SchoolRequestForm /> },
         ],
       },
 

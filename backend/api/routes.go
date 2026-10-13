@@ -5,6 +5,7 @@ import (
 	"nsms/api/admin"
 	"nsms/api/comms"
 	"nsms/api/region"
+	"nsms/api/requests"
 	"nsms/api/school"
 	"nsms/schema"
 
@@ -192,4 +193,20 @@ func (api *API) accountRoutes() {
 	contactsApi.Get("/directory", accounts.GetDirectory(api.ContactService, api.logger))
 	contactsApi.Put("/regions/:id/office", accounts.UpdateRegionOffice(api.ContactService, api.logger))
 	contactsApi.Put("/schools/:id/office", accounts.UpdateSchoolOffice(api.ContactService, api.logger))
+}
+
+func (api *API) schoolRequestRoutes() {
+	// Requests to register a new school. Division officers create, edit, submit and
+	// delete their division's requests; the super admin sees all and accepts them. The
+	// service checks which role may take each step.
+	requestsApi := api.app.Group("/school_requests", api.authenticated(), RequireRole(schema.RoleSuperAdmin, schema.RoleRegionalAdmin))
+	service := api.SchoolRequests
+
+	requestsApi.Get("", requests.List(service, api.logger))
+	requestsApi.Post("", requests.Create(service, api.logger))
+	requestsApi.Get("/:id", requests.Get(service, api.logger))
+	requestsApi.Put("/:id", requests.Update(service, api.logger))
+	requestsApi.Delete("/:id", requests.Delete(service, api.logger))
+	requestsApi.Post("/:id/submit", requests.Submit(service, api.logger))
+	requestsApi.Post("/:id/accept", requests.Accept(service, api.logger))
 }

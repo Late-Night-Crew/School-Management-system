@@ -29,12 +29,14 @@ type API struct {
 	AccountService      services.AccountService
 	ContactService      services.ContactService
 	GradingService      services.GradingService
+	SchoolRequests      services.SchoolRequestService
 }
 
 func NewAPI(config *config.Config) *API {
 	sqlDB := config.OpenDB()
 	dbConn := dbsqlc.New(sqlDB)
 	logger := logging.NewFromConfig(&config.Logging)
+	accountService := services.NewAccountService(dbConn, logger)
 
 	return &API{
 		logger:              logger,
@@ -53,9 +55,10 @@ func NewAPI(config *config.Config) *API {
 		RegionAdminService:  services.NewRegionAdminService(dbConn, logger),
 		MarksService:        services.NewMarksService(dbConn, logger),
 		CommsService:        services.NewCommsService(dbConn, logger),
-		AccountService:      services.NewAccountService(dbConn, logger),
+		AccountService:      accountService,
 		ContactService:      services.NewContactService(dbConn, logger),
 		GradingService:      services.NewGradingService(sqlDB.DB, dbConn, logger),
+		SchoolRequests:      services.NewSchoolRequestService(dbConn, accountService, logger),
 	}
 }
 
@@ -67,6 +70,7 @@ func (api *API) registerRoutes() {
 	api.regionRoutes()
 	api.commsRoutes()
 	api.accountRoutes()
+	api.schoolRequestRoutes()
 }
 
 // Start runs the Fiber server

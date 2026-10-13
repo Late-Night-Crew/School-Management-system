@@ -8,10 +8,62 @@ package dbsqlc
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"time"
 
 	"github.com/lib/pq"
 )
+
+const acceptSchoolRequest = `-- name: AcceptSchoolRequest :one
+WITH req AS (
+    SELECT id, status, region_id, district_id, school_name, form, created_by, submitted_by, submitted_at, decided_by, decided_at, registration_number, school_id, created_at, updated_at FROM school_requests
+    WHERE id = $1::int AND status = 'Submitted' AND district_id IS NOT NULL
+    FOR UPDATE
+),
+created AS (
+    INSERT INTO schools (name, school_number, district_id, postal_address, head_teacher_name, head_teacher_phone)
+    SELECT req.school_name, $2::text, req.district_id,
+        NULLIF(LEFT(req.form->>'address', 255), ''),
+        NULLIF(LEFT(req.form->'head_teacher'->>'name', 150), ''),
+        NULLIF(LEFT(req.form->'head_teacher'->>'phone', 20), '')
+    FROM req
+    RETURNING id, name
+),
+accepted AS (
+    UPDATE school_requests
+    SET status = 'Accepted', decided_by = $3::int, decided_at = CURRENT_TIMESTAMP,
+        registration_number = $2::text,
+        school_id = (SELECT id FROM created), updated_at = CURRENT_TIMESTAMP
+    WHERE id IN (SELECT id FROM req)
+    RETURNING id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'school_request', accepted.id, 'Accepted', u.id, u.name, u.role, u.school_id,
+        'Registration number ' || $2::text
+    FROM accepted LEFT JOIN users u ON u.id = $3::int
+    UNION ALL
+    SELECT 'school', created.id, 'Created', u.id, u.name, u.role, u.school_id,
+        'Registered from school request ' || $1::int
+    FROM created LEFT JOIN users u ON u.id = $3::int
+)
+SELECT id FROM created
+`
+
+type AcceptSchoolRequestParams struct {
+	RequestID          int32
+	RegistrationNumber string
+	ActorUserID        int32
+}
+
+// Creates the school from the request (name, district, registration number, address
+// and head teacher) and marks the request accepted, in one statement.
+func (q *Queries) AcceptSchoolRequest(ctx context.Context, arg AcceptSchoolRequestParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, acceptSchoolRequest, arg.RequestID, arg.RegistrationNumber, arg.ActorUserID)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
 
 const approveTransfer = `-- name: ApproveTransfer :one
 
@@ -266,6 +318,33 @@ func (q *Queries) CountRecentNoticesByUser(ctx context.Context, userID sql.NullI
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const countSchoolsWithNameInDistrict = `-- name: CountSchoolsWithNameInDistrict :one
+SELECT COUNT(*)::int FROM schools WHERE name = $1::text AND district_id = $2::int
+`
+
+type CountSchoolsWithNameInDistrictParams struct {
+	Name       string
+	DistrictID int32
+}
+
+func (q *Queries) CountSchoolsWithNameInDistrict(ctx context.Context, arg CountSchoolsWithNameInDistrictParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, countSchoolsWithNameInDistrict, arg.Name, arg.DistrictID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countSchoolsWithNumber = `-- name: CountSchoolsWithNumber :one
+SELECT COUNT(*)::int FROM schools WHERE LOWER(school_number) = LOWER($1::text)
+`
+
+func (q *Queries) CountSchoolsWithNumber(ctx context.Context, schoolNumber string) (int32, error) {
+	row := q.db.QueryRowContext(ctx, countSchoolsWithNumber, schoolNumber)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const countTransfersByStatusForAdmin = `-- name: CountTransfersByStatusForAdmin :many
@@ -843,6 +922,42 @@ func (q *Queries) CreateSchool(ctx context.Context, arg CreateSchoolParams) (Cre
 	return i, err
 }
 
+const createSchoolRequest = `-- name: CreateSchoolRequest :one
+WITH created AS (
+    INSERT INTO school_requests (region_id, district_id, school_name, form, created_by)
+    VALUES ($1::int, $2::int, $3::text,
+        $4::jsonb, $5::int)
+    RETURNING id, school_name
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'school_request', created.id, 'Created', u.id, u.name, u.role, u.school_id, created.school_name
+    FROM created LEFT JOIN users u ON u.id = $5::int
+)
+SELECT id FROM created
+`
+
+type CreateSchoolRequestParams struct {
+	RegionID    int32
+	DistrictID  sql.NullInt32
+	SchoolName  string
+	Form        json.RawMessage
+	ActorUserID int32
+}
+
+func (q *Queries) CreateSchoolRequest(ctx context.Context, arg CreateSchoolRequestParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, createSchoolRequest,
+		arg.RegionID,
+		arg.DistrictID,
+		arg.SchoolName,
+		arg.Form,
+		arg.ActorUserID,
+	)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createStudent = `-- name: CreateStudent :one
 INSERT INTO
     students (
@@ -1281,6 +1396,33 @@ WHERE
 func (q *Queries) DeleteSchool(ctx context.Context, id int32) error {
 	_, err := q.db.ExecContext(ctx, deleteSchool, id)
 	return err
+}
+
+const deleteSchoolRequest = `-- name: DeleteSchoolRequest :one
+WITH deleted AS (
+    DELETE FROM school_requests
+    WHERE id = $1::int AND region_id = $2::int AND status = 'Draft'
+    RETURNING id, school_name
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'school_request', deleted.id, 'Deleted', u.id, u.name, u.role, u.school_id, deleted.school_name
+    FROM deleted LEFT JOIN users u ON u.id = $3::int
+)
+SELECT id FROM deleted
+`
+
+type DeleteSchoolRequestParams struct {
+	RequestID   int32
+	RegionID    int32
+	ActorUserID int32
+}
+
+func (q *Queries) DeleteSchoolRequest(ctx context.Context, arg DeleteSchoolRequestParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, deleteSchoolRequest, arg.RequestID, arg.RegionID, arg.ActorUserID)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
 }
 
 const deleteStudent = `-- name: DeleteStudent :exec
@@ -2269,6 +2411,68 @@ func (q *Queries) GetSchoolReport(ctx context.Context, arg GetSchoolReportParams
 		return nil, err
 	}
 	return items, nil
+}
+
+const getSchoolRequest = `-- name: GetSchoolRequest :one
+SELECT
+    r.id, r.status, r.region_id, COALESCE(rg.name, '')::text AS region_name,
+    r.district_id, COALESCE(d.name, '')::text AS district_name, r.school_name, r.form,
+    COALESCE(cu.name, '')::text AS created_by_name,
+    r.submitted_at, COALESCE(su.name, '')::text AS submitted_by_name,
+    r.decided_at, COALESCE(du.name, '')::text AS decided_by_name,
+    r.registration_number, r.school_id, r.created_at, r.updated_at
+FROM school_requests r
+    LEFT JOIN regions rg ON rg.id = r.region_id
+    LEFT JOIN districts d ON d.id = r.district_id
+    LEFT JOIN users cu ON cu.id = r.created_by
+    LEFT JOIN users su ON su.id = r.submitted_by
+    LEFT JOIN users du ON du.id = r.decided_by
+WHERE r.id = $1::int
+`
+
+type GetSchoolRequestRow struct {
+	ID                 int32
+	Status             string
+	RegionID           sql.NullInt32
+	RegionName         string
+	DistrictID         sql.NullInt32
+	DistrictName       string
+	SchoolName         string
+	Form               json.RawMessage
+	CreatedByName      string
+	SubmittedAt        sql.NullTime
+	SubmittedByName    string
+	DecidedAt          sql.NullTime
+	DecidedByName      string
+	RegistrationNumber sql.NullString
+	SchoolID           sql.NullInt32
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+func (q *Queries) GetSchoolRequest(ctx context.Context, requestID int32) (GetSchoolRequestRow, error) {
+	row := q.db.QueryRowContext(ctx, getSchoolRequest, requestID)
+	var i GetSchoolRequestRow
+	err := row.Scan(
+		&i.ID,
+		&i.Status,
+		&i.RegionID,
+		&i.RegionName,
+		&i.DistrictID,
+		&i.DistrictName,
+		&i.SchoolName,
+		&i.Form,
+		&i.CreatedByName,
+		&i.SubmittedAt,
+		&i.SubmittedByName,
+		&i.DecidedAt,
+		&i.DecidedByName,
+		&i.RegistrationNumber,
+		&i.SchoolID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getSchoolScope = `-- name: GetSchoolScope :one
@@ -4047,6 +4251,136 @@ func (q *Queries) ListSchoolNameClashes(ctx context.Context, arg ListSchoolNameC
 	return items, nil
 }
 
+const listSchoolRequestHistory = `-- name: ListSchoolRequestHistory :many
+SELECT action, COALESCE(actor_name, '')::text AS actor_name, COALESCE(actor_role, '')::text AS actor_role,
+    COALESCE(note, '')::text AS note, created_at
+FROM audit_logs
+WHERE entity_type = 'school_request' AND entity_id = $1::int
+ORDER BY created_at, id
+`
+
+type ListSchoolRequestHistoryRow struct {
+	Action    string
+	ActorName string
+	ActorRole string
+	Note      string
+	CreatedAt time.Time
+}
+
+func (q *Queries) ListSchoolRequestHistory(ctx context.Context, requestID int32) ([]ListSchoolRequestHistoryRow, error) {
+	rows, err := q.db.QueryContext(ctx, listSchoolRequestHistory, requestID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSchoolRequestHistoryRow
+	for rows.Next() {
+		var i ListSchoolRequestHistoryRow
+		if err := rows.Scan(
+			&i.Action,
+			&i.ActorName,
+			&i.ActorRole,
+			&i.Note,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSchoolRequests = `-- name: ListSchoolRequests :many
+
+SELECT
+    r.id, r.status, r.region_id, COALESCE(rg.name, '')::text AS region_name,
+    r.district_id, COALESCE(d.name, '')::text AS district_name, r.school_name,
+    r.submitted_at, COALESCE(su.name, '')::text AS submitted_by_name,
+    r.decided_at, COALESCE(du.name, '')::text AS decided_by_name,
+    r.registration_number, r.school_id, r.created_at, r.updated_at
+FROM school_requests r
+    LEFT JOIN regions rg ON rg.id = r.region_id
+    LEFT JOIN districts d ON d.id = r.district_id
+    LEFT JOIN users su ON su.id = r.submitted_by
+    LEFT JOIN users du ON du.id = r.decided_by
+WHERE ($1::int IS NULL OR r.region_id = $1::int)
+    AND ($2::text IS NULL OR r.status = $2::text)
+ORDER BY COALESCE(r.submitted_at, r.updated_at) DESC, r.id DESC
+`
+
+type ListSchoolRequestsParams struct {
+	RegionID sql.NullInt32
+	Status   sql.NullString
+}
+
+type ListSchoolRequestsRow struct {
+	ID                 int32
+	Status             string
+	RegionID           sql.NullInt32
+	RegionName         string
+	DistrictID         sql.NullInt32
+	DistrictName       string
+	SchoolName         string
+	SubmittedAt        sql.NullTime
+	SubmittedByName    string
+	DecidedAt          sql.NullTime
+	DecidedByName      string
+	RegistrationNumber sql.NullString
+	SchoolID           sql.NullInt32
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+// ============================================================================
+// School registration requests (see migrations 20-21). Division officers create, edit,
+// submit and delete their own division's requests; the super admin accepts them.
+// Changes are scoped by region in the WHERE clause and audited in the same statement.
+// ============================================================================
+func (q *Queries) ListSchoolRequests(ctx context.Context, arg ListSchoolRequestsParams) ([]ListSchoolRequestsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listSchoolRequests, arg.RegionID, arg.Status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSchoolRequestsRow
+	for rows.Next() {
+		var i ListSchoolRequestsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Status,
+			&i.RegionID,
+			&i.RegionName,
+			&i.DistrictID,
+			&i.DistrictName,
+			&i.SchoolName,
+			&i.SubmittedAt,
+			&i.SubmittedByName,
+			&i.DecidedAt,
+			&i.DecidedByName,
+			&i.RegistrationNumber,
+			&i.SchoolID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSchools = `-- name: ListSchools :many
 SELECT
     id,
@@ -5244,6 +5578,35 @@ func (q *Queries) SetAccountActive(ctx context.Context, arg SetAccountActivePara
 	return id, err
 }
 
+const submitSchoolRequest = `-- name: SubmitSchoolRequest :one
+WITH submitted AS (
+    UPDATE school_requests
+    SET status = 'Submitted', submitted_by = $1::int, submitted_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = $2::int AND region_id = $3::int AND status = 'Draft'
+    RETURNING id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id)
+    SELECT 'school_request', submitted.id, 'Submitted', u.id, u.name, u.role, u.school_id
+    FROM submitted LEFT JOIN users u ON u.id = $1::int
+)
+SELECT id FROM submitted
+`
+
+type SubmitSchoolRequestParams struct {
+	ActorUserID int32
+	RequestID   int32
+	RegionID    int32
+}
+
+func (q *Queries) SubmitSchoolRequest(ctx context.Context, arg SubmitSchoolRequestParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, submitSchoolRequest, arg.ActorUserID, arg.RequestID, arg.RegionID)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
+
 const syncSchoolAccountScopes = `-- name: SyncSchoolAccountScopes :exec
 UPDATE users u
 SET district_id = sc.district_id, region_id = d.region_id
@@ -5652,6 +6015,45 @@ func (q *Queries) UpdateSchoolOffice(ctx context.Context, arg UpdateSchoolOffice
 		arg.HeadTeacherName,
 		arg.HeadTeacherPhone,
 		arg.SchoolID,
+		arg.ActorUserID,
+	)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
+
+const updateSchoolRequest = `-- name: UpdateSchoolRequest :one
+WITH updated AS (
+    UPDATE school_requests
+    SET district_id = $1::int, school_name = $2::text,
+        form = $3::jsonb, updated_at = CURRENT_TIMESTAMP
+    WHERE id = $4::int AND region_id = $5::int AND status = 'Draft'
+    RETURNING id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id)
+    SELECT 'school_request', updated.id, 'Updated', u.id, u.name, u.role, u.school_id
+    FROM updated LEFT JOIN users u ON u.id = $6::int
+)
+SELECT id FROM updated
+`
+
+type UpdateSchoolRequestParams struct {
+	DistrictID  sql.NullInt32
+	SchoolName  string
+	Form        json.RawMessage
+	RequestID   int32
+	RegionID    int32
+	ActorUserID int32
+}
+
+func (q *Queries) UpdateSchoolRequest(ctx context.Context, arg UpdateSchoolRequestParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, updateSchoolRequest,
+		arg.DistrictID,
+		arg.SchoolName,
+		arg.Form,
+		arg.RequestID,
+		arg.RegionID,
 		arg.ActorUserID,
 	)
 	var id int32

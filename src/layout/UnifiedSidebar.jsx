@@ -3,6 +3,7 @@ import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import "./shell.css";
 import { logout } from "../api/auth";
 import { COMMS_CHANGED, getCommsSummary } from "../api/comms";
+import { SCHOOL_REQUESTS_CHANGED, listSchoolRequests } from "../api/schoolRequests";
 import { ROLES, ROLE_LABELS, getSession } from "../auth/session";
 
 // Sidebar links for each role. Paths must match the routes in router.jsx.
@@ -12,6 +13,7 @@ function menuFor(session) {
     case ROLES.SUPER_ADMIN:
       return [
         { name: "Dashboard", path: "/admin/dashboard", icon: "bi-speedometer2" },
+        { name: "School Requests", path: "/admin/school-requests", icon: "bi-building-add" },
         {
           name: "Manage",
           icon: "bi-sliders",
@@ -38,6 +40,7 @@ function menuFor(session) {
         { name: "Dashboard", path: `${base}/dashboard`, icon: "bi-speedometer2" },
         { name: "Districts", path: `${base}/districts`, icon: "bi-geo-alt" },
         { name: "Schools", path: `${base}/schools`, icon: "bi-building" },
+        { name: "School Requests", path: `${base}/school-requests`, icon: "bi-building-add" },
         { name: "Students", path: `${base}/students`, icon: "bi-journal-bookmark" },
         { name: "Transfer Requests", path: `${base}/transfers`, icon: "bi-arrow-left-right" },
         { name: "Reports", path: `${base}/reports`, icon: "bi-file-earmark-text" },
@@ -94,13 +97,41 @@ function useUnreadCount(enabled) {
   return count;
 }
 
+// Requests waiting for the super admin's decision, for the School Requests badge
+function useAwaitingRequests(enabled) {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let current = true;
+    const refresh = () =>
+      listSchoolRequests({ status: "Submitted" }).then(
+        (requests) => current && setCount(requests.length),
+        () => {} // the badge is optional; the page reports its own errors
+      );
+    refresh();
+    const timer = setInterval(refresh, SUMMARY_POLL_MS);
+    window.addEventListener(SCHOOL_REQUESTS_CHANGED, refresh);
+    return () => {
+      current = false;
+      clearInterval(timer);
+      window.removeEventListener(SCHOOL_REQUESTS_CHANGED, refresh);
+    };
+  }, [enabled]);
+  return count;
+}
+
+const badgeText = (count) => (count > 99 ? "99+" : count);
+
 export default function UnifiedSidebar({ isMobileOpen = false, setIsMobileOpen = () => {} }) {
   const navigate = useNavigate();
   const session = getSession();
   const unread = useUnreadCount(Boolean(session?.role));
-  const menuItems = menuFor(session).map((item) =>
-    item.name === "Notifications" && unread > 0 ? { ...item, badge: unread > 99 ? "99+" : unread } : item
-  );
+  const awaiting = useAwaitingRequests(session?.role === ROLES.SUPER_ADMIN);
+  const menuItems = menuFor(session).map((item) => {
+    if (item.name === "Notifications" && unread > 0) return { ...item, badge: badgeText(unread) };
+    if (item.name === "School Requests" && awaiting > 0) return { ...item, badge: badgeText(awaiting) };
+    return item;
+  });
 
   const handleLogout = () => {
     logout();

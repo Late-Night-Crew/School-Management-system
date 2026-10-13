@@ -6,6 +6,7 @@ package dbsqlc
 
 import (
 	"database/sql"
+	"encoding/json"
 	"time"
 )
 
@@ -138,6 +139,24 @@ type School struct {
 	HeadTeacherName  sql.NullString
 	HeadTeacherPhone sql.NullString
 	ClosedAt         sql.NullTime
+}
+
+type SchoolRequest struct {
+	ID                 int32
+	Status             string
+	RegionID           sql.NullInt32
+	DistrictID         sql.NullInt32
+	SchoolName         string
+	Form               json.RawMessage
+	CreatedBy          sql.NullInt32
+	SubmittedBy        sql.NullInt32
+	SubmittedAt        sql.NullTime
+	DecidedBy          sql.NullInt32
+	DecidedAt          sql.NullTime
+	RegistrationNumber sql.NullString
+	SchoolID           sql.NullInt32
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 type Student struct {
