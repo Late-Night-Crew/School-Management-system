@@ -25,8 +25,8 @@ var createAdminCmd = &cobra.Command{
 	Short:        "Create a super admin (Learner Support Manager) account",
 	SilenceUsage: true,
 	Long: `Creates the super admin with a temporary password, printed once. They must change
-it when they first sign in. Use this to set up a new deployment instead of "nsms seed".
-The system has a single super admin.
+it when they first sign in. Use this to set up a new deployment instead of "nsms seed";
+after that, super admins can add further MCDE accounts on the Accounts page.
 
   nsms create-admin --name "Jane Phiri" --email jane.phiri@mcde.ac.mw`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -99,15 +99,6 @@ func createSuperAdmin(ctx context.Context, dbConn *sqlx.DB, name, email string) 
 	}
 	if taken > 0 {
 		return "", fmt.Errorf("%s already has an account; use reset-password if they cannot sign in", email)
-	}
-	// The database allows a single super admin
-	var existing string
-	err := dbConn.GetContext(ctx, &existing, `SELECT email FROM users WHERE role = 'SUPER_ADMIN' LIMIT 1`)
-	if err == nil {
-		return "", fmt.Errorf("a super admin already exists (%s) and only one is allowed; use reset-password if they cannot sign in", existing)
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return "", fmt.Errorf("failed to check for a super admin: %w", err)
 	}
 	password, hash, err := services.NewTemporaryPassword()
 	if err != nil {

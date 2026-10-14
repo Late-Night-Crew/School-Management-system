@@ -27,21 +27,6 @@ func GetStudentByID(studentService services.StudentService, logger logging.Logge
 	}
 }
 
-func GetStudentList(studentService services.StudentService, logger logging.Logger) fiber.Handler {
-	return func(ctx *fiber.Ctx) error {
-		var req schema.GetStudentListRequest
-		if err := common.ParseQueryParamsThenValidate(ctx, &req); err != nil {
-			return problemdetail.BadRequest(ctx, "invalid request body")
-		}
-		student, err := studentService.GetStudentList(ctx.Context(), &req)
-		if err != nil {
-			logger.Error("failed to get student list: ", "error", err)
-			return problemdetail.ServerErrorProblem(ctx, "Failed to get student list")
-		}
-		return ctx.Status(fiber.StatusOK).JSON(student)
-	}
-}
-
 func CreateStudent(studentService services.StudentService, logger logging.Logger) fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
 		var req schema.CreateStudentRequest

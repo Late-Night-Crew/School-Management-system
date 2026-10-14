@@ -4,9 +4,11 @@ import { Link } from "react-router-dom";
 import { getActiveAcademicYear } from "../../api/academicYears";
 import { listDistricts } from "../../api/districts";
 import { listRegions } from "../../api/regions";
+import { getNationalInsights } from "../../api/insights";
 import { getSchoolReport } from "../../api/reports";
 import useAsync from "../../hooks/useAsync";
 import { formatDate, formatNumber } from "../../utils/format";
+import InsightsPanel from "../../components/charts/InsightsPanel";
 import DataState from "../../components/DataState";
 import { Button, Card, Notice, Page, StatTile, Table } from "../../components/ui";
 
@@ -26,6 +28,7 @@ export default function AdminDashboard() {
       []
     )
   );
+  const insights = useAsync(useCallback(() => getNationalInsights(), []));
   const [schools = [], regions = [], districts = [], activeYear] = overview.data || [];
 
   // Students and pending transfers per region, from the per-school report rows
@@ -81,6 +84,10 @@ export default function AdminDashboard() {
           loading={loading}
         />
       </div>
+
+      <DataState loading={insights.loading} error={insights.error} onRetry={insights.reload}>
+        {insights.data && <InsightsPanel insights={insights.data} areaLabel="Division" />}
+      </DataState>
 
       <div className="ui-split">
         <Card

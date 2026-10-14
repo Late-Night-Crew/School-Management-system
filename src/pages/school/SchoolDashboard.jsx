@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { listAcademicYears } from "../../api/academicYears";
+import { getSchoolInsights } from "../../api/insights";
 import { getSchool } from "../../api/schools";
 import { schoolPromotionBase } from "../../api/promotion";
 import { listTermReports } from "../../api/termReports";
@@ -13,14 +14,13 @@ import {
 } from "../../api/schoolPortal";
 import { getSession } from "../../auth/session";
 import { formatDate, formatRate } from "../../utils/format";
+import InsightsPanel from "../../components/charts/InsightsPanel";
 import DataState from "../../components/DataState";
 import TransferStatusBadge from "../../components/TransferStatusBadge";
 import { Button, Card, Notice, Page, StatTile } from "../../components/ui";
 import styles from "./SchoolDashboard.module.css";
 
 const DAY_MONTH = { day: "numeric", month: "short" };
-
-const percent = (part, total) => (total ? Math.round((part / total) * 100) : 0);
 
 // Value of a settled promise, or the fallback if it failed
 const valueOr = (result, fallback) => (result.status === "fulfilled" ? result.value : fallback);
@@ -36,11 +36,12 @@ const SchoolDashboard = () => {
     const [activeYear, setActiveYear] = useState(null);
     const [latestResult, setLatestResult] = useState(null);
     const [recentTransfers, setRecentTransfers] = useState([]);
+    const [insights, setInsights] = useState(null);
 
     useEffect(() => {
         const load = async () => {
             setLoading(true);
-            const [statsRes, schoolRes, yearsRes, resultsRes, incomingRes, termRes, outgoingRes] = await Promise.allSettled([
+            const [statsRes, schoolRes, yearsRes, resultsRes, incomingRes, termRes, outgoingRes, insightsRes] = await Promise.allSettled([
                 getSchoolDashboard(schoolId),
                 getSchool(schoolId),
                 listAcademicYears(),
@@ -48,7 +49,9 @@ const SchoolDashboard = () => {
                 listSchoolIncomingTransfers(schoolId),
                 listTermReports(schoolPromotionBase(false, schoolId)),
                 listSchoolOutgoingTransfers(schoolId),
+                getSchoolInsights(schoolId),
             ]);
+            setInsights(valueOr(insightsRes, null));
 
             setStatsError(statsRes.status === "rejected");
             setStats(valueOr(statsRes, null));
@@ -81,9 +84,6 @@ const SchoolDashboard = () => {
     const total = stats?.student_count || 0;
     const male = stats?.male_count || 0;
     const female = stats?.female_count || 0;
-    const unrecorded = Math.max(total - male - female, 0);
-    const malePct = percent(male, total);
-    const femalePct = percent(female, total);
     const pendingIncoming = stats?.pending_incoming_count || 0;
     const pendingTotal = pendingIncoming + (stats?.pending_outgoing_count || 0);
     const value = (n) => (loading ? "…" : statsError ? "-" : n.toLocaleString());
@@ -142,6 +142,8 @@ const SchoolDashboard = () => {
                 />
             </div>
 
+            {insights && <InsightsPanel insights={insights} />}
+
             <div className="ui-split">
                 <div className={styles.stack}>
                     <Card
@@ -169,34 +171,6 @@ const SchoolDashboard = () => {
                                     </li>
                                 ))}
                             </ul>
-                        </DataState>
-                    </Card>
-
-                    <Card accent="purple" icon="bi-pie-chart" title="Gender Distribution" subtitle="Students currently enrolled">
-                        <DataState loading={loading} empty={total === 0} emptyMessage="No students enrolled yet.">
-                            <div className={styles.donutWrap}>
-                                <div
-                                    className={styles.donut}
-                                    role="img"
-                                    aria-label={`${malePct}% male, ${femalePct}% female`}
-                                    style={{
-                                        background: `conic-gradient(#2563eb 0% ${malePct}%, #ec4899 ${malePct}% ${malePct + femalePct}%, #94a3b8 ${malePct + femalePct}% 100%)`,
-                                    }}
-                                />
-                                <div className={styles.legend}>
-                                    <div className={styles.legendItem}>
-                                        <span className={`${styles.dot} ${styles.male}`} /> Male: {male} ({malePct}%)
-                                    </div>
-                                    <div className={styles.legendItem}>
-                                        <span className={`${styles.dot} ${styles.female}`} /> Female: {female} ({femalePct}%)
-                                    </div>
-                                    {unrecorded > 0 && (
-                                        <div className={styles.legendItem}>
-                                            <span className={`${styles.dot} ${styles.other}`} /> Not recorded: {unrecorded}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
                         </DataState>
                     </Card>
                 </div>

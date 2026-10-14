@@ -32,6 +32,7 @@ func errorResponse(ctx *fiber.Ctx, logger logging.Logger, err error, fallback st
 	case errors.Is(err, services.ErrAccountForbidden), errors.Is(err, services.ErrContactForbidden):
 		return problemdetail.Forbidden(ctx, err.Error())
 	case errors.Is(err, services.ErrEmailInUse), errors.Is(err, services.ErrRegionHasAdmin), errors.Is(err, services.ErrSchoolClosed),
+		errors.Is(err, services.ErrLastSuperAdmin),
 		errors.Is(err, services.ErrInUse):
 		return problemdetail.Conflict(ctx, err.Error())
 	case errors.Is(err, common.ErrInvalidPhone),

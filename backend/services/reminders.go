@@ -143,6 +143,11 @@ func (s *reminderService) CreateYearWithTerms(ctx context.Context, req *schema.C
 	if err := checkTermDates(start, end, req.Terms); err != nil {
 		return nil, err
 	}
+	if err := checkYearsDontOverlap(ctx, s.queries, 0, start, end); err != nil {
+		return nil, err
+	}
+	// The status follows the dates, whatever was sent
+	req.Status = academicYearStatus(start, end, TodayInMalawi())
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start transaction: %w", err)
@@ -177,6 +182,9 @@ func (s *reminderService) CheckYearDates(ctx context.Context, yearID int64, star
 	end, err2 := time.Parse(time.DateOnly, endDate)
 	if err1 != nil || err2 != nil {
 		return newUserError(ErrInvalidMove, "The academic year's dates are not valid dates.")
+	}
+	if err := checkYearsDontOverlap(ctx, s.queries, yearID, start, end); err != nil {
+		return err
 	}
 	terms, err := s.queries.ListTermDatesForYear(ctx, int32(yearID))
 	if err != nil {
@@ -314,20 +322,20 @@ func (s *reminderService) SendDue(ctx context.Context, today time.Time) (*schema
 	// Schools to report to their division office, sent as one summary per division
 	escalations := map[int32][]overdueSchool{}
 	for _, stage := range stages {
-		dates, err := s.queries.GetTermDates(ctx, dbsqlc.GetTermDatesParams{AcademicYearID: int32(stage.AcademicYearID), Term: int32(stage.Term)})
-		if errors.Is(err, sql.ErrNoRows) {
+		if stage.TermEndDate == "" {
 			continue // MCDE has not set this term's dates
 		}
+		end, err := time.Parse(time.DateOnly, stage.TermEndDate)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get term dates: %w", err)
+			return nil, fmt.Errorf("failed to read term end date: %w", err)
 		}
-		kind := reminderDue(today, dates.EndDate, times)
+		kind := reminderDue(today, end, times)
 		if kind == "" {
 			continue
 		}
 		if kind == reminderEscalated {
 			// A school the check reaches late still gets its own urgent reminder once
-			if sent, err := s.send(ctx, stage, reminderOverdue, dates.EndDate, today, times); err != nil {
+			if sent, err := s.send(ctx, stage, reminderOverdue, end, today, times); err != nil {
 				run.Failures = append(run.Failures, fmt.Sprintf("%s: %v", stage.SchoolName, err))
 			} else if sent {
 				run.Sent[reminderOverdue]++
@@ -336,10 +344,10 @@ func (s *reminderService) SendDue(ctx context.Context, today time.Time) (*schema
 			if err != nil {
 				return nil, fmt.Errorf("failed to find school %d's division: %w", stage.SchoolID, err)
 			}
-			escalations[region.RegionID] = append(escalations[region.RegionID], overdueSchool{stage: stage, end: dates.EndDate})
+			escalations[region.RegionID] = append(escalations[region.RegionID], overdueSchool{stage: stage, end: end})
 			continue
 		}
-		sent, err := s.send(ctx, stage, kind, dates.EndDate, today, times)
+		sent, err := s.send(ctx, stage, kind, end, today, times)
 		if err != nil {
 			s.logger.Error("reminders", "term reminder failed", "school_id", stage.SchoolID, "kind", kind, "error", err)
 			run.Failures = append(run.Failures, fmt.Sprintf("%s: %v", stage.SchoolName, err))

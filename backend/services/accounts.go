@@ -49,6 +49,7 @@ var (
 	ErrEmailInUse         = errors.New("another account already uses this email address")
 	ErrRegionHasAdmin     = errors.New("this division already has an active regional admin; deactivate them first")
 	ErrAccountScope       = errors.New("choose the division for a regional admin, or the school for a school manager")
+	ErrLastSuperAdmin     = errors.New("this is the only active MCDE account; create or reactivate another before deactivating it")
 	ErrAccountScopeGone   = errors.New("this account's school or division has been deleted, so it cannot be reactivated; create a new account instead")
 	ErrWrongPassword      = errors.New("your current password is not correct")
 	ErrWeakPassword       = errors.New("the new password must be at least 8 characters and include letters and numbers")
@@ -87,10 +88,12 @@ func toAccount(row dbsqlc.GetAccountRow) *schema.Account {
 }
 
 // canManage reports whether the actor may change the account.
+// canManage: super admins manage every account but their own (their own details and
+// password are changed under My account); regional admins manage their schools' managers.
 func canManage(actor schema.Actor, account *schema.Account) bool {
 	switch actor.Role {
 	case schema.RoleSuperAdmin:
-		return account.Role != schema.RoleSuperAdmin
+		return account.ID != actor.UserID
 	case schema.RoleRegionalAdmin:
 		return account.Role == schema.RoleSchoolManager && account.RegionID == actor.RegionID
 	}
@@ -202,6 +205,12 @@ func (s *accountService) CreateAccount(ctx context.Context, actor schema.Actor, 
 	}
 	var scope string
 	switch req.Role {
+	case schema.RoleSuperAdmin:
+		// Another MCDE account (Learner Support Manager): no division or school
+		if actor.Role != schema.RoleSuperAdmin {
+			return nil, ErrAccountForbidden
+		}
+		scope = "MCDE"
 	case schema.RoleRegionalAdmin:
 		if actor.Role != schema.RoleSuperAdmin {
 			return nil, ErrAccountForbidden
@@ -304,6 +313,16 @@ func (s *accountService) SetAccountActive(ctx context.Context, actor schema.Acto
 	account, err := s.getManagedAccount(ctx, actor, accountID)
 	if err != nil {
 		return nil, err
+	}
+	// MCDE must always keep at least one working account
+	if !active && account.Role == schema.RoleSuperAdmin {
+		others, err := s.queries.CountOtherActiveSuperAdmins(ctx, int32(accountID))
+		if err != nil {
+			return nil, fmt.Errorf("failed to count super admins: %w", err)
+		}
+		if others == 0 {
+			return nil, ErrLastSuperAdmin
+		}
 	}
 	if active && account.Role == schema.RoleRegionalAdmin {
 		if account.RegionID == 0 {

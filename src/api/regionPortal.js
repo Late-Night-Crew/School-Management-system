@@ -12,9 +12,9 @@ export const listRegionDistricts = (regionId) => client.get(`${base(regionId)}/d
 export const listRegionSchools = (regionId, filters) =>
   client.get(`${base(regionId)}/schools`, { params: params(filters) }).then(list);
 
-// filters: { district_id, school_id }
+// One page of the division's learners; filters and result as for students.listStudents
 export const listRegionStudents = (regionId, filters) =>
-  client.get(`${base(regionId)}/students`, { params: params(filters) }).then(list);
+  client.get(`${base(regionId)}/students`, { params: params(filters) }).then(data);
 
 // Transfers into or out of any school in the region
 export const listRegionTransfers = (regionId) => client.get(`${base(regionId)}/transfers`).then(list);

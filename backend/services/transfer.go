@@ -95,7 +95,7 @@ func (s *transferService) CreateTransferRequest(ctx context.Context, req *schema
 		return nil, err
 	}
 
-	_, err := s.queries.GetStudentByIDAndSchoolID(ctx, dbsqlc.GetStudentByIDAndSchoolIDParams{
+	student, err := s.queries.GetStudentByIDAndSchoolID(ctx, dbsqlc.GetStudentByIDAndSchoolIDParams{
 		ID:       int32(req.StudentID),
 		SchoolID: int32(req.FromSchoolID),
 	})
@@ -104,6 +104,9 @@ func (s *transferService) CreateTransferRequest(ctx context.Context, req *schema
 			return nil, ErrStudentNotInSchool
 		}
 		return nil, fmt.Errorf("failed to look up student %d: %w", req.StudentID, err)
+	}
+	if student.Status != schema.StudentActive {
+		return nil, ErrStudentNotActive
 	}
 
 	pending, err := s.queries.CountPendingTransfersForStudent(ctx, int32(req.StudentID))

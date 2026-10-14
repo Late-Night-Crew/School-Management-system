@@ -86,31 +86,6 @@ func ListSchools(reportService services.ReportService, logger logging.Logger) fi
 	}
 }
 
-// ListStudents returns the region's students. Optional query parameters: district_id, school_id.
-func ListStudents(regionService services.RegionAdminService, logger logging.Logger) fiber.Handler {
-	return func(ctx *fiber.Ctx) error {
-		regionID, err := regionIDFromPath(ctx)
-		if err != nil {
-			return err
-		}
-		districtID, ok1 := queryID(ctx, "district_id")
-		schoolID, ok2 := queryID(ctx, "school_id")
-		if !ok1 || !ok2 {
-			return problemdetail.BadRequest(ctx, "Invalid filter")
-		}
-
-		students, err := regionService.ListStudents(ctx.Context(), regionID, schema.RegionStudentFilter{
-			DistrictID: districtID,
-			SchoolID:   schoolID,
-		})
-		if err != nil {
-			logger.Error(module, "failed to list region students", "error", err)
-			return problemdetail.ServerErrorProblem(ctx, "Failed to get students")
-		}
-		return ctx.Status(fiber.StatusOK).JSON(students)
-	}
-}
-
 // ListTransfers returns transfers into or out of any school in the region.
 func ListTransfers(regionService services.RegionAdminService, logger logging.Logger) fiber.Handler {
 	return func(ctx *fiber.Ctx) error {

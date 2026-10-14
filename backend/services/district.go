@@ -35,7 +35,7 @@ func NewDistrictService(queries *dbsqlc.Queries, logger logging.Logger) District
 		queries: queries,
 		logger:  logger,
 	}
-}	
+}
 
 func (s *districtService) GetDistrictList(ctx context.Context, req *schema.GetDistrictListRequest) ([]*schema.District, error) {
 	res := make([]*schema.District, 0)

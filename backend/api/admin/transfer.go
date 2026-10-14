@@ -23,7 +23,8 @@ func transferErrorResponse(ctx *fiber.Ctx, logger logging.Logger, err error, fal
 		return problemdetail.NotFound(ctx, "Transfer not found")
 	case errors.Is(err, services.ErrStudentNotInSchool),
 		errors.Is(err, services.ErrTransferSameSchool),
-		errors.Is(err, services.ErrTransferTargetMissing):
+		errors.Is(err, services.ErrTransferTargetMissing),
+		errors.Is(err, services.ErrStudentNotActive):
 		return problemdetail.BadRequest(ctx, err.Error())
 	case errors.Is(err, services.ErrTransferAlreadyPending),
 		errors.Is(err, services.ErrTransferInvalidState),

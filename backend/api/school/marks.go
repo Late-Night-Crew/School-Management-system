@@ -14,7 +14,7 @@ import (
 )
 
 // ListMarks returns marks for the school's current students.
-// Optional query parameters: academic_year_id, term (1-3), student_id.
+// Optional query parameters: academic_year_id, term (1-3), student_id, form_level.
 func ListMarks(marksService services.MarksService, logger logging.Logger) fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
 		schoolID, err := schoolIDFromPath(ctx)
@@ -25,6 +25,7 @@ func ListMarks(marksService services.MarksService, logger logging.Logger) fiber.
 			AcademicYearID: int64(ctx.QueryInt("academic_year_id")),
 			Term:           ctx.QueryInt("term"),
 			StudentID:      int64(ctx.QueryInt("student_id")),
+			FormLevel:      ctx.QueryInt("form_level"),
 		}
 		if filter.AcademicYearID < 0 || filter.StudentID < 0 || filter.Term < 0 || filter.Term > 3 {
 			return problemdetail.BadRequest(ctx, "Invalid marks filter")

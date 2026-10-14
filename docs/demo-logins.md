@@ -12,8 +12,8 @@ They are for local development and demos only. Never run the seed against a prod
 | --- | --- |
 | `admin@nsms.demo` | Everything under `/admin`: divisions, districts, schools, academic years, subjects, all students, all transfers, national reports |
 
-If the database already had a super admin when you seeded, this account is skipped
-(only one super admin is allowed) and the seed output says so.
+If the email was already taken when you seeded, this account is skipped and the seed
+output says so.
 
 ## Regional admins
 

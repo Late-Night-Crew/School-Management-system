@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"nsms/database/dbsqlc"
 )
@@ -16,9 +17,38 @@ import (
 // ErrYearNotOpen wraps why a year or term cannot take records; the message is for the user.
 var ErrYearNotOpen = errors.New("academic year not open")
 
-const academicYearUpcoming = "Upcoming"
+// academicYearStatus is a year's status on a given day: it follows the dates.
+func academicYearStatus(start, end, today time.Time) string {
+	switch {
+	case today.Before(start):
+		return "Upcoming"
+	case today.After(end):
+		return "Completed"
+	}
+	return "Active"
+}
 
-// checkYearStarted refuses an academic year that has not started (status Upcoming).
+// SyncAcademicYearStatuses brings every year's status in line with its dates.
+func SyncAcademicYearStatuses(ctx context.Context, queries *dbsqlc.Queries) error {
+	if err := queries.SyncAcademicYearStatuses(ctx, TodayInMalawi()); err != nil {
+		return fmt.Errorf("failed to update academic year statuses: %w", err)
+	}
+	return nil
+}
+
+// checkYearsDontOverlap refuses year dates that overlap another academic year.
+func checkYearsDontOverlap(ctx context.Context, queries *dbsqlc.Queries, excludeID int64, start, end time.Time) error {
+	n, err := queries.CountOverlappingAcademicYears(ctx, dbsqlc.CountOverlappingAcademicYearsParams{ExcludeID: int32(excludeID), StartDate: start, EndDate: end})
+	if err != nil {
+		return fmt.Errorf("failed to check academic year dates: %w", err)
+	}
+	if n > 0 {
+		return newUserError(ErrInvalidMove, "These dates overlap another academic year. Years follow one another without overlapping.")
+	}
+	return nil
+}
+
+// checkYearStarted refuses an academic year that has not started yet (by its dates).
 func checkYearStarted(ctx context.Context, queries *dbsqlc.Queries, yearID int64) error {
 	year, err := queries.GetAcademicYearByID(ctx, int32(yearID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -27,7 +57,7 @@ func checkYearStarted(ctx context.Context, queries *dbsqlc.Queries, yearID int64
 	if err != nil {
 		return fmt.Errorf("failed to look up academic year %d: %w", yearID, err)
 	}
-	if year.Status.String == academicYearUpcoming {
+	if TodayInMalawi().Before(year.StartDate) {
 		return newUserError(ErrYearNotOpen, "The %d academic year has not started yet. Record this in the active year.", year.Year)
 	}
 	return nil

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"nsms/common"
 	"nsms/database/dbsqlc"
@@ -117,6 +118,7 @@ func FindSimilarLearners(ctx context.Context, queries *dbsqlc.Queries, check *sc
 			SchoolName:    row.SchoolName,
 			FormLevel:     int(row.FormLevel.Int32),
 			HasNationalID: row.NationalID.Valid && row.NationalID.String != "",
+			Status:        row.Status,
 			Reason:        "Same name, " + strings.Join(reasons, " and "),
 		})
 	}
@@ -136,4 +138,12 @@ func lastDigits(phone string, n int) string {
 		digits = digits[len(digits)-n:]
 	}
 	return string(digits)
+}
+
+// formatDate gives a DATE as YYYY-MM-DD, or "" when it is not set.
+func formatDate(t sql.NullTime) string {
+	if !t.Valid {
+		return ""
+	}
+	return t.Time.Format(time.DateOnly)
 }

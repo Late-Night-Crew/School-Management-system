@@ -5,7 +5,12 @@ const base = (schoolId) => `/school/${schoolId}`;
 
 export const getSchoolDashboard = (schoolId) => client.get(`${base(schoolId)}/dashboard`).then(data);
 
-export const listSchoolStudents = (schoolId) => client.get(`${base(schoolId)}/students`).then(list);
+// One page of the school's learners; filters and result as for students.listStudents
+export const listSchoolStudents = (schoolId, filters) =>
+  client.get(`${base(schoolId)}/students`, { params: params(filters) }).then(data);
+// Every learner matching the filters (e.g. { status: "Active", form_level: 2 }), as an array
+export const listAllSchoolStudents = (schoolId, filters) =>
+  listSchoolStudents(schoolId, { ...filters, page_size: 5000 }).then((page) => page.students);
 export const getSchoolStudent = (schoolId, id) => client.get(`${base(schoolId)}/students/${id}`).then(data);
 export const createSchoolStudent = (schoolId, student) =>
   client.post(`${base(schoolId)}/students`, student).then(data);
@@ -50,3 +55,7 @@ export const saveSchoolMarks = (schoolId, batch) => client.put(`${base(schoolId)
 // Resolves to [{ id, name, student_number, school_name, form_level, has_national_id, reason }]
 export const findSimilarSchoolStudents = (schoolId, check) =>
   client.get(`${base(schoolId)}/students/duplicates`, { params: params(check) }).then(list);
+
+// A learner who has left: { status: "Withdrawn" | "DroppedOut", left_on, reason }
+export const markSchoolStudentLeft = (schoolId, id, leave) => client.post(`${base(schoolId)}/students/${id}/leave`, leave);
+export const reinstateSchoolStudent = (schoolId, id) => client.post(`${base(schoolId)}/students/${id}/reinstate`);

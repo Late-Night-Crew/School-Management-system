@@ -13,9 +13,17 @@ import { formatDate } from "../../utils/format";
 import { Badge, Button, Card, Field, IconButton, Input, Notice, Page, Select, Table } from "../../components/ui";
 
 // Must match the academic_years.status check constraint in the database
-const STATUSES = ["Upcoming", "Active", "Completed"];
 const STATUS_TONES = { Upcoming: "blue", Active: "green", Completed: "slate" };
 const NOTICE_TONES = { success: "green", warning: "amber", danger: "red" };
+
+// A year's status follows its dates (the server sets it the same way)
+function statusFor(start, end) {
+  if (!start || !end) return "Set the dates";
+  const today = new Date().toLocaleDateString("en-CA");
+  if (today < start) return "Upcoming";
+  if (today > end) return "Completed";
+  return "Active";
+}
 
 const ManageAcademicYears = () => {
   const [academics, setAcademics] = useState([]);
@@ -187,12 +195,8 @@ const ManageAcademicYears = () => {
             <Field label="End Date" required>
               <Input type="date" name="end_date" value={formData.end_date} onChange={handleChange} required />
             </Field>
-            <Field label="Status" required>
-              <Select name="status" value={formData.status} onChange={handleChange} required>
-                {STATUSES.map((status) => (
-                  <option key={status} value={status}>{status}</option>
-                ))}
-              </Select>
+            <Field label="Status" hint="Follows the dates: Upcoming, Active while the year runs, then Completed">
+              <Input value={statusFor(formData.start_date, formData.end_date)} readOnly />
             </Field>
           </div>
           {!editingItem && (

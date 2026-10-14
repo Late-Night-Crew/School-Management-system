@@ -2,7 +2,9 @@ import { useCallback, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { listAcademicYears } from "../../api/academicYears";
-import { listSchoolMarks, listSchoolStudents } from "../../api/schoolPortal";
+import { listSchoolMarks, listAllSchoolStudents, markSchoolStudentLeft, reinstateSchoolStudent } from "../../api/schoolPortal";
+import { LeaveDialog, LearnerStatusBadge, ReinstateDialog } from "../../components/LearnerStatus";
+import ToastNote from "../../components/ToastNote";
 import { listSubjects } from "../../api/subjects";
 import useAsync from "../../hooks/useAsync";
 import usePagination from "../../hooks/usePagination";
@@ -14,7 +16,19 @@ import DetailRow from "../../components/DetailRow";
 import LearnerProgress from "../../components/LearnerProgress";
 import { schoolPromotionBase } from "../../api/promotion";
 import TablePagination from "../../components/TablePagination";
-import { Badge, Button, Card, Dialog, IconButton, Page, Person, SearchInput, Table } from "../../components/ui";
+import { Badge, Button, Card, Dialog, IconButton, Page, Person, SearchInput, Segmented, Table } from "../../components/ui";
+
+const SHOW = [
+  { value: "current", label: "Current" },
+  { value: "left", label: "Left" },
+  { value: "completed", label: "Completed" },
+  { value: "all", label: "All" },
+];
+const inView = (student, show) =>
+  show === "all" ||
+  (show === "current" && student.status === "Active") ||
+  (show === "left" && (student.status === "Withdrawn" || student.status === "DroppedOut")) ||
+  (show === "completed" && student.status === "Completed");
 
 
 // A student's details and their marks per subject, grouped by academic year and term.
@@ -105,24 +119,33 @@ export default function SchoolStudents() {
   const { schoolId } = useParams();
   const [searchTerm, setSearchTerm] = useState("");
   const [viewing, setViewing] = useState(null);
+  const [show, setShow] = useState("current");
+  const [leaving, setLeaving] = useState(null);
+  const [reinstating, setReinstating] = useState(null);
+  const [toast, setToast] = useState({ show: false, message: "", variant: "success" });
+  const notify = (message, variant = "success") => setToast({ show: true, message, variant });
 
   const data = useAsync(
-    useCallback(() => Promise.all([listSchoolStudents(schoolId), listSubjects(), listAcademicYears()]), [schoolId])
+    useCallback(() => Promise.all([listAllSchoolStudents(schoolId), listSubjects(), listAcademicYears()]), [schoolId])
   );
   const [students = [], subjects = [], years = []] = data.data || [];
 
   const term = searchTerm.trim().toLowerCase();
   const filteredStudents = students.filter(
-    (s) => fullName(s).toLowerCase().includes(term) || s.student_number?.toLowerCase().includes(term)
+    (s) => inView(s, show) && (fullName(s).toLowerCase().includes(term) || s.student_number?.toLowerCase().includes(term))
   );
+  const current = students.filter((s) => s.status === "Active").length;
   const { page, pageCount, pageItems, setPage } = usePagination(filteredStudents, 10);
 
   return (
     <Page
       icon="bi-people-fill"
       title="Students"
-      subtitle="Students currently enrolled at your school."
-      stats={[{ label: "Enrolled", value: data.loading ? null : students.length }]}
+      subtitle="Learners at your school: current ones, those who left, and those who completed Form 4."
+      stats={[
+        { label: "Current", value: data.loading ? null : current },
+        { label: "Left", value: data.loading ? null : students.filter((s) => inView(s, "left")).length },
+      ]}
       actions={
         <Button variant="ghost" icon="bi-person-plus" to={`/school/${schoolId}/register`}>
           Register Student
@@ -134,7 +157,12 @@ export default function SchoolStudents() {
         icon="bi-list-ul"
         title="All Students"
         subtitle={`${filteredStudents.length} of ${students.length} students`}
-        actions={<SearchInput value={searchTerm} onChange={setSearchTerm} placeholder="Search name or number…" />}
+        actions={
+          <>
+            <Segmented options={SHOW} value={show} onChange={setShow} />
+            <SearchInput value={searchTerm} onChange={setSearchTerm} placeholder="Search name or number…" />
+          </>
+        }
         flush
       >
         <DataState
@@ -142,7 +170,7 @@ export default function SchoolStudents() {
           error={data.error}
           onRetry={data.reload}
           empty={filteredStudents.length === 0}
-          emptyMessage={searchTerm ? "No students match your search." : "No students enrolled yet."}
+          emptyMessage={searchTerm ? "No students match your search." : show === "current" ? "No current learners." : "No learners here."}
         >
           <Table>
             <thead>
@@ -165,11 +193,17 @@ export default function SchoolStudents() {
                   <td>{formatDate(student.date_of_birth)}</td>
                   <td>{student.form_level ? <Badge tone="blue">Form {student.form_level}</Badge> : "-"}</td>
                   <td>
-                    <Badge tone={student.status?.toLowerCase() === "active" ? "green" : "slate"}>{student.status || "-"}</Badge>
+                    <LearnerStatusBadge student={student} />
                   </td>
                   <td className="end">
                     <IconButton kind="view" title="View details and marks" onClick={() => setViewing(student)} />
                     <IconButton kind="edit" title="Edit student" to={`/school/${schoolId}/register?edit=${student.id}`} />
+                    {student.status === "Active" && (
+                      <IconButton kind="delete" icon="bi-box-arrow-right" title={`${fullName(student)} has left`} tip="Learner has left" onClick={() => setLeaving(student)} />
+                    )}
+                    {(student.status === "Withdrawn" || student.status === "DroppedOut") && (
+                      <IconButton kind="save" icon="bi-arrow-counterclockwise" title={`Reinstate ${fullName(student)}`} tip="Reinstate" onClick={() => setReinstating(student)} />
+                    )}
                   </td>
                 </tr>
               ))}
@@ -178,6 +212,32 @@ export default function SchoolStudents() {
           <TablePagination page={page} pageCount={pageCount} onChange={setPage} />
         </DataState>
       </Card>
+
+      <ToastNote {...toast} onClose={() => setToast((t) => ({ ...t, show: false }))} />
+      <LeaveDialog
+        student={leaving}
+        onHide={() => setLeaving(null)}
+        markLeft={(id, leave) => markSchoolStudentLeft(schoolId, id, leave)}
+        onDone={(message) => {
+          setLeaving(null);
+          notify(message);
+          data.reload();
+        }}
+      />
+      <ReinstateDialog
+        student={reinstating}
+        onHide={() => setReinstating(null)}
+        reinstate={(id) => reinstateSchoolStudent(schoolId, id)}
+        onDone={(message) => {
+          setReinstating(null);
+          notify(message);
+          data.reload();
+        }}
+        onError={(message) => {
+          setReinstating(null);
+          notify(message, "danger");
+        }}
+      />
 
       <Dialog show={!!viewing} onHide={() => setViewing(null)} title={viewing && fullName(viewing)} icon="bi-person-vcard" size="lg">
         {viewing && <StudentDetails schoolId={schoolId} student={viewing} subjects={subjects} years={years} />}

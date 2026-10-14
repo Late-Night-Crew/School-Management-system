@@ -36,31 +36,6 @@ func GetSchoolDashboard(schoolAdminService services.SchoolAdminService, logger l
 	}
 }
 
-func GetStudentsForSchool(schoolAdminService services.SchoolAdminService, logger logging.Logger) fiber.Handler {
-	return func(ctx *fiber.Ctx) error {
-		pathSchoolID, err := common.ParseIDFromCtx(ctx, "school_id")
-		if err != nil || pathSchoolID < 1 {
-			return problemdetail.BadRequest(ctx, "Invalid school ID")
-		}
-
-		tokenSchoolID, err := common.GetSchoolIDFromCtx(ctx)
-		if err != nil {
-			return problemdetail.Unauthorized(ctx, "School admin access required")
-		}
-
-		if tokenSchoolID != pathSchoolID {
-			return problemdetail.Forbidden(ctx, "Forbidden school access")
-		}
-
-		students, err := schoolAdminService.GetStudentsBySchoolID(ctx.Context(), pathSchoolID)
-		if err != nil {
-			logger.Error("failed to get students for school", "error", err)
-			return problemdetail.ServerErrorProblem(ctx, "Failed to get students")
-		}
-		return ctx.Status(fiber.StatusOK).JSON(students)
-	}
-}
-
 func GetStudentByIDForSchool(schoolAdminService services.SchoolAdminService, logger logging.Logger) fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
 		pathSchoolID, err := common.ParseIDFromCtx(ctx, "school_id")

@@ -28,7 +28,7 @@ import {
     finalizeSchoolTransfer,
     listSchoolIncomingTransfers,
     listSchoolOutgoingTransfers,
-    listSchoolStudents,
+    listAllSchoolStudents,
     rejectSchoolTransfer,
 } from "../../api/schoolPortal";
 import usePagination from "../../hooks/usePagination";
@@ -84,7 +84,7 @@ export default function SchoolTransfers() {
 
     const loadStudents = useCallback(async () => {
         try {
-            setStudents(await listSchoolStudents(schoolId));
+            setStudents(await listAllSchoolStudents(schoolId, { status: "Active" }));
         } catch (error) {
             console.error(error);
             setToast({ show: true, message: "Failed to load students.", variant: "danger" });

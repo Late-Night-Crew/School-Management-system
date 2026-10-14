@@ -37,9 +37,21 @@ NSMS_ENVIRONMENT=PRODUCTION NSMS_JWT_SECRET=... ./nsms server
 Never run `nsms seed` on the live database: it loads demo schools and logins with a
 published password. In production it refuses to run.
 
-The super admin signs in with the temporary password and must choose their own. They
-then create the division officers' accounts; divisions create school accounts, and
-accepted school requests create the coordinators' accounts.
+The super admin (Learner Support Manager) signs in with the temporary password and must
+choose their own. They then create the division officers' accounts; divisions create
+school accounts, and accepted school requests create the coordinators' accounts.
+
+## MCDE accounts and the activity log
+
+MCDE can have several Learner Support Managers. Any of them adds another on the
+Accounts page (role "MCDE: Learner Support Manager"), or on the server with
+`./nsms create-admin`. They all have the same access. One cannot deactivate or reset
+their own account from the Accounts page, and the last active one cannot be
+deactivated.
+
+Every change is recorded with the name of the person who made it. MCDE sees the record
+under Activity Log, filtered by person, role, type of record, dates or a search, and
+can download it as CSV (up to 5,000 entries at a time).
 
 ## Upgrades
 
@@ -96,10 +108,9 @@ server, for example from cron instead of the built-in hourly check, or to try a 
   page. The request goes to the office above them (a school's division, or MCDE for
   division officers), which sees it at the top of the Accounts page, resets the password
   and passes on the temporary password by phone.
-- **The super admin**, or anyone who cannot be reached that way, is reset on the server:
+- **MCDE staff** reset each other's passwords on the Accounts page.
+- **The last MCDE account**, or anyone who cannot be reached that way, is reset on the server:
 
   ```sh
   ./nsms reset-password --email name@mcde.ac.mw   # prints a temporary password
   ```
-
-The system has a single super admin account.

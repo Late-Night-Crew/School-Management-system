@@ -17,6 +17,7 @@ type MarksFilter struct {
 	AcademicYearID int64
 	Term           int
 	StudentID      int64
+	FormLevel      int
 }
 
 // MarkEntry sets one mark; a null mark clears it.
@@ -36,4 +37,11 @@ type SaveMarksRequest struct {
 type SaveMarksResult struct {
 	Saved   int `json:"saved"`
 	Cleared int `json:"cleared"`
+}
+
+// YearMarks is what MCDE corrects in a finished year: the learners who were at the
+// school that year (form_level is their form in that year) and their marks for a term.
+type YearMarks struct {
+	Learners []Student     `json:"learners"`
+	Marks    []StudentMark `json:"marks"`
 }

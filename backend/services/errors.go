@@ -16,6 +16,7 @@ var (
 	ErrTransferWrongSchool    = errors.New("this school is not allowed to perform this action on the transfer")
 	ErrTransferInvalidState   = errors.New("transfer is not in a state that allows this action")
 	ErrTransferTargetMissing  = errors.New("the receiving school does not exist")
+	ErrStudentNotActive       = errors.New("only current learners can be transferred; this learner has left or finished school")
 )
 
 // ErrMarkNotAllowed means a mark was sent for a student who is not at the school

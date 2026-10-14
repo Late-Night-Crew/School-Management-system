@@ -346,6 +346,42 @@ func (q *Queries) CountActiveRegionalAdmins(ctx context.Context, arg CountActive
 	return count, err
 }
 
+const countAuditLogs = `-- name: CountAuditLogs :one
+SELECT COUNT(*)::int FROM audit_logs a
+WHERE ($1::int IS NULL OR a.actor_user_id = $1::int)
+    AND ($2::text IS NULL OR a.actor_role = $2::text)
+    AND ($3::text IS NULL OR a.entity_type = $3::text)
+    AND ($4::date IS NULL OR a.created_at >= $4::date)
+    AND ($5::date IS NULL OR a.created_at < $5::date + 1)
+    AND ($6::text IS NULL OR a.note ILIKE '%' || $6::text || '%'
+        OR a.action ILIKE '%' || $6::text || '%'
+        OR a.actor_name ILIKE '%' || $6::text || '%')
+`
+
+type CountAuditLogsParams struct {
+	ActorUserID sql.NullInt32
+	ActorRole   sql.NullString
+	EntityType  sql.NullString
+	FromDate    sql.NullTime
+	ToDate      sql.NullTime
+	Search      sql.NullString
+}
+
+// How many entries match ListAuditLogs' filters.
+func (q *Queries) CountAuditLogs(ctx context.Context, arg CountAuditLogsParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, countAuditLogs,
+		arg.ActorUserID,
+		arg.ActorRole,
+		arg.EntityType,
+		arg.FromDate,
+		arg.ToDate,
+		arg.Search,
+	)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countNoticeAudience = `-- name: CountNoticeAudience :one
 
 SELECT (
@@ -380,6 +416,38 @@ func (q *Queries) CountNoticeAudience(ctx context.Context, arg CountNoticeAudien
 	var count int32
 	err := row.Scan(&count)
 	return count, err
+}
+
+const countOtherActiveSuperAdmins = `-- name: CountOtherActiveSuperAdmins :one
+SELECT COUNT(*)::int FROM users
+WHERE role = 'SUPER_ADMIN' AND is_activated AND deleted_at IS NULL AND id <> $1::int
+`
+
+func (q *Queries) CountOtherActiveSuperAdmins(ctx context.Context, excludeID int32) (int32, error) {
+	row := q.db.QueryRowContext(ctx, countOtherActiveSuperAdmins, excludeID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countOverlappingAcademicYears = `-- name: CountOverlappingAcademicYears :one
+SELECT COUNT(*)::int FROM academic_years
+WHERE id <> $1::int
+    AND start_date <= $2::date AND end_date >= $3::date
+`
+
+type CountOverlappingAcademicYearsParams struct {
+	ExcludeID int32
+	EndDate   time.Time
+	StartDate time.Time
+}
+
+// Other years whose dates overlap these (years may not overlap: one is active at a time).
+func (q *Queries) CountOverlappingAcademicYears(ctx context.Context, arg CountOverlappingAcademicYearsParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, countOverlappingAcademicYears, arg.ExcludeID, arg.EndDate, arg.StartDate)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const countPendingTransfersForStudent = `-- name: CountPendingTransfersForStudent :one
@@ -453,6 +521,49 @@ SELECT COUNT(*)::int FROM schools WHERE LOWER(school_number) = LOWER($1::text)
 
 func (q *Queries) CountSchoolsWithNumber(ctx context.Context, schoolNumber string) (int32, error) {
 	row := q.db.QueryRowContext(ctx, countSchoolsWithNumber, schoolNumber)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countStudents = `-- name: CountStudents :one
+SELECT COUNT(*)::int FROM students s
+    JOIN schools sc ON sc.id = s.school_id
+    JOIN districts d ON d.id = sc.district_id
+WHERE ($1::int IS NULL OR d.region_id = $1::int)
+    AND ($2::int IS NULL OR sc.district_id = $2::int)
+    AND ($3::int IS NULL OR s.school_id = $3::int)
+    AND ($4::int IS NULL OR s.form_level = $4::int)
+    AND ($5::text IS NULL
+        OR ($5::text = 'Left' AND s.status IN ('Withdrawn', 'DroppedOut'))
+        OR s.status = $5::text)
+    AND ($6::text IS NULL
+        OR s.student_number ILIKE '%' || $6::text || '%'
+        OR (s.first_name || ' ' || COALESCE(s.middle_name || ' ', '') || s.last_name) ILIKE '%' || $6::text || '%'
+        OR (s.last_name || ' ' || s.first_name) ILIKE '%' || $6::text || '%'
+        OR UPPER(s.national_id) = UPPER($6::text)
+        OR UPPER(s.jce_number) = UPPER($6::text))
+`
+
+type CountStudentsParams struct {
+	RegionID   sql.NullInt32
+	DistrictID sql.NullInt32
+	SchoolID   sql.NullInt32
+	FormLevel  sql.NullInt32
+	Status     sql.NullString
+	Search     sql.NullString
+}
+
+// How many learners match SearchStudents' filters.
+func (q *Queries) CountStudents(ctx context.Context, arg CountStudentsParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, countStudents,
+		arg.RegionID,
+		arg.DistrictID,
+		arg.SchoolID,
+		arg.FormLevel,
+		arg.Status,
+		arg.Search,
+	)
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -593,7 +704,7 @@ WITH created AS (
     VALUES (
         $1::text, $1::text, $2::text, $3::text,
         $4::text, $5::int, $6::int, $7::int,
-        $8::text, $9::text, FALSE, TRUE, TRUE
+        $8::text, $9::text, $4::text = 'SUPER_ADMIN', TRUE, TRUE
     )
     RETURNING id
 ),
@@ -950,34 +1061,35 @@ func (q *Queries) CreatePasswordRequest(ctx context.Context, arg CreatePasswordR
 	return err
 }
 
-const createPromotion = `-- name: CreatePromotion :exec
+const createPromotions = `-- name: CreatePromotions :exec
 INSERT INTO promotions (student_id, school_id, academic_year_id, from_form, to_form, subjects_passed, outcome, automatic, decided_by)
-VALUES ($1::int, $2::int, $3::int, $4::int,
-    $5::int, $6::int, $7::text, $8::bool,
-    $9::int)
+SELECT unnest($1::int[]), $2::int, $3::int,
+    unnest($4::int[]), unnest($5::int[]), unnest($6::int[]),
+    unnest($7::text[]), $8::bool, $9::int
 `
 
-type CreatePromotionParams struct {
-	StudentID      int32
+type CreatePromotionsParams struct {
+	StudentIds     []int32
 	SchoolID       int32
 	AcademicYearID int32
-	FromForm       int32
-	ToForm         int32
-	SubjectsPassed int32
-	Outcome        string
+	FromForms      []int32
+	ToForms        []int32
+	SubjectsPassed []int32
+	Outcomes       []string
 	Automatic      bool
 	ActorUserID    int32
 }
 
-func (q *Queries) CreatePromotion(ctx context.Context, arg CreatePromotionParams) error {
-	_, err := q.db.ExecContext(ctx, createPromotion,
-		arg.StudentID,
+// Year-end results of many learners at once (arrays in the same order).
+func (q *Queries) CreatePromotions(ctx context.Context, arg CreatePromotionsParams) error {
+	_, err := q.db.ExecContext(ctx, createPromotions,
+		pq.Array(arg.StudentIds),
 		arg.SchoolID,
 		arg.AcademicYearID,
-		arg.FromForm,
-		arg.ToForm,
-		arg.SubjectsPassed,
-		arg.Outcome,
+		pq.Array(arg.FromForms),
+		pq.Array(arg.ToForms),
+		pq.Array(arg.SubjectsPassed),
+		pq.Array(arg.Outcomes),
 		arg.Automatic,
 		arg.ActorUserID,
 	)
@@ -1181,6 +1293,8 @@ VALUES
     disability_details,
     national_id,
     jce_number,
+    left_on,
+    leaving_reason,
     status,
     created_at,
     updated_at
@@ -1205,7 +1319,7 @@ type CreateStudentParams struct {
 	AcademicYearID       sql.NullInt32
 	Disability           sql.NullBool
 	DisabilityDetails    sql.NullString
-	Status               sql.NullString
+	Status               string
 	NationalID           sql.NullString
 	JceNumber            sql.NullString
 }
@@ -1232,7 +1346,9 @@ type CreateStudentRow struct {
 	DisabilityDetails    sql.NullString
 	NationalID           sql.NullString
 	JceNumber            sql.NullString
-	Status               sql.NullString
+	LeftOn               sql.NullTime
+	LeavingReason        sql.NullString
+	Status               string
 	CreatedAt            sql.NullTime
 	UpdatedAt            sql.NullTime
 }
@@ -1284,6 +1400,8 @@ func (q *Queries) CreateStudent(ctx context.Context, arg CreateStudentParams) (C
 		&i.DisabilityDetails,
 		&i.NationalID,
 		&i.JceNumber,
+		&i.LeftOn,
+		&i.LeavingReason,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -2273,7 +2391,8 @@ func (q *Queries) GetConversation(ctx context.Context, conversationID int32) (Ge
 
 const getDefaultAcademicYear = `-- name: GetDefaultAcademicYear :one
 SELECT id, year FROM academic_years
-ORDER BY (status = 'Active') DESC, year DESC
+ORDER BY (start_date <= $1::date) DESC,
+    CASE WHEN start_date <= $1::date THEN -year ELSE year END
 LIMIT 1
 `
 
@@ -2282,9 +2401,10 @@ type GetDefaultAcademicYearRow struct {
 	Year int32
 }
 
-// The year a school without a stage is in: the active one, else the latest.
-func (q *Queries) GetDefaultAcademicYear(ctx context.Context) (GetDefaultAcademicYearRow, error) {
-	row := q.db.QueryRowContext(ctx, getDefaultAcademicYear)
+// The year a school without a stage is in: the latest year that has started, else the
+// first one to come.
+func (q *Queries) GetDefaultAcademicYear(ctx context.Context, today time.Time) (GetDefaultAcademicYearRow, error) {
+	row := q.db.QueryRowContext(ctx, getDefaultAcademicYear, today)
 	var i GetDefaultAcademicYearRow
 	err := row.Scan(&i.ID, &i.Year)
 	return i, err
@@ -2362,6 +2482,33 @@ func (q *Queries) GetIncomingTransferCountBySchoolID(ctx context.Context, toScho
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const getLearnerState = `-- name: GetLearnerState :one
+SELECT status, school_id, left_on, leaving_reason,
+    EXISTS (SELECT 1 FROM transfers t WHERE t.student_id = students.id AND t.status IN ('Pending', 'Accepted'))::bool AS transfer_open
+FROM students WHERE id = $1::int
+`
+
+type GetLearnerStateRow struct {
+	Status        string
+	SchoolID      int32
+	LeftOn        sql.NullTime
+	LeavingReason sql.NullString
+	TransferOpen  bool
+}
+
+func (q *Queries) GetLearnerState(ctx context.Context, studentID int32) (GetLearnerStateRow, error) {
+	row := q.db.QueryRowContext(ctx, getLearnerState, studentID)
+	var i GetLearnerStateRow
+	err := row.Scan(
+		&i.Status,
+		&i.SchoolID,
+		&i.LeftOn,
+		&i.LeavingReason,
+		&i.TransferOpen,
+	)
+	return i, err
 }
 
 const getNextAcademicYear = `-- name: GetNextAcademicYear :one
@@ -2618,10 +2765,10 @@ WITH region_schools AS (
 SELECT
     (SELECT COUNT(*) FROM districts d WHERE d.region_id = $1) AS district_count,
     (SELECT COUNT(*) FROM region_schools) AS school_count,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools)) AS student_count,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools) AND s.gender = 'Male') AS male_count,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools) AND s.gender = 'Female') AS female_count,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools) AND s.disability) AS disability_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools) AND s.status = 'Active') AS student_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools) AND s.status = 'Active' AND s.gender = 'Male') AS male_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools) AND s.status = 'Active' AND s.gender = 'Female') AS female_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools) AND s.status = 'Active' AND s.disability) AS disability_count,
     (SELECT COUNT(*) FROM transfers t
         WHERE t.status = 'Pending'
         AND (t.from_school IN (SELECT id FROM region_schools) OR t.to_school IN (SELECT id FROM region_schools))
@@ -2659,7 +2806,7 @@ SELECT
     d.id,
     d.name,
     (SELECT COUNT(*) FROM schools sc WHERE sc.district_id = d.id) AS school_count,
-    (SELECT COUNT(*) FROM students s JOIN schools sc ON sc.id = s.school_id WHERE sc.district_id = d.id) AS student_count
+    (SELECT COUNT(*) FROM students s JOIN schools sc ON sc.id = s.school_id WHERE sc.district_id = d.id AND s.status = 'Active') AS student_count
 FROM districts d
 WHERE d.region_id = $1
 ORDER BY d.name
@@ -2768,10 +2915,10 @@ func (q *Queries) GetSchoolClosedAt(ctx context.Context, schoolID int32) (sql.Nu
 
 const getSchoolDashboardStats = `-- name: GetSchoolDashboardStats :one
 SELECT
-    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1) AS student_count,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1 AND s.gender = 'Male') AS male_count,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1 AND s.gender = 'Female') AS female_count,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1 AND s.disability) AS disability_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1 AND s.status = 'Active') AS student_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1 AND s.gender = 'Male' AND s.status = 'Active') AS male_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1 AND s.gender = 'Female' AND s.status = 'Active') AS female_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1 AND s.disability AND s.status = 'Active') AS disability_count,
     (SELECT COUNT(*) FROM transfers t WHERE t.to_school = $1) AS incoming_transfer_count,
     (SELECT COUNT(*) FROM transfers t WHERE t.from_school = $1) AS outgoing_transfer_count,
     (SELECT COUNT(*) FROM transfers t WHERE t.to_school = $1 AND t.status = 'Pending') AS pending_incoming_count,
@@ -2844,13 +2991,13 @@ SELECT
     d.name AS district_name,
     r.id AS region_id,
     r.name AS region_name,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id = sc.id) AS student_count,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id = sc.id AND s.gender = 'Male') AS male_count,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id = sc.id AND s.gender = 'Female') AS female_count,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id = sc.id AND s.disability) AS disability_count,
-    (SELECT COUNT(*) FROM transfers t WHERE t.to_school = sc.id) AS transfers_in,
-    (SELECT COUNT(*) FROM transfers t WHERE t.from_school = sc.id) AS transfers_out,
-    (SELECT COUNT(*) FROM transfers t WHERE t.to_school = sc.id AND t.status = 'Pending') AS pending_in,
+    COALESCE(l.learners, 0)::bigint AS student_count,
+    COALESCE(l.male, 0)::bigint AS male_count,
+    COALESCE(l.female, 0)::bigint AS female_count,
+    COALESCE(l.disability, 0)::bigint AS disability_count,
+    COALESCE(ti.moves, 0)::bigint AS transfers_in,
+    COALESCE(tout.moves, 0)::bigint AS transfers_out,
+    COALESCE(ti.pending, 0)::bigint AS pending_in,
     e.jce_pass_rate,
     e.msce_pass_rate,
     -- Calculated from Term 3 marks (the exam results); preferred over the recorded rates
@@ -2864,6 +3011,17 @@ FROM
         AND e.academic_year_id = $1::int
     LEFT JOIN term_reports tr ON tr.school_id = sc.id AND tr.term = 3
         AND tr.academic_year_id = $1::int
+    -- Counted once per table rather than once per school
+    LEFT JOIN (
+        SELECT school_id, COUNT(*) AS learners, COUNT(*) FILTER (WHERE gender = 'Male') AS male,
+            COUNT(*) FILTER (WHERE gender = 'Female') AS female, COUNT(*) FILTER (WHERE disability) AS disability
+        FROM students WHERE status = 'Active' GROUP BY school_id
+    ) l ON l.school_id = sc.id
+    LEFT JOIN (
+        SELECT to_school, COUNT(*) AS moves, COUNT(*) FILTER (WHERE status = 'Pending') AS pending
+        FROM transfers GROUP BY to_school
+    ) ti ON ti.to_school = sc.id
+    LEFT JOIN (SELECT from_school, COUNT(*) AS moves FROM transfers GROUP BY from_school) tout ON tout.from_school = sc.id
 WHERE
     ($2::int IS NULL OR r.id = $2::int)
     AND ($3::int IS NULL OR d.id = $3::int)
@@ -3110,6 +3268,8 @@ SELECT
     disability_details,
     national_id,
     jce_number,
+    left_on,
+    leaving_reason,
     status,
     created_at,
     updated_at
@@ -3141,7 +3301,9 @@ type GetStudentByIDRow struct {
 	DisabilityDetails    sql.NullString
 	NationalID           sql.NullString
 	JceNumber            sql.NullString
-	Status               sql.NullString
+	LeftOn               sql.NullTime
+	LeavingReason        sql.NullString
+	Status               string
 	CreatedAt            sql.NullTime
 	UpdatedAt            sql.NullTime
 }
@@ -3171,6 +3333,8 @@ func (q *Queries) GetStudentByID(ctx context.Context, id int32) (GetStudentByIDR
 		&i.DisabilityDetails,
 		&i.NationalID,
 		&i.JceNumber,
+		&i.LeftOn,
+		&i.LeavingReason,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -3201,6 +3365,8 @@ SELECT
     disability_details,
     national_id,
     jce_number,
+    left_on,
+    leaving_reason,
     status,
     created_at,
     updated_at
@@ -3238,7 +3404,9 @@ type GetStudentByIDAndSchoolIDRow struct {
 	DisabilityDetails    sql.NullString
 	NationalID           sql.NullString
 	JceNumber            sql.NullString
-	Status               sql.NullString
+	LeftOn               sql.NullTime
+	LeavingReason        sql.NullString
+	Status               string
 	CreatedAt            sql.NullTime
 	UpdatedAt            sql.NullTime
 }
@@ -3268,6 +3436,8 @@ func (q *Queries) GetStudentByIDAndSchoolID(ctx context.Context, arg GetStudentB
 		&i.DisabilityDetails,
 		&i.NationalID,
 		&i.JceNumber,
+		&i.LeftOn,
+		&i.LeavingReason,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -3286,116 +3456,6 @@ func (q *Queries) GetStudentCountBySchoolID(ctx context.Context, schoolID int32)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
-}
-
-const getStudentsBySchoolID = `-- name: GetStudentsBySchoolID :many
-SELECT
-    id,
-    student_number,
-    first_name,
-    middle_name,
-    last_name,
-    date_of_birth,
-    gender,
-    form_level,
-    guardian_name,
-    guardian_phone,
-    guardian_alt_phone,
-    guardian_email,
-    guardian_relationship,
-    previous_school,
-    previous_school_id,
-    school_id,
-    academic_year_id,
-    disability,
-    disability_details,
-    national_id,
-    jce_number,
-    status,
-    created_at,
-    updated_at
-FROM
-    students
-WHERE
-    school_id = $1
-ORDER BY
-    last_name ASC,
-    first_name ASC
-`
-
-type GetStudentsBySchoolIDRow struct {
-	ID                   int32
-	StudentNumber        string
-	FirstName            string
-	MiddleName           sql.NullString
-	LastName             string
-	DateOfBirth          sql.NullTime
-	Gender               sql.NullString
-	FormLevel            sql.NullInt32
-	GuardianName         sql.NullString
-	GuardianPhone        sql.NullString
-	GuardianAltPhone     sql.NullString
-	GuardianEmail        sql.NullString
-	GuardianRelationship sql.NullString
-	PreviousSchool       sql.NullString
-	PreviousSchoolID     sql.NullInt32
-	SchoolID             int32
-	AcademicYearID       sql.NullInt32
-	Disability           sql.NullBool
-	DisabilityDetails    sql.NullString
-	NationalID           sql.NullString
-	JceNumber            sql.NullString
-	Status               sql.NullString
-	CreatedAt            sql.NullTime
-	UpdatedAt            sql.NullTime
-}
-
-func (q *Queries) GetStudentsBySchoolID(ctx context.Context, schoolID int32) ([]GetStudentsBySchoolIDRow, error) {
-	rows, err := q.db.QueryContext(ctx, getStudentsBySchoolID, schoolID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []GetStudentsBySchoolIDRow
-	for rows.Next() {
-		var i GetStudentsBySchoolIDRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.StudentNumber,
-			&i.FirstName,
-			&i.MiddleName,
-			&i.LastName,
-			&i.DateOfBirth,
-			&i.Gender,
-			&i.FormLevel,
-			&i.GuardianName,
-			&i.GuardianPhone,
-			&i.GuardianAltPhone,
-			&i.GuardianEmail,
-			&i.GuardianRelationship,
-			&i.PreviousSchool,
-			&i.PreviousSchoolID,
-			&i.SchoolID,
-			&i.AcademicYearID,
-			&i.Disability,
-			&i.DisabilityDetails,
-			&i.NationalID,
-			&i.JceNumber,
-			&i.Status,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const getSubjectByID = `-- name: GetSubjectByID :one
@@ -3660,6 +3720,268 @@ func (q *Queries) GetUserPassword(ctx context.Context, userID int32) (string, er
 	return password, err
 }
 
+const insightAreas = `-- name: InsightAreas :many
+SELECT CASE WHEN $1::int IS NULL THEN rg.id ELSE d.id END::int AS id,
+    CASE WHEN $1::int IS NULL THEN rg.name ELSE d.name END::text AS name,
+    COUNT(sc.id) FILTER (WHERE sc.closed_at IS NULL)::int AS schools,
+    COALESCE(SUM(l.learners), 0)::int AS learners,
+    COALESCE(SUM(l.female), 0)::int AS female
+FROM regions rg
+    JOIN districts d ON d.region_id = rg.id
+    LEFT JOIN schools sc ON sc.district_id = d.id
+    LEFT JOIN (
+        SELECT school_id, COUNT(*) AS learners, COUNT(*) FILTER (WHERE gender = 'Female') AS female
+        FROM students WHERE status = 'Active' GROUP BY school_id
+    ) l ON l.school_id = sc.id
+WHERE $1::int IS NULL OR rg.id = $1::int
+GROUP BY 1, 2
+ORDER BY 2
+`
+
+type InsightAreasRow struct {
+	ID       int32
+	Name     string
+	Schools  int32
+	Learners int32
+	Female   int32
+}
+
+// Open schools and current learners per division (country) or per district (a division).
+func (q *Queries) InsightAreas(ctx context.Context, regionID sql.NullInt32) ([]InsightAreasRow, error) {
+	rows, err := q.db.QueryContext(ctx, insightAreas, regionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []InsightAreasRow
+	for rows.Next() {
+		var i InsightAreasRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Schools,
+			&i.Learners,
+			&i.Female,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const insightLearnerStatuses = `-- name: InsightLearnerStatuses :many
+SELECT s.status, COUNT(*)::int AS learners
+FROM students s
+    JOIN schools sc ON sc.id = s.school_id
+    JOIN districts d ON d.id = sc.district_id
+WHERE ($1::int IS NULL OR d.region_id = $1::int)
+    AND ($2::int IS NULL OR s.school_id = $2::int)
+GROUP BY 1
+`
+
+type InsightLearnerStatusesParams struct {
+	RegionID sql.NullInt32
+	SchoolID sql.NullInt32
+}
+
+type InsightLearnerStatusesRow struct {
+	Status   string
+	Learners int32
+}
+
+// Learners by status: current, withdrawn, dropped out, completed Form 4.
+func (q *Queries) InsightLearnerStatuses(ctx context.Context, arg InsightLearnerStatusesParams) ([]InsightLearnerStatusesRow, error) {
+	rows, err := q.db.QueryContext(ctx, insightLearnerStatuses, arg.RegionID, arg.SchoolID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []InsightLearnerStatusesRow
+	for rows.Next() {
+		var i InsightLearnerStatusesRow
+		if err := rows.Scan(&i.Status, &i.Learners); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const insightLearnersByForm = `-- name: InsightLearnersByForm :many
+
+SELECT COALESCE(s.form_level, 0)::int AS form_level, COALESCE(s.gender, '')::text AS gender,
+    COUNT(*)::int AS learners, COUNT(*) FILTER (WHERE s.disability)::int AS with_disability
+FROM students s
+    JOIN schools sc ON sc.id = s.school_id
+    JOIN districts d ON d.id = sc.district_id
+WHERE s.status = 'Active'
+    AND ($1::int IS NULL OR d.region_id = $1::int)
+    AND ($2::int IS NULL OR s.school_id = $2::int)
+GROUP BY 1, 2
+ORDER BY 1, 2
+`
+
+type InsightLearnersByFormParams struct {
+	RegionID sql.NullInt32
+	SchoolID sql.NullInt32
+}
+
+type InsightLearnersByFormRow struct {
+	FormLevel      int32
+	Gender         string
+	Learners       int32
+	WithDisability int32
+}
+
+// Dashboard charts. Every Insight query covers the whole country, one division
+// (region_id) or one school (school_id).
+// Current learners by form and gender.
+func (q *Queries) InsightLearnersByForm(ctx context.Context, arg InsightLearnersByFormParams) ([]InsightLearnersByFormRow, error) {
+	rows, err := q.db.QueryContext(ctx, insightLearnersByForm, arg.RegionID, arg.SchoolID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []InsightLearnersByFormRow
+	for rows.Next() {
+		var i InsightLearnersByFormRow
+		if err := rows.Scan(
+			&i.FormLevel,
+			&i.Gender,
+			&i.Learners,
+			&i.WithDisability,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const insightSchoolTerms = `-- name: InsightSchoolTerms :many
+SELECT COALESCE(st.term, 0)::int AS term, COUNT(*)::int AS schools
+FROM schools sc
+    JOIN districts d ON d.id = sc.district_id
+    LEFT JOIN school_stages st ON st.school_id = sc.id
+WHERE sc.closed_at IS NULL
+    AND ($1::int IS NULL OR d.region_id = $1::int)
+GROUP BY 1
+ORDER BY 1
+`
+
+type InsightSchoolTermsRow struct {
+	Term    int32
+	Schools int32
+}
+
+// Open schools by the term they are in (0: not started in the system yet).
+func (q *Queries) InsightSchoolTerms(ctx context.Context, regionID sql.NullInt32) ([]InsightSchoolTermsRow, error) {
+	rows, err := q.db.QueryContext(ctx, insightSchoolTerms, regionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []InsightSchoolTermsRow
+	for rows.Next() {
+		var i InsightSchoolTermsRow
+		if err := rows.Scan(&i.Term, &i.Schools); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const insightTermReports = `-- name: InsightTermReports :many
+SELECT tr.school_id, tr.academic_year_id, ay.year, tr.term, tr.learners_assessed, tr.details,
+    CASE WHEN $1::int IS NULL THEN rg.id ELSE d.id END::int AS area_id,
+    CASE WHEN $1::int IS NULL THEN rg.name ELSE d.name END::text AS area_name
+FROM term_reports tr
+    JOIN academic_years ay ON ay.id = tr.academic_year_id
+    JOIN schools sc ON sc.id = tr.school_id
+    JOIN districts d ON d.id = sc.district_id
+    JOIN regions rg ON rg.id = d.region_id
+WHERE ay.year >= $2::int
+    AND ($1::int IS NULL OR d.region_id = $1::int)
+    AND ($3::int IS NULL OR tr.school_id = $3::int)
+ORDER BY ay.year, tr.term, tr.school_id
+`
+
+type InsightTermReportsParams struct {
+	RegionID sql.NullInt32
+	MinYear  int32
+	SchoolID sql.NullInt32
+}
+
+type InsightTermReportsRow struct {
+	SchoolID         int32
+	AcademicYearID   int32
+	Year             int32
+	Term             int32
+	LearnersAssessed int32
+	Details          json.RawMessage
+	AreaID           int32
+	AreaName         string
+}
+
+// Saved end-of-term reports from min_year on, oldest first, with each school's area.
+func (q *Queries) InsightTermReports(ctx context.Context, arg InsightTermReportsParams) ([]InsightTermReportsRow, error) {
+	rows, err := q.db.QueryContext(ctx, insightTermReports, arg.RegionID, arg.MinYear, arg.SchoolID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []InsightTermReportsRow
+	for rows.Next() {
+		var i InsightTermReportsRow
+		if err := rows.Scan(
+			&i.SchoolID,
+			&i.AcademicYearID,
+			&i.Year,
+			&i.Term,
+			&i.LearnersAssessed,
+			&i.Details,
+			&i.AreaID,
+			&i.AreaName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAcademicYears = `-- name: ListAcademicYears :many
 SELECT
     id,
@@ -3732,7 +4054,6 @@ FROM
     LEFT JOIN regions rg ON rg.id = COALESCE(sd.region_id, u.region_id)
 WHERE
     u.deleted_at IS NULL
-    AND u.role <> 'SUPER_ADMIN'
     AND ($1::text IS NULL OR u.role = $1::text)
     AND ($2::int IS NULL OR COALESCE(sd.region_id, u.region_id) = $2::int)
 ORDER BY rg.name, u.role, sc.name, u.name
@@ -3790,6 +4111,151 @@ func (q *Queries) ListAccounts(ctx context.Context, arg ListAccountsParams) ([]L
 			&i.MustChangePassword,
 			&i.LastLoginAt,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditActors = `-- name: ListAuditActors :many
+SELECT a.actor_user_id::int AS id, MAX(a.actor_name)::text AS name, MAX(a.actor_role)::text AS role, COUNT(*)::int AS entries
+FROM audit_logs a
+WHERE a.actor_user_id IS NOT NULL
+GROUP BY a.actor_user_id
+ORDER BY CASE MAX(a.actor_role) WHEN 'SUPER_ADMIN' THEN 0 WHEN 'REGIONAL_ADMIN' THEN 1 ELSE 2 END, MAX(a.actor_name)
+`
+
+type ListAuditActorsRow struct {
+	ID      int32
+	Name    string
+	Role    string
+	Entries int32
+}
+
+// Everyone who appears in the log, for the "who" filter.
+func (q *Queries) ListAuditActors(ctx context.Context) ([]ListAuditActorsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAuditActors)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAuditActorsRow
+	for rows.Next() {
+		var i ListAuditActorsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Role,
+			&i.Entries,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditLogs = `-- name: ListAuditLogs :many
+
+SELECT a.id, a.entity_type, COALESCE(a.entity_id, 0)::int AS entity_id, a.action,
+    COALESCE(a.actor_user_id, 0)::int AS actor_user_id, COALESCE(a.actor_name, '')::text AS actor_name,
+    COALESCE(a.actor_role, '')::text AS actor_role, COALESCE(a.note, '')::text AS note, a.created_at,
+    COALESCE(CASE a.entity_type
+        WHEN 'school' THEN (SELECT name FROM schools WHERE id = a.entity_id)
+        WHEN 'user' THEN (SELECT name || ' (' || email || ')' FROM users WHERE id = a.entity_id)
+        WHEN 'student' THEN (SELECT first_name || ' ' || last_name || ' (' || student_number || ')' FROM students WHERE id = a.entity_id)
+        WHEN 'region' THEN (SELECT name || ' division' FROM regions WHERE id = a.entity_id)
+        WHEN 'district' THEN (SELECT name || ' district' FROM districts WHERE id = a.entity_id)
+        WHEN 'academic_year' THEN (SELECT year::text FROM academic_years WHERE id = a.entity_id)
+        WHEN 'transfer' THEN (SELECT st.first_name || ' ' || st.last_name || ' (transfer)' FROM transfers t JOIN students st ON st.id = t.student_id WHERE t.id = a.entity_id)
+        WHEN 'school_request' THEN (SELECT school_name || ' (request)' FROM school_requests WHERE id = a.entity_id)
+        WHEN 'notice' THEN (SELECT title FROM notices WHERE id = a.entity_id)
+    END, '')::text AS entity_label
+FROM audit_logs a
+WHERE ($1::int IS NULL OR a.actor_user_id = $1::int)
+    AND ($2::text IS NULL OR a.actor_role = $2::text)
+    AND ($3::text IS NULL OR a.entity_type = $3::text)
+    AND ($4::date IS NULL OR a.created_at >= $4::date)
+    AND ($5::date IS NULL OR a.created_at < $5::date + 1)
+    AND ($6::text IS NULL OR a.note ILIKE '%' || $6::text || '%'
+        OR a.action ILIKE '%' || $6::text || '%'
+        OR a.actor_name ILIKE '%' || $6::text || '%')
+ORDER BY a.created_at DESC, a.id DESC
+LIMIT $8::int OFFSET $7::int
+`
+
+type ListAuditLogsParams struct {
+	ActorUserID sql.NullInt32
+	ActorRole   sql.NullString
+	EntityType  sql.NullString
+	FromDate    sql.NullTime
+	ToDate      sql.NullTime
+	Search      sql.NullString
+	PageOffset  int32
+	PageSize    int32
+}
+
+type ListAuditLogsRow struct {
+	ID          int32
+	EntityType  string
+	EntityID    int32
+	Action      string
+	ActorUserID int32
+	ActorName   string
+	ActorRole   string
+	Note        string
+	CreatedAt   time.Time
+	EntityLabel string
+}
+
+// ============================================================================
+// Activity log: the audit_logs written throughout the app, for MCDE to search.
+// ============================================================================
+// One page of the log, newest first, with what each entry is about as a readable label.
+// Counted separately (CountAuditLogs) so the page is read straight from the index.
+func (q *Queries) ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]ListAuditLogsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAuditLogs,
+		arg.ActorUserID,
+		arg.ActorRole,
+		arg.EntityType,
+		arg.FromDate,
+		arg.ToDate,
+		arg.Search,
+		arg.PageOffset,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAuditLogsRow
+	for rows.Next() {
+		var i ListAuditLogsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.EntityType,
+			&i.EntityID,
+			&i.Action,
+			&i.ActorUserID,
+			&i.ActorName,
+			&i.ActorRole,
+			&i.Note,
+			&i.CreatedAt,
+			&i.EntityLabel,
 		); err != nil {
 			return nil, err
 		}
@@ -4543,6 +5009,7 @@ WHERE
     AND ($2::int IS NULL OR m.academic_year_id = $2::int)
     AND ($3::int IS NULL OR m.term = $3::int)
     AND ($4::int IS NULL OR m.student_id = $4::int)
+    AND ($5::int IS NULL OR s.form_level = $5::int)
 ORDER BY m.student_id, m.subject_id, m.academic_year_id, m.term
 `
 
@@ -4551,6 +5018,7 @@ type ListMarksForSchoolParams struct {
 	AcademicYearID sql.NullInt32
 	Term           sql.NullInt32
 	StudentID      sql.NullInt32
+	FormLevel      sql.NullInt32
 }
 
 type ListMarksForSchoolRow struct {
@@ -4564,13 +5032,15 @@ type ListMarksForSchoolRow struct {
 	UpdatedAt      sql.NullTime
 }
 
-// Marks of the school's current students. Year, term and student filters are optional.
+// Marks of the school's current students. Year, term, student and form (the learner's
+// current form) filters are optional.
 func (q *Queries) ListMarksForSchool(ctx context.Context, arg ListMarksForSchoolParams) ([]ListMarksForSchoolRow, error) {
 	rows, err := q.db.QueryContext(ctx, listMarksForSchool,
 		arg.SchoolID,
 		arg.AcademicYearID,
 		arg.Term,
 		arg.StudentID,
+		arg.FormLevel,
 	)
 	if err != nil {
 		return nil, err
@@ -4873,7 +5343,7 @@ func (q *Queries) ListPasswordRequests(ctx context.Context, handlerRegionID sql.
 
 const listPossibleDuplicateStudents = `-- name: ListPossibleDuplicateStudents :many
 SELECT s.id, s.first_name, s.last_name, s.student_number, s.date_of_birth, s.guardian_phone,
-    s.form_level, s.national_id, COALESCE(sc.name, '')::text AS school_name
+    s.form_level, s.national_id, s.status, COALESCE(sc.name, '')::text AS school_name
 FROM students s LEFT JOIN schools sc ON sc.id = s.school_id
 WHERE LOWER(s.last_name) = LOWER($1::text)
     AND LOWER(s.first_name) = LOWER($2::text)
@@ -4903,6 +5373,7 @@ type ListPossibleDuplicateStudentsRow struct {
 	GuardianPhone sql.NullString
 	FormLevel     sql.NullInt32
 	NationalID    sql.NullString
+	Status        string
 	SchoolName    string
 }
 
@@ -4933,6 +5404,7 @@ func (q *Queries) ListPossibleDuplicateStudents(ctx context.Context, arg ListPos
 			&i.GuardianPhone,
 			&i.FormLevel,
 			&i.NationalID,
+			&i.Status,
 			&i.SchoolName,
 		); err != nil {
 			return nil, err
@@ -5281,7 +5753,7 @@ func (q *Queries) ListSchoolRequests(ctx context.Context, arg ListSchoolRequests
 const listSchoolStages = `-- name: ListSchoolStages :many
 SELECT sc.id AS school_id, sc.name AS school_name, sc.school_number, d.name AS district_name,
     rg.name AS region_name, st.academic_year_id, st.term,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id = sc.id AND COALESCE(s.status, 'Active') <> 'Completed')::int AS learners
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = sc.id AND s.status = 'Active')::int AS learners
 FROM schools sc
     JOIN districts d ON d.id = sc.district_id
     JOIN regions rg ON rg.id = d.region_id
@@ -5593,44 +6065,6 @@ func (q *Queries) ListSentNotices(ctx context.Context, arg ListSentNoticesParams
 	return items, nil
 }
 
-const listStudentSubjectIDsByStudentID = `-- name: ListStudentSubjectIDsByStudentID :many
-SELECT
-    student_id,
-    subject_id
-FROM
-    student_subjects
-WHERE
-    student_id = $1
-`
-
-type ListStudentSubjectIDsByStudentIDRow struct {
-	StudentID int32
-	SubjectID int32
-}
-
-func (q *Queries) ListStudentSubjectIDsByStudentID(ctx context.Context, studentID int32) ([]ListStudentSubjectIDsByStudentIDRow, error) {
-	rows, err := q.db.QueryContext(ctx, listStudentSubjectIDsByStudentID, studentID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListStudentSubjectIDsByStudentIDRow
-	for rows.Next() {
-		var i ListStudentSubjectIDsByStudentIDRow
-		if err := rows.Scan(&i.StudentID, &i.SubjectID); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listStudentTermSummaries = `-- name: ListStudentTermSummaries :many
 SELECT m.academic_year_id, ay.year, m.term, COUNT(*)::int AS subjects_marked,
     AVG(m.mark)::float8 AS average_mark,
@@ -5691,199 +6125,6 @@ func (q *Queries) ListStudentTermSummaries(ctx context.Context, arg ListStudentT
 	return items, nil
 }
 
-const listStudents = `-- name: ListStudents :many
-SELECT
-    id,
-    student_number,
-    first_name,
-    middle_name,
-    last_name,
-    date_of_birth,
-    gender,
-    form_level,
-    guardian_name,
-    guardian_phone,
-    guardian_alt_phone,
-    guardian_email,
-    guardian_relationship,
-    previous_school,
-    previous_school_id,
-    school_id,
-    academic_year_id,
-    disability,
-    disability_details,
-    national_id,
-    jce_number,
-    status,
-    created_at,
-    updated_at
-FROM
-    students
-ORDER BY
-    id DESC
-LIMIT
-    $1 OFFSET $2
-`
-
-type ListStudentsParams struct {
-	Limit  int32
-	Offset int32
-}
-
-type ListStudentsRow struct {
-	ID                   int32
-	StudentNumber        string
-	FirstName            string
-	MiddleName           sql.NullString
-	LastName             string
-	DateOfBirth          sql.NullTime
-	Gender               sql.NullString
-	FormLevel            sql.NullInt32
-	GuardianName         sql.NullString
-	GuardianPhone        sql.NullString
-	GuardianAltPhone     sql.NullString
-	GuardianEmail        sql.NullString
-	GuardianRelationship sql.NullString
-	PreviousSchool       sql.NullString
-	PreviousSchoolID     sql.NullInt32
-	SchoolID             int32
-	AcademicYearID       sql.NullInt32
-	Disability           sql.NullBool
-	DisabilityDetails    sql.NullString
-	NationalID           sql.NullString
-	JceNumber            sql.NullString
-	Status               sql.NullString
-	CreatedAt            sql.NullTime
-	UpdatedAt            sql.NullTime
-}
-
-func (q *Queries) ListStudents(ctx context.Context, arg ListStudentsParams) ([]ListStudentsRow, error) {
-	rows, err := q.db.QueryContext(ctx, listStudents, arg.Limit, arg.Offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListStudentsRow
-	for rows.Next() {
-		var i ListStudentsRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.StudentNumber,
-			&i.FirstName,
-			&i.MiddleName,
-			&i.LastName,
-			&i.DateOfBirth,
-			&i.Gender,
-			&i.FormLevel,
-			&i.GuardianName,
-			&i.GuardianPhone,
-			&i.GuardianAltPhone,
-			&i.GuardianEmail,
-			&i.GuardianRelationship,
-			&i.PreviousSchool,
-			&i.PreviousSchoolID,
-			&i.SchoolID,
-			&i.AcademicYearID,
-			&i.Disability,
-			&i.DisabilityDetails,
-			&i.NationalID,
-			&i.JceNumber,
-			&i.Status,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listStudentsForRegion = `-- name: ListStudentsForRegion :many
-SELECT
-    s.id,
-    s.student_number,
-    s.first_name,
-    s.last_name,
-    s.gender,
-    s.form_level,
-    s.status,
-    sc.id AS school_id,
-    sc.name AS school_name,
-    d.id AS district_id,
-    d.name AS district_name
-FROM students s
-JOIN schools sc ON sc.id = s.school_id
-JOIN districts d ON d.id = sc.district_id
-WHERE
-    d.region_id = $1
-    AND ($2::int IS NULL OR d.id = $2::int)
-    AND ($3::int IS NULL OR sc.id = $3::int)
-ORDER BY d.name, sc.name, s.last_name, s.first_name
-`
-
-type ListStudentsForRegionParams struct {
-	RegionID   int32
-	DistrictID sql.NullInt32
-	SchoolID   sql.NullInt32
-}
-
-type ListStudentsForRegionRow struct {
-	ID            int32
-	StudentNumber string
-	FirstName     string
-	LastName      string
-	Gender        sql.NullString
-	FormLevel     sql.NullInt32
-	Status        sql.NullString
-	SchoolID      int32
-	SchoolName    string
-	DistrictID    int32
-	DistrictName  string
-}
-
-// Students enrolled at schools in a region; district and school filters are optional.
-func (q *Queries) ListStudentsForRegion(ctx context.Context, arg ListStudentsForRegionParams) ([]ListStudentsForRegionRow, error) {
-	rows, err := q.db.QueryContext(ctx, listStudentsForRegion, arg.RegionID, arg.DistrictID, arg.SchoolID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListStudentsForRegionRow
-	for rows.Next() {
-		var i ListStudentsForRegionRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.StudentNumber,
-			&i.FirstName,
-			&i.LastName,
-			&i.Gender,
-			&i.FormLevel,
-			&i.Status,
-			&i.SchoolID,
-			&i.SchoolName,
-			&i.DistrictID,
-			&i.DistrictName,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listSubjectEnrolmentsForSchool = `-- name: ListSubjectEnrolmentsForSchool :many
 SELECT ss.student_id, ss.subject_id
 FROM student_subjects ss
@@ -5912,6 +6153,41 @@ func (q *Queries) ListSubjectEnrolmentsForSchool(ctx context.Context, arg ListSu
 	var items []ListSubjectEnrolmentsForSchoolRow
 	for rows.Next() {
 		var i ListSubjectEnrolmentsForSchoolRow
+		if err := rows.Scan(&i.StudentID, &i.SubjectID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSubjectIDsForStudents = `-- name: ListSubjectIDsForStudents :many
+SELECT student_id, subject_id FROM student_subjects
+WHERE student_id = ANY($1::int[])
+ORDER BY student_id, subject_id
+`
+
+type ListSubjectIDsForStudentsRow struct {
+	StudentID int32
+	SubjectID int32
+}
+
+// Subject choices of several learners at once.
+func (q *Queries) ListSubjectIDsForStudents(ctx context.Context, studentIds []int32) ([]ListSubjectIDsForStudentsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listSubjectIDsForStudents, pq.Array(studentIds))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSubjectIDsForStudentsRow
+	for rows.Next() {
+		var i ListSubjectIDsForStudentsRow
 		if err := rows.Scan(&i.StudentID, &i.SubjectID); err != nil {
 			return nil, err
 		}
@@ -6051,12 +6327,59 @@ func (q *Queries) ListTermDatesForYear(ctx context.Context, academicYearID int32
 	return items, nil
 }
 
+const listTermMarkFingerprints = `-- name: ListTermMarkFingerprints :many
+SELECT m.academic_year_id, m.term,
+    encode(sha256(convert_to(string_agg(m.student_id || ':' || m.subject_id || ':' || m.mark || ';', ''
+        ORDER BY m.student_id, m.subject_id), 'UTF8')), 'hex')::text AS fingerprint
+FROM student_marks m
+WHERE m.school_id = $1::int
+    AND ($2::int IS NULL OR m.academic_year_id = $2::int)
+    AND ($3::int IS NULL OR m.term = $3::int)
+GROUP BY m.academic_year_id, m.term
+`
+
+type ListTermMarkFingerprintsParams struct {
+	SchoolID       int32
+	AcademicYearID sql.NullInt32
+	Term           sql.NullInt32
+}
+
+type ListTermMarkFingerprintsRow struct {
+	AcademicYearID int32
+	Term           int32
+	Fingerprint    string
+}
+
+// The fingerprint of each term's marks at a school, worked out in the database; the
+// same SHA-256 as computeTermReport, so it can be compared with saved reports.
+func (q *Queries) ListTermMarkFingerprints(ctx context.Context, arg ListTermMarkFingerprintsParams) ([]ListTermMarkFingerprintsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listTermMarkFingerprints, arg.SchoolID, arg.AcademicYearID, arg.Term)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTermMarkFingerprintsRow
+	for rows.Next() {
+		var i ListTermMarkFingerprintsRow
+		if err := rows.Scan(&i.AcademicYearID, &i.Term, &i.Fingerprint); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTermMarks = `-- name: ListTermMarks :many
 SELECT m.student_id, m.subject_id, sb.name AS subject_name, m.mark,
     COALESCE((SELECT p.from_form FROM promotions p WHERE p.student_id = m.student_id AND p.academic_year_id = m.academic_year_id),
-        s.form_level, 1)::int AS form_level
+        (SELECT s.form_level FROM students s WHERE s.id = m.student_id), 1)::int AS form_level
 FROM student_marks m
-    JOIN students s ON s.id = m.student_id
     JOIN subjects sb ON sb.id = m.subject_id
 WHERE m.school_id = $1::int AND m.academic_year_id = $2::int
     AND m.term = $3::int
@@ -6079,6 +6402,7 @@ type ListTermMarksRow struct {
 
 // Every mark a school recorded in one term, with each learner's form during that year
 // (from their year-end result if the year is finished, otherwise their current form).
+// (The form is looked up per mark by key; joining students hashed every learner nationally.)
 func (q *Queries) ListTermMarks(ctx context.Context, arg ListTermMarksParams) ([]ListTermMarksRow, error) {
 	rows, err := q.db.QueryContext(ctx, listTermMarks, arg.SchoolID, arg.AcademicYearID, arg.Term)
 	if err != nil {
@@ -6516,7 +6840,7 @@ SELECT s.id, s.first_name, s.last_name, s.student_number, COALESCE(s.form_level,
 FROM students s
     LEFT JOIN student_marks m ON m.student_id = s.id AND m.academic_year_id = $2::int AND m.term = 3
 WHERE s.school_id = $3::int
-    AND COALESCE(s.status, 'Active') <> 'Completed'
+    AND s.status = 'Active'
     AND NOT EXISTS (SELECT 1 FROM promotions p WHERE p.student_id = s.id AND p.academic_year_id = $2::int)
 GROUP BY s.id
 ORDER BY s.form_level, s.last_name, s.first_name
@@ -6562,6 +6886,138 @@ func (q *Queries) ListYearEndLearners(ctx context.Context, arg ListYearEndLearne
 			&i.SubjectsMarked,
 			&i.CompulsoryPassed,
 			&i.CompulsoryRequired,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listYearLearners = `-- name: ListYearLearners :many
+SELECT s.id, s.student_number, s.first_name, COALESCE(s.middle_name, '')::text AS middle_name, s.last_name,
+    COALESCE(s.gender, '')::text AS gender, s.status,
+    COALESCE(p.from_form, s.form_level, 1)::int AS year_form
+FROM students s
+    LEFT JOIN promotions p ON p.student_id = s.id AND p.academic_year_id = $1::int
+WHERE s.id IN (
+        SELECT pr.student_id FROM promotions pr
+        WHERE pr.school_id = $2::int AND pr.academic_year_id = $1::int
+        UNION
+        SELECT m.student_id FROM student_marks m
+        WHERE m.school_id = $2::int AND m.academic_year_id = $1::int)
+    AND ($3::int IS NULL OR COALESCE(p.from_form, s.form_level, 1) = $3::int)
+ORDER BY s.last_name, s.first_name, s.id
+`
+
+type ListYearLearnersParams struct {
+	AcademicYearID int32
+	SchoolID       int32
+	FormLevel      sql.NullInt32
+}
+
+type ListYearLearnersRow struct {
+	ID            int32
+	StudentNumber string
+	FirstName     string
+	MiddleName    string
+	LastName      string
+	Gender        string
+	Status        string
+	YearForm      int32
+}
+
+// Learners who were at a school in an academic year (a year-end result or any marks
+// there), with the form they were in that year. Used to correct a finished year, so it
+// includes learners who have since completed Form 4, left or moved school.
+func (q *Queries) ListYearLearners(ctx context.Context, arg ListYearLearnersParams) ([]ListYearLearnersRow, error) {
+	rows, err := q.db.QueryContext(ctx, listYearLearners, arg.AcademicYearID, arg.SchoolID, arg.FormLevel)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListYearLearnersRow
+	for rows.Next() {
+		var i ListYearLearnersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.StudentNumber,
+			&i.FirstName,
+			&i.MiddleName,
+			&i.LastName,
+			&i.Gender,
+			&i.Status,
+			&i.YearForm,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listYearMarksForSchool = `-- name: ListYearMarksForSchool :many
+SELECT m.id, m.student_id, m.subject_id, m.academic_year_id, m.term, m.mark, m.school_id, m.updated_at
+FROM student_marks m
+WHERE m.school_id = $1::int AND m.academic_year_id = $2::int
+    AND m.term = $3::int AND m.student_id = ANY($4::int[])
+ORDER BY m.student_id, m.subject_id
+`
+
+type ListYearMarksForSchoolParams struct {
+	SchoolID       int32
+	AcademicYearID int32
+	Term           int32
+	StudentIds     []int32
+}
+
+type ListYearMarksForSchoolRow struct {
+	ID             int32
+	StudentID      int32
+	SubjectID      int32
+	AcademicYearID int32
+	Term           int32
+	Mark           int32
+	SchoolID       int32
+	UpdatedAt      sql.NullTime
+}
+
+// The marks a school recorded for some learners in one year and term.
+func (q *Queries) ListYearMarksForSchool(ctx context.Context, arg ListYearMarksForSchoolParams) ([]ListYearMarksForSchoolRow, error) {
+	rows, err := q.db.QueryContext(ctx, listYearMarksForSchool,
+		arg.SchoolID,
+		arg.AcademicYearID,
+		arg.Term,
+		pq.Array(arg.StudentIds),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListYearMarksForSchoolRow
+	for rows.Next() {
+		var i ListYearMarksForSchoolRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.StudentID,
+			&i.SubjectID,
+			&i.AcademicYearID,
+			&i.Term,
+			&i.Mark,
+			&i.SchoolID,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -6639,6 +7095,23 @@ func (q *Queries) ListYearResults(ctx context.Context, arg ListYearResultsParams
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockSchoolStage = `-- name: LockSchoolStage :one
+SELECT academic_year_id, term FROM school_stages WHERE school_id = $1::int FOR UPDATE
+`
+
+type LockSchoolStageRow struct {
+	AcademicYearID int32
+	Term           int32
+}
+
+// A school's stage, locked until the transaction ends, so two moves cannot overlap.
+func (q *Queries) LockSchoolStage(ctx context.Context, schoolID int32) (LockSchoolStageRow, error) {
+	row := q.db.QueryRowContext(ctx, lockSchoolStage, schoolID)
+	var i LockSchoolStageRow
+	err := row.Scan(&i.AcademicYearID, &i.Term)
+	return i, err
 }
 
 const logTermDatesChange = `-- name: LogTermDatesChange :exec
@@ -6809,28 +7282,32 @@ func (q *Queries) MoveRegionDistricts(ctx context.Context, arg MoveRegionDistric
 	return column_1, err
 }
 
-const moveStudentAfterYearEnd = `-- name: MoveStudentAfterYearEnd :exec
-UPDATE students
-SET form_level = $1::int, status = $2::text,
-    academic_year_id = $3::int, updated_at = CURRENT_TIMESTAMP
-WHERE id = $4::int
+const moveStudentsAfterYearEnd = `-- name: MoveStudentsAfterYearEnd :exec
+UPDATE students s
+SET form_level = u.form_level, status = u.status, academic_year_id = $1::int,
+    updated_at = CURRENT_TIMESTAMP
+FROM (
+    SELECT unnest($2::int[]) AS student_id, unnest($3::int[]) AS form_level,
+        unnest($4::text[]) AS status
+) u
+WHERE s.id = u.student_id
 `
 
-type MoveStudentAfterYearEndParams struct {
-	FormLevel      int32
-	Status         string
+type MoveStudentsAfterYearEndParams struct {
 	AcademicYearID int32
-	StudentID      int32
+	StudentIds     []int32
+	FormLevels     []int32
+	Statuses       []string
 }
 
-// Completed learners keep their form and become 'Completed'; everyone else is Active
-// in the new academic year at their new form.
-func (q *Queries) MoveStudentAfterYearEnd(ctx context.Context, arg MoveStudentAfterYearEndParams) error {
-	_, err := q.db.ExecContext(ctx, moveStudentAfterYearEnd,
-		arg.FormLevel,
-		arg.Status,
+// Moves many learners into the new academic year at once: Completed learners keep
+// their form and become 'Completed'; everyone else is Active at their new form.
+func (q *Queries) MoveStudentsAfterYearEnd(ctx context.Context, arg MoveStudentsAfterYearEndParams) error {
+	_, err := q.db.ExecContext(ctx, moveStudentsAfterYearEnd,
 		arg.AcademicYearID,
-		arg.StudentID,
+		pq.Array(arg.StudentIds),
+		pq.Array(arg.FormLevels),
+		pq.Array(arg.Statuses),
 	)
 	return err
 }
@@ -6871,6 +7348,33 @@ UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = $1
 func (q *Queries) RecordLogin(ctx context.Context, userID int32) error {
 	_, err := q.db.ExecContext(ctx, recordLogin, userID)
 	return err
+}
+
+const reinstateLearner = `-- name: ReinstateLearner :one
+WITH changed AS (
+    UPDATE students
+    SET status = 'Active', left_on = NULL, leaving_reason = NULL, updated_at = CURRENT_TIMESTAMP
+    WHERE id = $2::int AND status IN ('Withdrawn', 'DroppedOut')
+        AND ($3::int IS NULL OR school_id = $3::int)
+    RETURNING id
+)
+INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+SELECT 'student', changed.id, 'Reinstated', u.id, u.name, u.role, u.school_id, 'Back at school'
+FROM changed LEFT JOIN users u ON u.id = $1::int
+RETURNING entity_id
+`
+
+type ReinstateLearnerParams struct {
+	ActorUserID int32
+	StudentID   int32
+	SchoolID    sql.NullInt32
+}
+
+func (q *Queries) ReinstateLearner(ctx context.Context, arg ReinstateLearnerParams) (sql.NullInt32, error) {
+	row := q.db.QueryRowContext(ctx, reinstateLearner, arg.ActorUserID, arg.StudentID, arg.SchoolID)
+	var entity_id sql.NullInt32
+	err := row.Scan(&entity_id)
+	return entity_id, err
 }
 
 const rejectTransfer = `-- name: RejectTransfer :one
@@ -7007,7 +7511,7 @@ const resetAccountPassword = `-- name: ResetAccountPassword :one
 WITH reset AS (
     UPDATE users
     SET password = $1::text, must_change_password = TRUE, updated_at = CURRENT_TIMESTAMP
-    WHERE users.id = $2 AND users.deleted_at IS NULL AND users.role <> 'SUPER_ADMIN'
+    WHERE users.id = $2 AND users.deleted_at IS NULL
     RETURNING users.id
 ),
 logged AS (
@@ -7091,11 +7595,151 @@ func (q *Queries) SaveTermReport(ctx context.Context, arg SaveTermReportParams) 
 	return err
 }
 
+const searchStudents = `-- name: SearchStudents :many
+SELECT s.id, s.student_number, s.first_name, COALESCE(s.middle_name, '')::text AS middle_name, s.last_name,
+    s.date_of_birth, COALESCE(s.gender, '')::text AS gender, COALESCE(s.form_level, 0)::int AS form_level,
+    COALESCE(s.guardian_name, '')::text AS guardian_name, COALESCE(s.guardian_phone, '')::text AS guardian_phone,
+    COALESCE(s.guardian_alt_phone, '')::text AS guardian_alt_phone, COALESCE(s.guardian_email, '')::text AS guardian_email,
+    COALESCE(s.guardian_relationship, '')::text AS guardian_relationship,
+    COALESCE(s.previous_school, '')::text AS previous_school, COALESCE(s.previous_school_id, 0)::int AS previous_school_id,
+    s.school_id, COALESCE(s.academic_year_id, 0)::int AS academic_year_id, COALESCE(s.disability, false)::bool AS disability,
+    COALESCE(s.disability_details, '')::text AS disability_details, COALESCE(s.national_id, '')::text AS national_id,
+    COALESCE(s.jce_number, '')::text AS jce_number, s.status, s.left_on, COALESCE(s.leaving_reason, '')::text AS leaving_reason,
+    sc.name AS school_name, sc.district_id, d.name AS district_name, d.region_id, rg.name AS region_name
+FROM students s
+    JOIN schools sc ON sc.id = s.school_id
+    JOIN districts d ON d.id = sc.district_id
+    JOIN regions rg ON rg.id = d.region_id
+WHERE ($1::int IS NULL OR d.region_id = $1::int)
+    AND ($2::int IS NULL OR sc.district_id = $2::int)
+    AND ($3::int IS NULL OR s.school_id = $3::int)
+    AND ($4::int IS NULL OR s.form_level = $4::int)
+    AND ($5::text IS NULL
+        OR ($5::text = 'Left' AND s.status IN ('Withdrawn', 'DroppedOut'))
+        OR s.status = $5::text)
+    AND ($6::text IS NULL
+        OR s.student_number ILIKE '%' || $6::text || '%'
+        OR (s.first_name || ' ' || COALESCE(s.middle_name || ' ', '') || s.last_name) ILIKE '%' || $6::text || '%'
+        OR (s.last_name || ' ' || s.first_name) ILIKE '%' || $6::text || '%'
+        OR UPPER(s.national_id) = UPPER($6::text)
+        OR UPPER(s.jce_number) = UPPER($6::text))
+ORDER BY s.last_name, s.first_name, s.id
+LIMIT $8::int OFFSET $7::int
+`
+
+type SearchStudentsParams struct {
+	RegionID   sql.NullInt32
+	DistrictID sql.NullInt32
+	SchoolID   sql.NullInt32
+	FormLevel  sql.NullInt32
+	Status     sql.NullString
+	Search     sql.NullString
+	PageOffset int32
+	PageSize   int32
+}
+
+type SearchStudentsRow struct {
+	ID                   int32
+	StudentNumber        string
+	FirstName            string
+	MiddleName           string
+	LastName             string
+	DateOfBirth          sql.NullTime
+	Gender               string
+	FormLevel            int32
+	GuardianName         string
+	GuardianPhone        string
+	GuardianAltPhone     string
+	GuardianEmail        string
+	GuardianRelationship string
+	PreviousSchool       string
+	PreviousSchoolID     int32
+	SchoolID             int32
+	AcademicYearID       int32
+	Disability           bool
+	DisabilityDetails    string
+	NationalID           string
+	JceNumber            string
+	Status               string
+	LeftOn               sql.NullTime
+	LeavingReason        string
+	SchoolName           string
+	DistrictID           int32
+	DistrictName         string
+	RegionID             int32
+	RegionName           string
+}
+
+// One page of learners for the learner lists (country, division, district or school),
+// with where each one is. Counted separately (CountStudents).
+// status: Active, Left (withdrawn or dropped out) or Completed; NULL for everyone.
+func (q *Queries) SearchStudents(ctx context.Context, arg SearchStudentsParams) ([]SearchStudentsRow, error) {
+	rows, err := q.db.QueryContext(ctx, searchStudents,
+		arg.RegionID,
+		arg.DistrictID,
+		arg.SchoolID,
+		arg.FormLevel,
+		arg.Status,
+		arg.Search,
+		arg.PageOffset,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchStudentsRow
+	for rows.Next() {
+		var i SearchStudentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.StudentNumber,
+			&i.FirstName,
+			&i.MiddleName,
+			&i.LastName,
+			&i.DateOfBirth,
+			&i.Gender,
+			&i.FormLevel,
+			&i.GuardianName,
+			&i.GuardianPhone,
+			&i.GuardianAltPhone,
+			&i.GuardianEmail,
+			&i.GuardianRelationship,
+			&i.PreviousSchool,
+			&i.PreviousSchoolID,
+			&i.SchoolID,
+			&i.AcademicYearID,
+			&i.Disability,
+			&i.DisabilityDetails,
+			&i.NationalID,
+			&i.JceNumber,
+			&i.Status,
+			&i.LeftOn,
+			&i.LeavingReason,
+			&i.SchoolName,
+			&i.DistrictID,
+			&i.DistrictName,
+			&i.RegionID,
+			&i.RegionName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setAccountActive = `-- name: SetAccountActive :one
 WITH changed AS (
     UPDATE users
     SET is_activated = $1::bool, updated_at = CURRENT_TIMESTAMP
-    WHERE users.id = $2 AND users.deleted_at IS NULL AND users.role <> 'SUPER_ADMIN'
+    WHERE users.id = $2 AND users.deleted_at IS NULL
     RETURNING users.id
 ),
 logged AS (
@@ -7124,6 +7768,46 @@ func (q *Queries) SetAccountActive(ctx context.Context, arg SetAccountActivePara
 	var id int32
 	err := row.Scan(&id)
 	return id, err
+}
+
+const setLearnerLeft = `-- name: SetLearnerLeft :one
+WITH changed AS (
+    UPDATE students
+    SET status = $1::text, left_on = $2::date,
+        leaving_reason = $3::text, updated_at = CURRENT_TIMESTAMP
+    WHERE id = $5::int AND status = 'Active'
+        AND ($6::int IS NULL OR school_id = $6::int)
+    RETURNING id
+)
+INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+SELECT 'student', changed.id, $1::text, u.id, u.name, u.role, u.school_id,
+    'Left on ' || $2::date || COALESCE(': ' || $3::text, '')
+FROM changed LEFT JOIN users u ON u.id = $4::int
+RETURNING entity_id
+`
+
+type SetLearnerLeftParams struct {
+	Status      string
+	LeftOn      time.Time
+	Reason      sql.NullString
+	ActorUserID int32
+	StudentID   int32
+	SchoolID    sql.NullInt32
+}
+
+// Marks an active learner as Withdrawn or DroppedOut (optionally only at one school).
+func (q *Queries) SetLearnerLeft(ctx context.Context, arg SetLearnerLeftParams) (sql.NullInt32, error) {
+	row := q.db.QueryRowContext(ctx, setLearnerLeft,
+		arg.Status,
+		arg.LeftOn,
+		arg.Reason,
+		arg.ActorUserID,
+		arg.StudentID,
+		arg.SchoolID,
+	)
+	var entity_id sql.NullInt32
+	err := row.Scan(&entity_id)
+	return entity_id, err
 }
 
 const setSchoolStage = `-- name: SetSchoolStage :exec
@@ -7187,6 +7871,27 @@ func (q *Queries) SubmitSchoolRequest(ctx context.Context, arg SubmitSchoolReque
 	var id int32
 	err := row.Scan(&id)
 	return id, err
+}
+
+const syncAcademicYearStatuses = `-- name: SyncAcademicYearStatuses :exec
+UPDATE academic_years
+SET status = CASE
+        WHEN $1::date < start_date THEN 'Upcoming'
+        WHEN $1::date > end_date THEN 'Completed'
+        ELSE 'Active'
+    END,
+    updated_at = CURRENT_TIMESTAMP
+WHERE status IS DISTINCT FROM CASE
+        WHEN $1::date < start_date THEN 'Upcoming'
+        WHEN $1::date > end_date THEN 'Completed'
+        ELSE 'Active'
+    END
+`
+
+// Status follows the dates: Upcoming before the start, Completed after the end, else Active.
+func (q *Queries) SyncAcademicYearStatuses(ctx context.Context, today time.Time) error {
+	_, err := q.db.ExecContext(ctx, syncAcademicYearStatuses, today)
+	return err
 }
 
 const syncSchoolAccountScopes = `-- name: SyncSchoolAccountScopes :exec
@@ -7328,7 +8033,7 @@ WITH updated AS (
         phone = $3::text,
         whatsapp = $4::text,
         updated_at = CURRENT_TIMESTAMP
-    WHERE users.id = $5 AND users.deleted_at IS NULL AND users.role <> 'SUPER_ADMIN'
+    WHERE users.id = $5 AND users.deleted_at IS NULL
     RETURNING users.id
 ),
 logged AS (
@@ -7760,6 +8465,8 @@ WHERE
     disability_details,
     national_id,
     jce_number,
+    left_on,
+    leaving_reason,
     status,
     created_at,
     updated_at
@@ -7785,7 +8492,7 @@ type UpdateStudentParams struct {
 	AcademicYearID       sql.NullInt32
 	Disability           sql.NullBool
 	DisabilityDetails    sql.NullString
-	Status               sql.NullString
+	Status               string
 	NationalID           sql.NullString
 	JceNumber            sql.NullString
 }
@@ -7812,7 +8519,9 @@ type UpdateStudentRow struct {
 	DisabilityDetails    sql.NullString
 	NationalID           sql.NullString
 	JceNumber            sql.NullString
-	Status               sql.NullString
+	LeftOn               sql.NullTime
+	LeavingReason        sql.NullString
+	Status               string
 	CreatedAt            sql.NullTime
 	UpdatedAt            sql.NullTime
 }
@@ -7865,6 +8574,8 @@ func (q *Queries) UpdateStudent(ctx context.Context, arg UpdateStudentParams) (U
 		&i.DisabilityDetails,
 		&i.NationalID,
 		&i.JceNumber,
+		&i.LeftOn,
+		&i.LeavingReason,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -7922,6 +8633,8 @@ RETURNING id,
     disability_details,
     national_id,
     jce_number,
+    left_on,
+    leaving_reason,
     status,
     created_at,
     updated_at
@@ -7947,7 +8660,7 @@ type UpdateStudentByIDAndSchoolIDParams struct {
 	AcademicYearID       sql.NullInt32
 	Disability           sql.NullBool
 	DisabilityDetails    sql.NullString
-	Status               sql.NullString
+	Status               string
 	SchoolID_2           int32
 	NationalID           sql.NullString
 	JceNumber            sql.NullString
@@ -7975,7 +8688,9 @@ type UpdateStudentByIDAndSchoolIDRow struct {
 	DisabilityDetails    sql.NullString
 	NationalID           sql.NullString
 	JceNumber            sql.NullString
-	Status               sql.NullString
+	LeftOn               sql.NullTime
+	LeavingReason        sql.NullString
+	Status               string
 	CreatedAt            sql.NullTime
 	UpdatedAt            sql.NullTime
 }
@@ -8029,6 +8744,8 @@ func (q *Queries) UpdateStudentByIDAndSchoolID(ctx context.Context, arg UpdateSt
 		&i.DisabilityDetails,
 		&i.NationalID,
 		&i.JceNumber,
+		&i.LeftOn,
+		&i.LeavingReason,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,

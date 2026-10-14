@@ -13,13 +13,15 @@ import (
 )
 
 type StudentService interface {
-	GetStudentList(ctx context.Context, req *schema.GetStudentListRequest) ([]*schema.Student, error)
 	GetStudentByID(ctx context.Context, studentID int64) (*schema.Student, error)
 	CreateStudent(ctx context.Context, req *schema.CreateStudentRequest) (*schema.Student, error)
 	UpdateStudent(ctx context.Context, req *schema.UpdateStudentRequest) (*schema.Student, error)
 	DeleteStudent(ctx context.Context, studentID int64) error
 	// FindSimilar lists existing learners who may be the one being registered.
 	FindSimilar(ctx context.Context, check *schema.DuplicateCheckRequest) ([]schema.SimilarLearner, error)
+	// MarkLeft marks a learner Withdrawn or DroppedOut; Reinstate brings them back.
+	MarkLeft(ctx context.Context, actorID, schoolID, studentID int64, req *schema.LeaveRequest) error
+	Reinstate(ctx context.Context, actorID, schoolID, studentID int64) error
 }
 
 type studentService struct {
@@ -34,110 +36,6 @@ func NewStudentService(queries *dbsqlc.Queries, logger logging.Logger) StudentSe
 	}
 }
 
-// maxStudentList caps the national student list (was 100, which silently hid students).
-const maxStudentList = 20000
-
-func (s *studentService) GetStudentList(ctx context.Context, req *schema.GetStudentListRequest) ([]*schema.Student, error) {
-	res := make([]*schema.Student, 0)
-	// The admin screen filters and pages in the browser, so it needs every student.
-	// TODO: add server-side paging and filtering before national-scale data.
-	dbStudents, err := s.queries.ListStudents(ctx, dbsqlc.ListStudentsParams{Limit: maxStudentList, Offset: 0})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list students: %w", err)
-	}
-
-	studentIDs := make([]int32, 0, len(dbStudents))
-	for _, student := range dbStudents {
-		studentIDs = append(studentIDs, int32(student.ID))
-	}
-
-	subjectIDsByStudent, err := s.loadStudentSubjectIDs(ctx, studentIDs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load student subjects: %w", err)
-	}
-
-	for _, dbStudent := range dbStudents {
-		dateOfBirth := ""
-		if dbStudent.DateOfBirth.Valid {
-			dateOfBirth = dbStudent.DateOfBirth.Time.Format("2006-01-02")
-		}
-
-		status := ""
-		if dbStudent.Status.Valid {
-			status = dbStudent.Status.String
-		}
-
-		gender := ""
-		if dbStudent.Gender.Valid {
-			gender = dbStudent.Gender.String
-		}
-
-		guardianName := ""
-		if dbStudent.GuardianName.Valid {
-			guardianName = dbStudent.GuardianName.String
-		}
-
-		guardianPhone := ""
-		if dbStudent.GuardianPhone.Valid {
-			guardianPhone = dbStudent.GuardianPhone.String
-		}
-
-		guardianAltPhone := ""
-		if dbStudent.GuardianAltPhone.Valid {
-			guardianAltPhone = dbStudent.GuardianAltPhone.String
-		}
-
-		guardianEmail := ""
-		if dbStudent.GuardianEmail.Valid {
-			guardianEmail = dbStudent.GuardianEmail.String
-		}
-
-		guardianRelationship := ""
-		if dbStudent.GuardianRelationship.Valid {
-			guardianRelationship = dbStudent.GuardianRelationship.String
-		}
-
-		previousSchool := ""
-		if dbStudent.PreviousSchool.Valid {
-			previousSchool = dbStudent.PreviousSchool.String
-		}
-
-		disabilityDetails := ""
-		if dbStudent.DisabilityDetails.Valid {
-			disabilityDetails = dbStudent.DisabilityDetails.String
-		}
-
-		subjectIDs := subjectIDsByStudent[int32(dbStudent.ID)]
-
-		res = append(res, &schema.Student{
-			ID:                   int64(dbStudent.ID),
-			StudentNumber:        dbStudent.StudentNumber,
-			FirstName:            dbStudent.FirstName,
-			MiddleName:           dbStudent.MiddleName.String,
-			LastName:             dbStudent.LastName,
-			FormLevel:            int(dbStudent.FormLevel.Int32),
-			SchoolID:             int64(dbStudent.SchoolID),
-			DateOfBirth:          dateOfBirth,
-			AcademicYearID:       int64(dbStudent.AcademicYearID.Int32),
-			Status:               status,
-			Gender:               gender,
-			GuardianName:         guardianName,
-			GuardianPhone:        guardianPhone,
-			GuardianAltPhone:     guardianAltPhone,
-			GuardianEmail:        guardianEmail,
-			GuardianRelationship: guardianRelationship,
-			PreviousSchool:       previousSchool,
-			PreviousSchoolID:     int64(dbStudent.PreviousSchoolID.Int32),
-			Disability:           dbStudent.Disability.Bool,
-			DisabilityDetails:    disabilityDetails,
-			NationalID:           dbStudent.NationalID.String,
-			JCENumber:            dbStudent.JceNumber.String,
-			SubjectIDs:           subjectIDs,
-		})
-	}
-	return res, nil
-}
-
 func (s *studentService) GetStudentByID(ctx context.Context, studentID int64) (*schema.Student, error) {
 	student, err := s.queries.GetStudentByID(ctx, int32(studentID))
 	if err != nil {
@@ -149,10 +47,7 @@ func (s *studentService) GetStudentByID(ctx context.Context, studentID int64) (*
 		dateOfBirth = student.DateOfBirth.Time.Format("2006-01-02")
 	}
 
-	status := ""
-	if student.Status.Valid {
-		status = student.Status.String
-	}
+	status := student.Status
 
 	gender := ""
 	if student.Gender.Valid {
@@ -222,6 +117,8 @@ func (s *studentService) GetStudentByID(ctx context.Context, studentID int64) (*
 		DisabilityDetails:    disabilityDetails,
 		NationalID:           student.NationalID.String,
 		JCENumber:            student.JceNumber.String,
+		LeftOn:               formatDate(student.LeftOn),
+		LeavingReason:        student.LeavingReason.String,
 		SubjectIDs:           subjectIDsByStudent[int32(student.ID)],
 	}, nil
 }
@@ -244,22 +141,7 @@ func (s *studentService) createStudentSubjectAssignments(ctx context.Context, st
 }
 
 func (s *studentService) loadStudentSubjectIDs(ctx context.Context, studentIDs []int32) (map[int32][]int64, error) {
-	subjectIDsByStudent := make(map[int32][]int64)
-	if len(studentIDs) == 0 {
-		return subjectIDsByStudent, nil
-	}
-
-	for _, id := range studentIDs {
-		dbRows, err := s.queries.ListStudentSubjectIDsByStudentID(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		for _, row := range dbRows {
-			subjectIDsByStudent[row.StudentID] = append(subjectIDsByStudent[row.StudentID], int64(row.SubjectID))
-		}
-	}
-
-	return subjectIDsByStudent, nil
+	return subjectIDsFor(ctx, s.queries, studentIDs)
 }
 
 func (s *studentService) CreateStudent(ctx context.Context, req *schema.CreateStudentRequest) (*schema.Student, error) {
@@ -300,7 +182,7 @@ func (s *studentService) CreateStudent(ctx context.Context, req *schema.CreateSt
 		DisabilityDetails:    sql.NullString{String: req.DisabilityDetails, Valid: req.DisabilityDetails != ""},
 		NationalID:           common.NullString(req.NationalID),
 		JceNumber:            common.NullString(req.JCENumber),
-		Status:               sql.NullString{String: req.Status, Valid: req.Status != ""},
+		Status:               schema.StudentActive, // new learners are active; leaving has its own action
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create student: %w", err)
@@ -325,7 +207,7 @@ func (s *studentService) CreateStudent(ctx context.Context, req *schema.CreateSt
 		SchoolID:             int64(dbStudent.SchoolID),
 		DateOfBirth:          dateOfBirth,
 		AcademicYearID:       int64(dbStudent.AcademicYearID.Int32),
-		Status:               dbStudent.Status.String,
+		Status:               dbStudent.Status,
 		Gender:               dbStudent.Gender.String,
 		GuardianName:         dbStudent.GuardianName.String,
 		GuardianPhone:        dbStudent.GuardianPhone.String,
@@ -338,6 +220,8 @@ func (s *studentService) CreateStudent(ctx context.Context, req *schema.CreateSt
 		DisabilityDetails:    dbStudent.DisabilityDetails.String,
 		NationalID:           dbStudent.NationalID.String,
 		JCENumber:            dbStudent.JceNumber.String,
+		LeftOn:               formatDate(dbStudent.LeftOn),
+		LeavingReason:        dbStudent.LeavingReason.String,
 		SubjectIDs:           req.SubjectIDs,
 	}, nil
 }
@@ -388,7 +272,7 @@ func (s *studentService) UpdateStudent(ctx context.Context, req *schema.UpdateSt
 		DisabilityDetails:    sql.NullString{String: req.DisabilityDetails, Valid: req.DisabilityDetails != ""},
 		NationalID:           common.NullString(req.NationalID),
 		JceNumber:            common.NullString(req.JCENumber),
-		Status:               sql.NullString{String: req.Status, Valid: req.Status != ""},
+		Status:               current.Status, // status changes only through leave/reinstate/year end
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to update student: %w", err)
@@ -416,7 +300,7 @@ func (s *studentService) UpdateStudent(ctx context.Context, req *schema.UpdateSt
 		SchoolID:             int64(dbStudent.SchoolID),
 		DateOfBirth:          dateOfBirth,
 		AcademicYearID:       int64(dbStudent.AcademicYearID.Int32),
-		Status:               dbStudent.Status.String,
+		Status:               dbStudent.Status,
 		Gender:               dbStudent.Gender.String,
 		GuardianName:         dbStudent.GuardianName.String,
 		GuardianPhone:        dbStudent.GuardianPhone.String,
@@ -429,6 +313,8 @@ func (s *studentService) UpdateStudent(ctx context.Context, req *schema.UpdateSt
 		DisabilityDetails:    dbStudent.DisabilityDetails.String,
 		NationalID:           dbStudent.NationalID.String,
 		JCENumber:            dbStudent.JceNumber.String,
+		LeftOn:               formatDate(dbStudent.LeftOn),
+		LeavingReason:        dbStudent.LeavingReason.String,
 		SubjectIDs:           req.SubjectIDs,
 	}, nil
 }
@@ -443,4 +329,12 @@ func (s *studentService) DeleteStudent(ctx context.Context, studentID int64) err
 
 func (s *studentService) FindSimilar(ctx context.Context, check *schema.DuplicateCheckRequest) ([]schema.SimilarLearner, error) {
 	return FindSimilarLearners(ctx, s.queries, check)
+}
+
+func (s *studentService) MarkLeft(ctx context.Context, actorID, schoolID, studentID int64, req *schema.LeaveRequest) error {
+	return markLearnerLeft(ctx, s.queries, actorID, schoolID, studentID, req)
+}
+
+func (s *studentService) Reinstate(ctx context.Context, actorID, schoolID, studentID int64) error {
+	return reinstateLearner(ctx, s.queries, actorID, schoolID, studentID)
 }

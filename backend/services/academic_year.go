@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	// "errors"
 	"fmt"
-	"time"
 	"strings"
+	"time"
 
 	"nsms/common"
 	"nsms/database/dbsqlc"
@@ -88,8 +88,8 @@ func (s *academicYearService) CreateAcademicYear(ctx context.Context, req *schem
 	}
 
 	return &schema.AcademicYear{
-		ID:        int64(dbAcademicYear.ID),
-		Year:      int(dbAcademicYear.Year),
+		ID:   int64(dbAcademicYear.ID),
+		Year: int(dbAcademicYear.Year),
 	}, nil
 }
 func (s *academicYearService) UpdateAcademicYear(ctx context.Context, req *schema.UpdateAcademicYearRequest) (*schema.AcademicYear, error) {
@@ -102,10 +102,8 @@ func (s *academicYearService) UpdateAcademicYear(ctx context.Context, req *schem
 	if err != nil {
 		return nil, fmt.Errorf("invalid end date format: %w", err)
 	}
-	status := sql.NullString{
-		String: req.Status,
-		Valid:  req.Status != "",
-	}
+	// The status follows the dates, whatever was sent
+	status := sql.NullString{String: academicYearStatus(startDate, endDate, TodayInMalawi()), Valid: true}
 	academicYear, err := s.queries.UpdateAcademicYear(ctx, dbsqlc.UpdateAcademicYearParams{
 		ID:        int32(req.ID),
 		Year:      int32(req.Year),
@@ -133,4 +131,3 @@ func (s *academicYearService) DeleteAcademicYear(ctx context.Context, academicYe
 	}
 	return nil
 }
-

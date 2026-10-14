@@ -235,7 +235,7 @@ type Student struct {
 	PreviousSchool       sql.NullString
 	GuardianName         sql.NullString
 	FormLevel            sql.NullInt32
-	Status               sql.NullString
+	Status               string
 	SchoolID             int32
 	AcademicYearID       sql.NullInt32
 	CreatedAt            sql.NullTime
@@ -250,6 +250,8 @@ type Student struct {
 	DisabilityDetails    sql.NullString
 	NationalID           sql.NullString
 	JceNumber            sql.NullString
+	LeftOn               sql.NullTime
+	LeavingReason        sql.NullString
 }
 
 type StudentMark struct {

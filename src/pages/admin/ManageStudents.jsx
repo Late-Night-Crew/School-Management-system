@@ -2,13 +2,24 @@ import { useState, useEffect } from "react";
 import { listRegions } from "../../api/regions";
 import { listSchools } from "../../api/schools";
 import { listDistricts } from "../../api/districts";
-import { createStudent, deleteStudent, findSimilarStudents, listStudents, updateStudent } from "../../api/students";
+import {
+  createStudent,
+  deleteStudent,
+  findSimilarStudents,
+  listStudents,
+  markStudentLeft,
+  reinstateStudent,
+  updateStudent,
+} from "../../api/students";
+import { LeaveDialog, LearnerStatusBadge, ReinstateDialog } from "../../components/LearnerStatus";
 import DuplicateLearnerDialog from "../../components/DuplicateLearnerDialog";
 import { listAcademicYears } from "../../api/academicYears";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import TypeToConfirm from "../../components/TypeToConfirm";
 import TablePagination from "../../components/TablePagination";
+import useServerPage, { fetchAllPages } from "../../hooks/useServerPage";
+import { FORMS, LEARNER_SHOWS, learnerSheetRows } from "../../utils/learners";
 import { formatNumber } from "../../utils/format";
 import {
   Badge,
@@ -19,18 +30,17 @@ import {
   Field,
   IconButton,
   Input,
+  Notice,
   Page,
   Person,
   SearchInput,
+  Segmented,
   Select,
   Table,
 } from "../../components/ui";
 
-const STATUS_TONES = { active: "green", inactive: "slate", graduated: "blue", transferred: "amber", pending: "purple" };
 
 const ManageStudents = () => {
-  const [students, setStudents] = useState([]);
-  const [filteredStudents, setFilteredStudents] = useState([]);
   const [divisions, setDivisions] = useState([]);
   const [districts, setDistricts] = useState([]);
   const [schools, setSchools] = useState([]);
@@ -39,14 +49,25 @@ const ManageStudents = () => {
   const [selectedDistrict, setSelectedDistrict] = useState("");
   const [selectedSchool, setSelectedSchool] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
+  const [status, setStatus] = useState("Active");
+  const [form, setForm] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [editingStudent, setEditingStudent] = useState(null);
   const [allYears, setAllYears] = useState([]);
   const [deleting, setDeleting] = useState(null);
+  const [leaving, setLeaving] = useState(null);
+  const [reinstating, setReinstating] = useState(null);
   const [duplicates, setDuplicates] = useState(null); // { matches, fields } awaiting confirmation
 
-  const studentsPerPage = 5;
+  // Learners are paged and filtered on the server
+  const list = useServerPage(
+    listStudents,
+    { region_id: selectedDivision, district_id: selectedDistrict, school_id: selectedSchool, status, form_level: form },
+    searchTerm
+  );
+  const refresh = list.reload;
 
   const [newStudent, setNewStudent] = useState({
     student_number: "",
@@ -64,11 +85,10 @@ const ManageStudents = () => {
 
   const fetchAllData = async () => {
     try {
-      const [divData, schoolData, districtData, studentData, academicData] = await Promise.all([
+      const [divData, schoolData, districtData, academicData] = await Promise.all([
         listRegions(),
         listSchools(),
         listDistricts(),
-        listStudents(),
         listAcademicYears(),
       ]);
 
@@ -91,27 +111,6 @@ const ManageStudents = () => {
         }));
       }
 
-      const mappedStudents = (studentData || []).map((s) => {
-        const school = schoolData.find((sc) => Number(sc.id) === Number(s.school_id));
-        const district = districtData.find((d) => Number(d.id) === Number(school?.district_id));
-        const division = divData.find((div) => Number(div.id) === Number(district?.region_id));
-
-        return {
-          ...s,
-          studentNumber: s.student_number,
-          firstName: s.first_name,
-          lastName: s.last_name,
-          formLevel: s.form_level,
-          gender: s.gender,
-          schoolName: school?.name || "",
-          districtName: district?.name || "",
-          divisionName: division?.name || "",
-          status: s.status || "Active",
-        };
-      });
-
-      setStudents(mappedStudents);
-      setFilteredStudents(mappedStudents);
     } catch (err) {
       console.error("Error loading data:", err);
       alert(`Failed to load students: ${err.message}`);
@@ -131,67 +130,26 @@ const ManageStudents = () => {
     ? schools.filter((s) => s.district_id === Number(selectedDistrict))
     : schools;
 
-  // Search & filter logic
-  useEffect(() => {
-    const lowerSearch = searchTerm.trim().toLowerCase();
 
-    const filtered = students.filter((s) => {
-      const matchSearch =
-        !lowerSearch ||
-        s.firstName.toLowerCase().includes(lowerSearch) ||
-        s.lastName.toLowerCase().includes(lowerSearch) ||
-        s.studentNumber.toLowerCase().includes(lowerSearch);
-
-      const matchDivision =
-        !selectedDivision ||
-        s.divisionName === divisions.find((d) => d.id === Number(selectedDivision))?.name;
-
-      const matchDistrict =
-        !selectedDistrict ||
-        s.districtName === districts.find((d) => d.id === Number(selectedDistrict))?.name;
-
-      const matchSchool =
-        !selectedSchool ||
-        s.schoolName === schools.find((sch) => sch.id === Number(selectedSchool))?.name;
-
-      return matchSearch && matchDivision && matchDistrict && matchSchool;
-    });
-
-    setFilteredStudents(filtered);
-    setCurrentPage(1);
-  }, [searchTerm, selectedDivision, selectedDistrict, selectedSchool, students, divisions, districts, schools]);
-
-  // Pagination
-  const indexOfLastStudent = currentPage * studentsPerPage;
-  const indexOfFirstStudent = indexOfLastStudent - studentsPerPage;
-  const currentStudents = filteredStudents.slice(indexOfFirstStudent, indexOfLastStudent);
-  const totalPages = Math.ceil(filteredStudents.length / studentsPerPage);
-
-  // Export to Excel
-  const exportToExcel = () => {
-    if (filteredStudents.length === 0) return alert("No students to export!");
-
-    const data = filteredStudents.map((s) => ({
-      "Student #": s.studentNumber,
-      "First Name": s.firstName,
-      "Last Name": s.lastName,
-      "Form Level": s.formLevel,
-      "Gender": s.gender,
-      "School": s.schoolName,
-      "District": s.districtName,
-      "Division": s.divisionName,
-      "Status": s.status,
-    }));
-
-    const worksheet = XLSX.utils.json_to_sheet(data);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Students");
-
-    const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-    saveAs(
-      new Blob([excelBuffer], { type: "application/octet-stream" }),
-      `Students_${new Date().toISOString().slice(0, 10)}.xlsx`
-    );
+  // Export every learner matching the filters
+  const exportToExcel = async () => {
+    setExporting(true);
+    setExportError("");
+    try {
+      const rows = learnerSheetRows(await fetchAllPages(listStudents, list.query));
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Students");
+      const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+      saveAs(
+        new Blob([excelBuffer], { type: "application/octet-stream" }),
+        `Students_${new Date().toISOString().slice(0, 10)}.xlsx`
+      );
+    } catch (err) {
+      setExportError(err.message);
+    } finally {
+      setExporting(false);
+    }
   };
 
   // Handle new student form changes
@@ -290,7 +248,7 @@ const ManageStudents = () => {
       setShowModal(false);
       setEditingStudent(null);
       setNewStudent(blankStudent());
-      fetchAllData();
+      refresh();
     } catch (err) {
       console.error("Error saving student:", err);
       alert(`Failed to save student: ${err.message}`);
@@ -302,7 +260,7 @@ const ManageStudents = () => {
     setDeleting(null);
     try {
       await deleteStudent(student.id);
-      fetchAllData();
+      refresh();
     } catch (err) {
       alert(`Failed to delete student: ${err.message}`);
     }
@@ -318,8 +276,7 @@ const ManageStudents = () => {
     <Page
       icon="bi-mortarboard-fill"
       title="Student Management"
-      subtitle="Every enrolled student nationally, filterable by division, district and school."
-      stats={[{ label: "Students", value: formatNumber(students.length) }]}
+      subtitle="Every learner nationally, filterable by division, district, school, form and status."
       actions={
         <Button variant="ghost" icon="bi-plus-lg" onClick={openAddModal}>
           Add Student
@@ -332,12 +289,12 @@ const ManageStudents = () => {
         title="Filters"
         subtitle="Narrow the list by area"
         actions={
-          <Button variant="success" size="sm" icon="bi-file-earmark-excel" onClick={exportToExcel}>
-            Export Excel
+          <Button variant="success" size="sm" icon="bi-file-earmark-excel" onClick={exportToExcel} disabled={!list.total || exporting}>
+            {exporting ? "Preparing…" : "Export Excel"}
           </Button>
         }
       >
-        <div className="ui-grid ui-cols-3">
+        <div className="ui-grid ui-cols-4">
           <Field label="Division">
             <Select
               value={selectedDivision}
@@ -386,23 +343,40 @@ const ManageStudents = () => {
               ))}
             </Select>
           </Field>
+          <Field label="Form">
+            <Select value={form} onChange={(e) => setForm(e.target.value)}>
+              <option value="">All Forms</option>
+              {FORMS.map((f) => (
+                <option key={f} value={f}>
+                  Form {f}
+                </option>
+              ))}
+            </Select>
+          </Field>
         </div>
       </Card>
+
+      {exportError && <Notice tone="red">{exportError}</Notice>}
 
       <Card
         accent="blue"
         icon="bi-people-fill"
         title="All Students"
-        subtitle={`${formatNumber(filteredStudents.length)} of ${formatNumber(students.length)} shown`}
+        subtitle={list.firstLoad ? "Loading…" : `${formatNumber(list.total)} ${list.total === 1 ? "learner" : "learners"}`}
         actions={
-          <SearchInput value={searchTerm} onChange={setSearchTerm} placeholder="Search name or number…" />
+          <>
+            <Segmented options={LEARNER_SHOWS} value={status} onChange={setStatus} />
+            <SearchInput value={searchTerm} onChange={setSearchTerm} placeholder="Name, number or National ID…" />
+          </>
         }
         flush
       >
-        {currentStudents.length === 0 ? (
-          <EmptyState icon="bi-people">No students found.</EmptyState>
+        {list.error ? (
+          <Notice tone="red">{list.error}</Notice>
+        ) : list.items.length === 0 ? (
+          <EmptyState icon="bi-people">{list.firstLoad ? "Loading…" : "No students found."}</EmptyState>
         ) : (
-          <>
+          <div style={{ opacity: list.refreshing ? 0.55 : 1, transition: "opacity 0.15s" }}>
             <Table>
               <thead>
                 <tr>
@@ -417,29 +391,35 @@ const ManageStudents = () => {
                 </tr>
               </thead>
               <tbody>
-                {currentStudents.map((s) => (
+                {list.items.map((s) => (
                   <tr key={s.id}>
                     <td>
-                      <Person name={`${s.firstName} ${s.lastName}`} sub={s.studentNumber} />
+                      <Person name={`${s.first_name} ${s.last_name}`} sub={s.student_number} />
                     </td>
-                    <td>Form {s.formLevel}</td>
+                    <td>Form {s.form_level}</td>
                     <td>{s.gender}</td>
-                    <td>{s.schoolName}</td>
-                    <td>{s.districtName}</td>
-                    <td>{s.divisionName}</td>
+                    <td>{s.school_name}</td>
+                    <td>{s.district_name}</td>
+                    <td>{s.region_name}</td>
                     <td>
-                      <Badge tone={STATUS_TONES[s.status.toLowerCase()] || "slate"}>{s.status}</Badge>
+                      <LearnerStatusBadge student={s} />
                     </td>
                     <td className="end">
                       <IconButton kind="edit" title="Edit student" onClick={() => openEditModal(s)} />
+                      {s.status === "Active" && (
+                        <IconButton kind="view" icon="bi-box-arrow-right" title={`${s.first_name} ${s.last_name} has left`} tip="Learner has left" onClick={() => setLeaving(s)} />
+                      )}
+                      {(s.status === "Withdrawn" || s.status === "DroppedOut") && (
+                        <IconButton kind="save" icon="bi-arrow-counterclockwise" title={`Reinstate ${s.first_name} ${s.last_name}`} tip="Reinstate" onClick={() => setReinstating(s)} />
+                      )}
                       <IconButton kind="delete" title="Delete student" onClick={() => setDeleting(s)} />
                     </td>
                   </tr>
                 ))}
               </tbody>
             </Table>
-            <TablePagination page={currentPage} pageCount={totalPages} onChange={setCurrentPage} />
-          </>
+            <TablePagination page={list.page} pageCount={list.pageCount} onChange={list.setPage} />
+          </div>
         )}
       </Card>
 
@@ -550,15 +530,34 @@ const ManageStudents = () => {
               ))}
             </Select>
           </Field>
-          <Field label="Status" required>
-            <Select name="status" value={newStudent.status} onChange={handleNewStudentChange} required>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-              <option value="pending">Pending</option>
-            </Select>
-          </Field>
+
         </div>
       </Dialog>
+
+      <LeaveDialog
+        student={leaving}
+        onHide={() => setLeaving(null)}
+        markLeft={markStudentLeft}
+        onDone={(message) => {
+          setLeaving(null);
+          alert(message);
+          refresh();
+        }}
+      />
+      <ReinstateDialog
+        student={reinstating}
+        onHide={() => setReinstating(null)}
+        reinstate={reinstateStudent}
+        onDone={(message) => {
+          setReinstating(null);
+          alert(message);
+          refresh();
+        }}
+        onError={(message) => {
+          setReinstating(null);
+          alert(message);
+        }}
+      />
 
       <DuplicateLearnerDialog
         matches={duplicates?.matches}

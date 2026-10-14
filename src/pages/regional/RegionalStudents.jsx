@@ -4,13 +4,13 @@ import * as XLSX from "xlsx";
 
 import { listRegionDistricts, listRegionSchools, listRegionStudents } from "../../api/regionPortal";
 import useAsync from "../../hooks/useAsync";
-import usePagination from "../../hooks/usePagination";
+import useServerPage, { fetchAllPages } from "../../hooks/useServerPage";
 import { formatNumber, fullName } from "../../utils/format";
+import { FORMS, LEARNER_SHOWS, learnerSheetRows } from "../../utils/learners";
 import DataState from "../../components/DataState";
+import { LearnerStatusBadge } from "../../components/LearnerStatus";
 import TablePagination from "../../components/TablePagination";
-import { Badge, Button, Card, Field, Page, Person, SearchInput, Select, Table } from "../../components/ui";
-
-const STATUS_TONES = { active: "green", graduated: "blue", transferred: "amber" };
+import { Button, Card, Field, Notice, Page, Person, SearchInput, Segmented, Select, Table } from "../../components/ui";
 
 export default function RegionalStudents() {
   const { regionId } = useParams();
@@ -19,24 +19,17 @@ export default function RegionalStudents() {
   const districtId = searchParams.get("district") || "";
   const schoolId = searchParams.get("school") || "";
   const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("Active");
+  const [form, setForm] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
 
   const districts = useAsync(useCallback(() => listRegionDistricts(regionId), [regionId]));
   const schools = useAsync(useCallback(() => listRegionSchools(regionId), [regionId]));
-  const students = useAsync(
-    useCallback(
-      () => listRegionStudents(regionId, { district_id: districtId, school_id: schoolId }),
-      [regionId, districtId, schoolId]
-    )
-  );
+  const fetchPage = useCallback((filters) => listRegionStudents(regionId, filters), [regionId]);
+  const list = useServerPage(fetchPage, { district_id: districtId, school_id: schoolId, status, form_level: form }, search);
 
   const schoolOptions = (schools.data || []).filter((s) => !districtId || s.district_id === Number(districtId));
-
-  const all = students.data || [];
-  const term = search.trim().toLowerCase();
-  const visibleStudents = all.filter(
-    (s) => fullName(s).toLowerCase().includes(term) || s.student_number.toLowerCase().includes(term)
-  );
-  const { page, pageCount, pageItems, setPage } = usePagination(visibleStudents, 25);
 
   const setFilter = (name, value) => {
     const next = { district: districtId, school: schoolId, [name]: value };
@@ -45,35 +38,34 @@ export default function RegionalStudents() {
     setSearchParams(Object.fromEntries(Object.entries(next).filter(([, v]) => v)));
   };
 
-  const exportXLS = () => {
-    const rows = visibleStudents.map((s) => ({
-      "Student Number": s.student_number,
-      Name: fullName(s),
-      Gender: s.gender,
-      Form: s.form_level || "",
-      School: s.school_name,
-      District: s.district_name,
-      Status: s.status,
-    }));
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), "Students");
-    XLSX.writeFile(workbook, "region_students.xlsx");
+  const exportXLS = async () => {
+    setExporting(true);
+    setExportError("");
+    try {
+      const rows = learnerSheetRows(await fetchAllPages(fetchPage, list.query));
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), "Students");
+      XLSX.writeFile(workbook, "division_students.xlsx");
+    } catch (err) {
+      setExportError(err.message);
+    } finally {
+      setExporting(false);
+    }
   };
 
   return (
     <Page
       icon="bi-people-fill"
       title="Students"
-      subtitle="Students enrolled at schools in your region."
-      stats={[{ label: "Students", value: students.loading ? null : formatNumber(all.length) }]}
+      subtitle="Learners at the schools in your division."
       actions={
-        <Button variant="ghost" icon="bi-file-earmark-excel" onClick={exportXLS} disabled={!visibleStudents.length}>
-          Export XLS
+        <Button variant="ghost" icon="bi-file-earmark-excel" onClick={exportXLS} disabled={!list.total || exporting}>
+          {exporting ? "Preparing…" : "Export XLS"}
         </Button>
       }
     >
       <Card accent="slate" icon="bi-funnel" title="Filters">
-        <div className="ui-grid ui-cols-3">
+        <div className="ui-grid ui-cols-4">
           <Field label="District">
             <Select value={districtId} onChange={(e) => setFilter("district", e.target.value)}>
               <option value="">All districts</option>
@@ -90,53 +82,64 @@ export default function RegionalStudents() {
               ))}
             </Select>
           </Field>
+          <Field label="Form">
+            <Select value={form} onChange={(e) => setForm(e.target.value)}>
+              <option value="">All forms</option>
+              {FORMS.map((f) => (
+                <option key={f} value={f}>Form {f}</option>
+              ))}
+            </Select>
+          </Field>
           <Field label="Search">
-            <SearchInput value={search} onChange={setSearch} placeholder="Name or student number" />
+            <SearchInput value={search} onChange={setSearch} placeholder="Name, number or National ID" />
           </Field>
         </div>
       </Card>
 
+      {exportError && <Notice tone="red">{exportError}</Notice>}
+
       <Card
         accent="blue"
         icon="bi-list-ul"
-        title="All Students"
-        subtitle={students.loading ? null : `${formatNumber(visibleStudents.length)} students`}
+        title="Students"
+        subtitle={list.firstLoad ? null : `${formatNumber(list.total)} ${list.total === 1 ? "learner" : "learners"}`}
+        actions={<Segmented options={LEARNER_SHOWS} value={status} onChange={setStatus} />}
         flush
       >
         <DataState
-          loading={students.loading}
-          error={students.error}
-          onRetry={students.reload}
-          empty={visibleStudents.length === 0}
+          loading={list.firstLoad}
+          error={list.error}
+          onRetry={list.reload}
+          empty={!list.items.length}
           emptyMessage="No students match these filters."
         >
-          <Table>
-            <thead>
-              <tr>
-                <th>Student</th>
-                <th>Gender</th>
-                <th>Form</th>
-                <th>School</th>
-                <th>District</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pageItems.map((s) => (
-                <tr key={s.id}>
-                  <td><Person name={fullName(s)} sub={s.student_number} /></td>
-                  <td>{s.gender || "-"}</td>
-                  <td>{s.form_level || "-"}</td>
-                  <td>{s.school_name}</td>
-                  <td>{s.district_name}</td>
-                  <td>
-                    {s.status ? <Badge tone={STATUS_TONES[s.status.toLowerCase()] || "slate"}>{s.status}</Badge> : "-"}
-                  </td>
+          <div style={{ opacity: list.refreshing ? 0.55 : 1, transition: "opacity 0.15s" }}>
+            <Table>
+              <thead>
+                <tr>
+                  <th>Student</th>
+                  <th>Gender</th>
+                  <th>Form</th>
+                  <th>School</th>
+                  <th>District</th>
+                  <th>Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </Table>
-          <TablePagination page={page} pageCount={pageCount} onChange={setPage} />
+              </thead>
+              <tbody>
+                {list.items.map((s) => (
+                  <tr key={s.id}>
+                    <td><Person name={fullName(s)} sub={s.student_number} /></td>
+                    <td>{s.gender || "-"}</td>
+                    <td>{s.form_level || "-"}</td>
+                    <td>{s.school_name}</td>
+                    <td>{s.district_name}</td>
+                    <td><LearnerStatusBadge student={s} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+            <TablePagination page={list.page} pageCount={list.pageCount} onChange={list.setPage} />
+          </div>
         </DataState>
       </Card>
     </Page>

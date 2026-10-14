@@ -2,12 +2,13 @@ import { useCallback, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { listAcademicYears } from "../../api/academicYears";
-import { listSchoolMarks, listSchoolStudents, saveSchoolMarks } from "../../api/schoolPortal";
+import { listAllSchoolStudents, listSchoolMarks, saveSchoolMarks } from "../../api/schoolPortal";
 import { listSubjects } from "../../api/subjects";
 import {
   getStage,
   listSchoolMarksAsAdmin,
   listSchoolStudentsAsAdmin,
+  listSchoolYearMarksAsAdmin,
   saveSchoolMarksAsAdmin,
   schoolPromotionBase,
 } from "../../api/promotion";
@@ -37,20 +38,19 @@ export default function EnterMarks() {
   const isSuper = getSession().role === ROLES.SUPER_ADMIN;
   const marksApi = isSuper
     ? { students: listSchoolStudentsAsAdmin, list: listSchoolMarksAsAdmin, save: saveSchoolMarksAsAdmin }
-    : { students: listSchoolStudents, list: listSchoolMarks, save: saveSchoolMarks };
+    : { students: listAllSchoolStudents, list: listSchoolMarks, save: saveSchoolMarks };
   const school = useAsync(useCallback(() => (isSuper ? getSchool(schoolId) : Promise.resolve(null)), [isSuper, schoolId]));
   const scale = useGradingScale();
 
   // Students, subjects and years load once; marks reload when the year or term changes
   const lookups = useAsync(
+    // Only current learners take marks (not those who left or completed Form 4)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- marksApi only changes with the role
-    useCallback(() => Promise.all([marksApi.students(schoolId), listSubjects(), listAcademicYears()]), [schoolId, isSuper])
+    useCallback(() => Promise.all([marksApi.students(schoolId, { status: "Active" }), listSubjects(), listAcademicYears()]), [schoolId, isSuper])
   );
   // The school's current year and term (see Terms & Promotion) is where marks usually go
   const stage = useAsync(useCallback(() => getStage(schoolPromotionBase(isSuper, schoolId)).catch(() => null), [isSuper, schoolId]));
-  const [allStudents = [], subjects = [], years = []] = lookups.data || [];
-  // Learners who completed Form 4 take no more marks
-  const students = allStudents.filter((s) => s.status !== "Completed");
+  const [currentStudents = [], subjects = [], years = []] = lookups.data || [];
   // Marks go into the active year or a past one, never an upcoming year
   const sortedYears = startedYears(years).sort((a, b) => b.year - a.year);
   const defaultYear =
@@ -69,17 +69,24 @@ export default function EnterMarks() {
   const [formLevel, setFormLevel] = useState("");
   const [subjectFilter, setSubjectFilter] = useState("");
 
+  // MCDE correcting a finished year sees who was at the school that year, in the form
+  // they were in then (today's learners and forms would be wrong for a past year)
+  const yearView = isSuper && pastYear;
   const saved = useAsync(
     useCallback(
-      () =>
-        academicYearId
-          ? marksApi.list(schoolId, { academic_year_id: academicYearId, term })
-          : Promise.resolve([]),
+      () => {
+        if (!academicYearId) return Promise.resolve(null);
+        if (yearView) return listSchoolYearMarksAsAdmin(schoolId, { academic_year_id: academicYearId, term });
+        return formLevel
+          ? marksApi.list(schoolId, { academic_year_id: academicYearId, term, form_level: formLevel }).then((marks) => ({ marks }))
+          : Promise.resolve(null);
+      },
       // eslint-disable-next-line react-hooks/exhaustive-deps -- marksApi only changes with the role
-      [schoolId, academicYearId, term, isSuper]
+      [schoolId, academicYearId, term, yearView ? "" : formLevel, yearView, isSuper]
     )
   );
-  const savedMarks = Object.fromEntries((saved.data || []).map((m) => [cellKey(m.student_id, m.subject_id), m.mark]));
+  const students = yearView ? saved.data?.learners || [] : currentStudents;
+  const savedMarks = Object.fromEntries((saved.data?.marks || []).map((m) => [cellKey(m.student_id, m.subject_id), m.mark]));
 
   // Unsaved changes: key -> mark (0-100) or null when a saved mark was cleared
   const [edits, setEdits] = useState({});

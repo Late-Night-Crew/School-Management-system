@@ -11,6 +11,7 @@ import (
 	"nsms/services"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/compress"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/pprof"
@@ -28,6 +29,9 @@ func (api *API) middleware() {
 	if api.Config.Environment == "DEVELOPMENT" {
 		app.Use(pprof.New())
 	}
+	// Gzip responses for browsers that accept it: JSON shrinks several times, which
+	// matters to coordinators on mobile data
+	app.Use(compress.New())
 
 	app.Use(recover.New(recover.Config{
 		EnableStackTrace: true,

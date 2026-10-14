@@ -327,6 +327,8 @@ VALUES
     disability_details,
     national_id,
     jce_number,
+    left_on,
+    leaving_reason,
     status,
     created_at,
     updated_at;
@@ -354,6 +356,8 @@ SELECT
     disability_details,
     national_id,
     jce_number,
+    left_on,
+    leaving_reason,
     status,
     created_at,
     updated_at
@@ -361,39 +365,6 @@ FROM
     students
 WHERE
     id = $1;
-
--- name: ListStudents :many
-SELECT
-    id,
-    student_number,
-    first_name,
-    middle_name,
-    last_name,
-    date_of_birth,
-    gender,
-    form_level,
-    guardian_name,
-    guardian_phone,
-    guardian_alt_phone,
-    guardian_email,
-    guardian_relationship,
-    previous_school,
-    previous_school_id,
-    school_id,
-    academic_year_id,
-    disability,
-    disability_details,
-    national_id,
-    jce_number,
-    status,
-    created_at,
-    updated_at
-FROM
-    students
-ORDER BY
-    id DESC
-LIMIT
-    $1 OFFSET $2;
 
 -- name: UpdateStudent :one
 UPDATE
@@ -443,6 +414,8 @@ WHERE
     disability_details,
     national_id,
     jce_number,
+    left_on,
+    leaving_reason,
     status,
     created_at,
     updated_at;
@@ -452,40 +425,6 @@ DELETE FROM
     students
 WHERE
     id = $1;
-
--- name: GetStudentsBySchoolID :many
-SELECT
-    id,
-    student_number,
-    first_name,
-    middle_name,
-    last_name,
-    date_of_birth,
-    gender,
-    form_level,
-    guardian_name,
-    guardian_phone,
-    guardian_alt_phone,
-    guardian_email,
-    guardian_relationship,
-    previous_school,
-    previous_school_id,
-    school_id,
-    academic_year_id,
-    disability,
-    disability_details,
-    national_id,
-    jce_number,
-    status,
-    created_at,
-    updated_at
-FROM
-    students
-WHERE
-    school_id = $1
-ORDER BY
-    last_name ASC,
-    first_name ASC;
 
 -- name: GetStudentByIDAndSchoolID :one
 SELECT
@@ -510,6 +449,8 @@ SELECT
     disability_details,
     national_id,
     jce_number,
+    left_on,
+    leaving_reason,
     status,
     created_at,
     updated_at
@@ -569,6 +510,8 @@ RETURNING id,
     disability_details,
     national_id,
     jce_number,
+    left_on,
+    leaving_reason,
     status,
     created_at,
     updated_at;
@@ -593,21 +536,12 @@ DELETE FROM
 WHERE
     student_id = $1;
 
--- name: ListStudentSubjectIDsByStudentID :many
-SELECT
-    student_id,
-    subject_id
-FROM
-    student_subjects
-WHERE
-    student_id = $1;
-
 -- name: GetSchoolDashboardStats :one
 SELECT
-    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1) AS student_count,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1 AND s.gender = 'Male') AS male_count,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1 AND s.gender = 'Female') AS female_count,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1 AND s.disability) AS disability_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1 AND s.status = 'Active') AS student_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1 AND s.gender = 'Male' AND s.status = 'Active') AS male_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1 AND s.gender = 'Female' AND s.status = 'Active') AS female_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = $1 AND s.disability AND s.status = 'Active') AS disability_count,
     (SELECT COUNT(*) FROM transfers t WHERE t.to_school = $1) AS incoming_transfer_count,
     (SELECT COUNT(*) FROM transfers t WHERE t.from_school = $1) AS outgoing_transfer_count,
     (SELECT COUNT(*) FROM transfers t WHERE t.to_school = $1 AND t.status = 'Pending') AS pending_incoming_count,
@@ -1166,13 +1100,13 @@ SELECT
     d.name AS district_name,
     r.id AS region_id,
     r.name AS region_name,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id = sc.id) AS student_count,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id = sc.id AND s.gender = 'Male') AS male_count,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id = sc.id AND s.gender = 'Female') AS female_count,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id = sc.id AND s.disability) AS disability_count,
-    (SELECT COUNT(*) FROM transfers t WHERE t.to_school = sc.id) AS transfers_in,
-    (SELECT COUNT(*) FROM transfers t WHERE t.from_school = sc.id) AS transfers_out,
-    (SELECT COUNT(*) FROM transfers t WHERE t.to_school = sc.id AND t.status = 'Pending') AS pending_in,
+    COALESCE(l.learners, 0)::bigint AS student_count,
+    COALESCE(l.male, 0)::bigint AS male_count,
+    COALESCE(l.female, 0)::bigint AS female_count,
+    COALESCE(l.disability, 0)::bigint AS disability_count,
+    COALESCE(ti.moves, 0)::bigint AS transfers_in,
+    COALESCE(tout.moves, 0)::bigint AS transfers_out,
+    COALESCE(ti.pending, 0)::bigint AS pending_in,
     e.jce_pass_rate,
     e.msce_pass_rate,
     -- Calculated from Term 3 marks (the exam results); preferred over the recorded rates
@@ -1186,6 +1120,17 @@ FROM
         AND e.academic_year_id = sqlc.narg(academic_year_id)::int
     LEFT JOIN term_reports tr ON tr.school_id = sc.id AND tr.term = 3
         AND tr.academic_year_id = sqlc.narg(academic_year_id)::int
+    -- Counted once per table rather than once per school
+    LEFT JOIN (
+        SELECT school_id, COUNT(*) AS learners, COUNT(*) FILTER (WHERE gender = 'Male') AS male,
+            COUNT(*) FILTER (WHERE gender = 'Female') AS female, COUNT(*) FILTER (WHERE disability) AS disability
+        FROM students WHERE status = 'Active' GROUP BY school_id
+    ) l ON l.school_id = sc.id
+    LEFT JOIN (
+        SELECT to_school, COUNT(*) AS moves, COUNT(*) FILTER (WHERE status = 'Pending') AS pending
+        FROM transfers GROUP BY to_school
+    ) ti ON ti.to_school = sc.id
+    LEFT JOIN (SELECT from_school, COUNT(*) AS moves FROM transfers GROUP BY from_school) tout ON tout.from_school = sc.id
 WHERE
     (sqlc.narg(region_id)::int IS NULL OR r.id = sqlc.narg(region_id)::int)
     AND (sqlc.narg(district_id)::int IS NULL OR d.id = sqlc.narg(district_id)::int)
@@ -1202,10 +1147,10 @@ WITH region_schools AS (
 SELECT
     (SELECT COUNT(*) FROM districts d WHERE d.region_id = $1) AS district_count,
     (SELECT COUNT(*) FROM region_schools) AS school_count,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools)) AS student_count,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools) AND s.gender = 'Male') AS male_count,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools) AND s.gender = 'Female') AS female_count,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools) AND s.disability) AS disability_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools) AND s.status = 'Active') AS student_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools) AND s.status = 'Active' AND s.gender = 'Male') AS male_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools) AND s.status = 'Active' AND s.gender = 'Female') AS female_count,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id IN (SELECT id FROM region_schools) AND s.status = 'Active' AND s.disability) AS disability_count,
     (SELECT COUNT(*) FROM transfers t
         WHERE t.status = 'Pending'
         AND (t.from_school IN (SELECT id FROM region_schools) OR t.to_school IN (SELECT id FROM region_schools))
@@ -1217,33 +1162,10 @@ SELECT
     d.id,
     d.name,
     (SELECT COUNT(*) FROM schools sc WHERE sc.district_id = d.id) AS school_count,
-    (SELECT COUNT(*) FROM students s JOIN schools sc ON sc.id = s.school_id WHERE sc.district_id = d.id) AS student_count
+    (SELECT COUNT(*) FROM students s JOIN schools sc ON sc.id = s.school_id WHERE sc.district_id = d.id AND s.status = 'Active') AS student_count
 FROM districts d
 WHERE d.region_id = $1
 ORDER BY d.name;
-
--- name: ListStudentsForRegion :many
--- Students enrolled at schools in a region; district and school filters are optional.
-SELECT
-    s.id,
-    s.student_number,
-    s.first_name,
-    s.last_name,
-    s.gender,
-    s.form_level,
-    s.status,
-    sc.id AS school_id,
-    sc.name AS school_name,
-    d.id AS district_id,
-    d.name AS district_name
-FROM students s
-JOIN schools sc ON sc.id = s.school_id
-JOIN districts d ON d.id = sc.district_id
-WHERE
-    d.region_id = sqlc.arg(region_id)
-    AND (sqlc.narg(district_id)::int IS NULL OR d.id = sqlc.narg(district_id)::int)
-    AND (sqlc.narg(school_id)::int IS NULL OR sc.id = sqlc.narg(school_id)::int)
-ORDER BY d.name, sc.name, s.last_name, s.first_name;
 
 -- name: ListTransfersForRegion :many
 -- Transfers into or out of any school in a region.
@@ -1274,7 +1196,8 @@ WHERE
 ORDER BY t.date_initiated DESC, t.id DESC;
 
 -- name: ListMarksForSchool :many
--- Marks of the school's current students. Year, term and student filters are optional.
+-- Marks of the school's current students. Year, term, student and form (the learner's
+-- current form) filters are optional.
 SELECT
     m.id,
     m.student_id,
@@ -1291,6 +1214,7 @@ WHERE
     AND (sqlc.narg(academic_year_id)::int IS NULL OR m.academic_year_id = sqlc.narg(academic_year_id)::int)
     AND (sqlc.narg(term)::int IS NULL OR m.term = sqlc.narg(term)::int)
     AND (sqlc.narg(student_id)::int IS NULL OR m.student_id = sqlc.narg(student_id)::int)
+    AND (sqlc.narg(form_level)::int IS NULL OR s.form_level = sqlc.narg(form_level)::int)
 ORDER BY m.student_id, m.subject_id, m.academic_year_id, m.term;
 
 -- name: ListSubjectEnrolmentsForSchool :many
@@ -1860,7 +1784,6 @@ FROM
     LEFT JOIN regions rg ON rg.id = COALESCE(sd.region_id, u.region_id)
 WHERE
     u.deleted_at IS NULL
-    AND u.role <> 'SUPER_ADMIN'
     AND (sqlc.narg(role)::text IS NULL OR u.role = sqlc.narg(role)::text)
     AND (sqlc.narg(region_id)::int IS NULL OR COALESCE(sd.region_id, u.region_id) = sqlc.narg(region_id)::int)
 ORDER BY rg.name, u.role, sc.name, u.name;
@@ -1890,7 +1813,7 @@ WITH created AS (
     VALUES (
         sqlc.arg(name)::text, sqlc.arg(name)::text, sqlc.arg(email)::text, sqlc.arg(password_hash)::text,
         sqlc.arg(role)::text, sqlc.narg(region_id)::int, sqlc.narg(district_id)::int, sqlc.narg(school_id)::int,
-        sqlc.narg(phone)::text, sqlc.narg(whatsapp)::text, FALSE, TRUE, TRUE
+        sqlc.narg(phone)::text, sqlc.narg(whatsapp)::text, sqlc.arg(role)::text = 'SUPER_ADMIN', TRUE, TRUE
     )
     RETURNING id
 ),
@@ -1911,7 +1834,7 @@ WITH updated AS (
         phone = sqlc.narg(phone)::text,
         whatsapp = sqlc.narg(whatsapp)::text,
         updated_at = CURRENT_TIMESTAMP
-    WHERE users.id = sqlc.arg(user_id) AND users.deleted_at IS NULL AND users.role <> 'SUPER_ADMIN'
+    WHERE users.id = sqlc.arg(user_id) AND users.deleted_at IS NULL
     RETURNING users.id
 ),
 logged AS (
@@ -1925,7 +1848,7 @@ SELECT updated.id FROM updated;
 WITH changed AS (
     UPDATE users
     SET is_activated = sqlc.arg(active)::bool, updated_at = CURRENT_TIMESTAMP
-    WHERE users.id = sqlc.arg(user_id) AND users.deleted_at IS NULL AND users.role <> 'SUPER_ADMIN'
+    WHERE users.id = sqlc.arg(user_id) AND users.deleted_at IS NULL
     RETURNING users.id
 ),
 logged AS (
@@ -1940,7 +1863,7 @@ SELECT changed.id FROM changed;
 WITH reset AS (
     UPDATE users
     SET password = sqlc.arg(password_hash)::text, must_change_password = TRUE, updated_at = CURRENT_TIMESTAMP
-    WHERE users.id = sqlc.arg(user_id) AND users.deleted_at IS NULL AND users.role <> 'SUPER_ADMIN'
+    WHERE users.id = sqlc.arg(user_id) AND users.deleted_at IS NULL
     RETURNING users.id
 ),
 logged AS (
@@ -2467,7 +2390,7 @@ LIMIT 1;
 -- the same date of birth or guardian phone. Used to warn, not to block, since two
 -- learners can genuinely share a name.
 SELECT s.id, s.first_name, s.last_name, s.student_number, s.date_of_birth, s.guardian_phone,
-    s.form_level, s.national_id, COALESCE(sc.name, '')::text AS school_name
+    s.form_level, s.national_id, s.status, COALESCE(sc.name, '')::text AS school_name
 FROM students s LEFT JOIN schools sc ON sc.id = s.school_id
 WHERE LOWER(s.last_name) = LOWER(sqlc.arg(last_name)::text)
     AND LOWER(s.first_name) = LOWER(sqlc.arg(first_name)::text)
@@ -2503,9 +2426,11 @@ SELECT 'promotion_settings', NULL, 'Updated', u.id, u.name, u.role, u.school_id,
 FROM updated LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int;
 
 -- name: GetDefaultAcademicYear :one
--- The year a school without a stage is in: the active one, else the latest.
+-- The year a school without a stage is in: the latest year that has started, else the
+-- first one to come.
 SELECT id, year FROM academic_years
-ORDER BY (status = 'Active') DESC, year DESC
+ORDER BY (start_date <= sqlc.arg(today)::date) DESC,
+    CASE WHEN start_date <= sqlc.arg(today)::date THEN -year ELSE year END
 LIMIT 1;
 
 -- name: GetAcademicYearByIDForStage :one
@@ -2521,7 +2446,7 @@ SELECT academic_year_id, term FROM school_stages WHERE school_id = sqlc.arg(scho
 -- Every open school with its stage (NULL when it has none yet) and division.
 SELECT sc.id AS school_id, sc.name AS school_name, sc.school_number, d.name AS district_name,
     rg.name AS region_name, st.academic_year_id, st.term,
-    (SELECT COUNT(*) FROM students s WHERE s.school_id = sc.id AND COALESCE(s.status, 'Active') <> 'Completed')::int AS learners
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = sc.id AND s.status = 'Active')::int AS learners
 FROM schools sc
     JOIN districts d ON d.id = sc.district_id
     JOIN regions rg ON rg.id = d.region_id
@@ -2558,24 +2483,10 @@ SELECT s.id, s.first_name, s.last_name, s.student_number, COALESCE(s.form_level,
 FROM students s
     LEFT JOIN student_marks m ON m.student_id = s.id AND m.academic_year_id = sqlc.arg(academic_year_id)::int AND m.term = 3
 WHERE s.school_id = sqlc.arg(school_id)::int
-    AND COALESCE(s.status, 'Active') <> 'Completed'
+    AND s.status = 'Active'
     AND NOT EXISTS (SELECT 1 FROM promotions p WHERE p.student_id = s.id AND p.academic_year_id = sqlc.arg(academic_year_id)::int)
 GROUP BY s.id
 ORDER BY s.form_level, s.last_name, s.first_name;
-
--- name: CreatePromotion :exec
-INSERT INTO promotions (student_id, school_id, academic_year_id, from_form, to_form, subjects_passed, outcome, automatic, decided_by)
-VALUES (sqlc.arg(student_id)::int, sqlc.arg(school_id)::int, sqlc.arg(academic_year_id)::int, sqlc.arg(from_form)::int,
-    sqlc.arg(to_form)::int, sqlc.arg(subjects_passed)::int, sqlc.arg(outcome)::text, sqlc.arg(automatic)::bool,
-    sqlc.arg(actor_user_id)::int);
-
--- name: MoveStudentAfterYearEnd :exec
--- Completed learners keep their form and become 'Completed'; everyone else is Active
--- in the new academic year at their new form.
-UPDATE students
-SET form_level = sqlc.arg(form_level)::int, status = sqlc.arg(status)::text,
-    academic_year_id = sqlc.arg(academic_year_id)::int, updated_at = CURRENT_TIMESTAMP
-WHERE id = sqlc.arg(student_id)::int;
 
 -- name: ListYearResults :many
 -- A school's year-end results for one academic year.
@@ -2632,11 +2543,11 @@ ON CONFLICT DO NOTHING;
 -- name: ListTermMarks :many
 -- Every mark a school recorded in one term, with each learner's form during that year
 -- (from their year-end result if the year is finished, otherwise their current form).
+-- (The form is looked up per mark by key; joining students hashed every learner nationally.)
 SELECT m.student_id, m.subject_id, sb.name AS subject_name, m.mark,
     COALESCE((SELECT p.from_form FROM promotions p WHERE p.student_id = m.student_id AND p.academic_year_id = m.academic_year_id),
-        s.form_level, 1)::int AS form_level
+        (SELECT s.form_level FROM students s WHERE s.id = m.student_id), 1)::int AS form_level
 FROM student_marks m
-    JOIN students s ON s.id = m.student_id
     JOIN subjects sb ON sb.id = m.subject_id
 WHERE m.school_id = sqlc.arg(school_id)::int AND m.academic_year_id = sqlc.arg(academic_year_id)::int
     AND m.term = sqlc.arg(term)::int
@@ -2773,3 +2684,305 @@ FROM updated LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int;
 -- name: ListTermDatesForYear :many
 SELECT term, start_date, end_date FROM academic_year_terms
 WHERE academic_year_id = sqlc.arg(academic_year_id)::int ORDER BY term;
+
+-- name: SyncAcademicYearStatuses :exec
+-- Status follows the dates: Upcoming before the start, Completed after the end, else Active.
+UPDATE academic_years
+SET status = CASE
+        WHEN sqlc.arg(today)::date < start_date THEN 'Upcoming'
+        WHEN sqlc.arg(today)::date > end_date THEN 'Completed'
+        ELSE 'Active'
+    END,
+    updated_at = CURRENT_TIMESTAMP
+WHERE status IS DISTINCT FROM CASE
+        WHEN sqlc.arg(today)::date < start_date THEN 'Upcoming'
+        WHEN sqlc.arg(today)::date > end_date THEN 'Completed'
+        ELSE 'Active'
+    END;
+
+-- name: CountOverlappingAcademicYears :one
+-- Other years whose dates overlap these (years may not overlap: one is active at a time).
+SELECT COUNT(*)::int FROM academic_years
+WHERE id <> sqlc.arg(exclude_id)::int
+    AND start_date <= sqlc.arg(end_date)::date AND end_date >= sqlc.arg(start_date)::date;
+
+-- name: SetLearnerLeft :one
+-- Marks an active learner as Withdrawn or DroppedOut (optionally only at one school).
+WITH changed AS (
+    UPDATE students
+    SET status = sqlc.arg(status)::text, left_on = sqlc.arg(left_on)::date,
+        leaving_reason = sqlc.narg(reason)::text, updated_at = CURRENT_TIMESTAMP
+    WHERE id = sqlc.arg(student_id)::int AND status = 'Active'
+        AND (sqlc.narg(school_id)::int IS NULL OR school_id = sqlc.narg(school_id)::int)
+    RETURNING id
+)
+INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+SELECT 'student', changed.id, sqlc.arg(status)::text, u.id, u.name, u.role, u.school_id,
+    'Left on ' || sqlc.arg(left_on)::date || COALESCE(': ' || sqlc.narg(reason)::text, '')
+FROM changed LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int
+RETURNING entity_id;
+
+-- name: ReinstateLearner :one
+WITH changed AS (
+    UPDATE students
+    SET status = 'Active', left_on = NULL, leaving_reason = NULL, updated_at = CURRENT_TIMESTAMP
+    WHERE id = sqlc.arg(student_id)::int AND status IN ('Withdrawn', 'DroppedOut')
+        AND (sqlc.narg(school_id)::int IS NULL OR school_id = sqlc.narg(school_id)::int)
+    RETURNING id
+)
+INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+SELECT 'student', changed.id, 'Reinstated', u.id, u.name, u.role, u.school_id, 'Back at school'
+FROM changed LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int
+RETURNING entity_id;
+
+-- name: GetLearnerState :one
+SELECT status, school_id, left_on, leaving_reason,
+    EXISTS (SELECT 1 FROM transfers t WHERE t.student_id = students.id AND t.status IN ('Pending', 'Accepted'))::bool AS transfer_open
+FROM students WHERE id = sqlc.arg(student_id)::int;
+
+-- name: CountOtherActiveSuperAdmins :one
+SELECT COUNT(*)::int FROM users
+WHERE role = 'SUPER_ADMIN' AND is_activated AND deleted_at IS NULL AND id <> sqlc.arg(exclude_id)::int;
+
+-- ============================================================================
+-- Activity log: the audit_logs written throughout the app, for MCDE to search.
+-- ============================================================================
+
+-- name: ListAuditLogs :many
+-- One page of the log, newest first, with what each entry is about as a readable label.
+-- Counted separately (CountAuditLogs) so the page is read straight from the index.
+SELECT a.id, a.entity_type, COALESCE(a.entity_id, 0)::int AS entity_id, a.action,
+    COALESCE(a.actor_user_id, 0)::int AS actor_user_id, COALESCE(a.actor_name, '')::text AS actor_name,
+    COALESCE(a.actor_role, '')::text AS actor_role, COALESCE(a.note, '')::text AS note, a.created_at,
+    COALESCE(CASE a.entity_type
+        WHEN 'school' THEN (SELECT name FROM schools WHERE id = a.entity_id)
+        WHEN 'user' THEN (SELECT name || ' (' || email || ')' FROM users WHERE id = a.entity_id)
+        WHEN 'student' THEN (SELECT first_name || ' ' || last_name || ' (' || student_number || ')' FROM students WHERE id = a.entity_id)
+        WHEN 'region' THEN (SELECT name || ' division' FROM regions WHERE id = a.entity_id)
+        WHEN 'district' THEN (SELECT name || ' district' FROM districts WHERE id = a.entity_id)
+        WHEN 'academic_year' THEN (SELECT year::text FROM academic_years WHERE id = a.entity_id)
+        WHEN 'transfer' THEN (SELECT st.first_name || ' ' || st.last_name || ' (transfer)' FROM transfers t JOIN students st ON st.id = t.student_id WHERE t.id = a.entity_id)
+        WHEN 'school_request' THEN (SELECT school_name || ' (request)' FROM school_requests WHERE id = a.entity_id)
+        WHEN 'notice' THEN (SELECT title FROM notices WHERE id = a.entity_id)
+    END, '')::text AS entity_label
+FROM audit_logs a
+WHERE (sqlc.narg(actor_user_id)::int IS NULL OR a.actor_user_id = sqlc.narg(actor_user_id)::int)
+    AND (sqlc.narg(actor_role)::text IS NULL OR a.actor_role = sqlc.narg(actor_role)::text)
+    AND (sqlc.narg(entity_type)::text IS NULL OR a.entity_type = sqlc.narg(entity_type)::text)
+    AND (sqlc.narg(from_date)::date IS NULL OR a.created_at >= sqlc.narg(from_date)::date)
+    AND (sqlc.narg(to_date)::date IS NULL OR a.created_at < sqlc.narg(to_date)::date + 1)
+    AND (sqlc.narg(search)::text IS NULL OR a.note ILIKE '%' || sqlc.narg(search)::text || '%'
+        OR a.action ILIKE '%' || sqlc.narg(search)::text || '%'
+        OR a.actor_name ILIKE '%' || sqlc.narg(search)::text || '%')
+ORDER BY a.created_at DESC, a.id DESC
+LIMIT sqlc.arg(page_size)::int OFFSET sqlc.arg(page_offset)::int;
+
+-- name: CountAuditLogs :one
+-- How many entries match ListAuditLogs' filters.
+SELECT COUNT(*)::int FROM audit_logs a
+WHERE (sqlc.narg(actor_user_id)::int IS NULL OR a.actor_user_id = sqlc.narg(actor_user_id)::int)
+    AND (sqlc.narg(actor_role)::text IS NULL OR a.actor_role = sqlc.narg(actor_role)::text)
+    AND (sqlc.narg(entity_type)::text IS NULL OR a.entity_type = sqlc.narg(entity_type)::text)
+    AND (sqlc.narg(from_date)::date IS NULL OR a.created_at >= sqlc.narg(from_date)::date)
+    AND (sqlc.narg(to_date)::date IS NULL OR a.created_at < sqlc.narg(to_date)::date + 1)
+    AND (sqlc.narg(search)::text IS NULL OR a.note ILIKE '%' || sqlc.narg(search)::text || '%'
+        OR a.action ILIKE '%' || sqlc.narg(search)::text || '%'
+        OR a.actor_name ILIKE '%' || sqlc.narg(search)::text || '%');
+
+-- name: ListAuditActors :many
+-- Everyone who appears in the log, for the "who" filter.
+SELECT a.actor_user_id::int AS id, MAX(a.actor_name)::text AS name, MAX(a.actor_role)::text AS role, COUNT(*)::int AS entries
+FROM audit_logs a
+WHERE a.actor_user_id IS NOT NULL
+GROUP BY a.actor_user_id
+ORDER BY CASE MAX(a.actor_role) WHEN 'SUPER_ADMIN' THEN 0 WHEN 'REGIONAL_ADMIN' THEN 1 ELSE 2 END, MAX(a.actor_name);
+
+-- Dashboard charts. Every Insight query covers the whole country, one division
+-- (region_id) or one school (school_id).
+
+-- name: InsightLearnersByForm :many
+-- Current learners by form and gender.
+SELECT COALESCE(s.form_level, 0)::int AS form_level, COALESCE(s.gender, '')::text AS gender,
+    COUNT(*)::int AS learners, COUNT(*) FILTER (WHERE s.disability)::int AS with_disability
+FROM students s
+    JOIN schools sc ON sc.id = s.school_id
+    JOIN districts d ON d.id = sc.district_id
+WHERE s.status = 'Active'
+    AND (sqlc.narg(region_id)::int IS NULL OR d.region_id = sqlc.narg(region_id)::int)
+    AND (sqlc.narg(school_id)::int IS NULL OR s.school_id = sqlc.narg(school_id)::int)
+GROUP BY 1, 2
+ORDER BY 1, 2;
+
+-- name: InsightLearnerStatuses :many
+-- Learners by status: current, withdrawn, dropped out, completed Form 4.
+SELECT s.status, COUNT(*)::int AS learners
+FROM students s
+    JOIN schools sc ON sc.id = s.school_id
+    JOIN districts d ON d.id = sc.district_id
+WHERE (sqlc.narg(region_id)::int IS NULL OR d.region_id = sqlc.narg(region_id)::int)
+    AND (sqlc.narg(school_id)::int IS NULL OR s.school_id = sqlc.narg(school_id)::int)
+GROUP BY 1;
+
+-- name: InsightAreas :many
+-- Open schools and current learners per division (country) or per district (a division).
+SELECT CASE WHEN sqlc.narg(region_id)::int IS NULL THEN rg.id ELSE d.id END::int AS id,
+    CASE WHEN sqlc.narg(region_id)::int IS NULL THEN rg.name ELSE d.name END::text AS name,
+    COUNT(sc.id) FILTER (WHERE sc.closed_at IS NULL)::int AS schools,
+    COALESCE(SUM(l.learners), 0)::int AS learners,
+    COALESCE(SUM(l.female), 0)::int AS female
+FROM regions rg
+    JOIN districts d ON d.region_id = rg.id
+    LEFT JOIN schools sc ON sc.district_id = d.id
+    LEFT JOIN (
+        SELECT school_id, COUNT(*) AS learners, COUNT(*) FILTER (WHERE gender = 'Female') AS female
+        FROM students WHERE status = 'Active' GROUP BY school_id
+    ) l ON l.school_id = sc.id
+WHERE sqlc.narg(region_id)::int IS NULL OR rg.id = sqlc.narg(region_id)::int
+GROUP BY 1, 2
+ORDER BY 2;
+
+-- name: InsightSchoolTerms :many
+-- Open schools by the term they are in (0: not started in the system yet).
+SELECT COALESCE(st.term, 0)::int AS term, COUNT(*)::int AS schools
+FROM schools sc
+    JOIN districts d ON d.id = sc.district_id
+    LEFT JOIN school_stages st ON st.school_id = sc.id
+WHERE sc.closed_at IS NULL
+    AND (sqlc.narg(region_id)::int IS NULL OR d.region_id = sqlc.narg(region_id)::int)
+GROUP BY 1
+ORDER BY 1;
+
+-- name: InsightTermReports :many
+-- Saved end-of-term reports from min_year on, oldest first, with each school's area.
+SELECT tr.school_id, tr.academic_year_id, ay.year, tr.term, tr.learners_assessed, tr.details,
+    CASE WHEN sqlc.narg(region_id)::int IS NULL THEN rg.id ELSE d.id END::int AS area_id,
+    CASE WHEN sqlc.narg(region_id)::int IS NULL THEN rg.name ELSE d.name END::text AS area_name
+FROM term_reports tr
+    JOIN academic_years ay ON ay.id = tr.academic_year_id
+    JOIN schools sc ON sc.id = tr.school_id
+    JOIN districts d ON d.id = sc.district_id
+    JOIN regions rg ON rg.id = d.region_id
+WHERE ay.year >= sqlc.arg(min_year)::int
+    AND (sqlc.narg(region_id)::int IS NULL OR d.region_id = sqlc.narg(region_id)::int)
+    AND (sqlc.narg(school_id)::int IS NULL OR tr.school_id = sqlc.narg(school_id)::int)
+ORDER BY ay.year, tr.term, tr.school_id;
+
+-- name: SearchStudents :many
+-- One page of learners for the learner lists (country, division, district or school),
+-- with where each one is. Counted separately (CountStudents).
+-- status: Active, Left (withdrawn or dropped out) or Completed; NULL for everyone.
+SELECT s.id, s.student_number, s.first_name, COALESCE(s.middle_name, '')::text AS middle_name, s.last_name,
+    s.date_of_birth, COALESCE(s.gender, '')::text AS gender, COALESCE(s.form_level, 0)::int AS form_level,
+    COALESCE(s.guardian_name, '')::text AS guardian_name, COALESCE(s.guardian_phone, '')::text AS guardian_phone,
+    COALESCE(s.guardian_alt_phone, '')::text AS guardian_alt_phone, COALESCE(s.guardian_email, '')::text AS guardian_email,
+    COALESCE(s.guardian_relationship, '')::text AS guardian_relationship,
+    COALESCE(s.previous_school, '')::text AS previous_school, COALESCE(s.previous_school_id, 0)::int AS previous_school_id,
+    s.school_id, COALESCE(s.academic_year_id, 0)::int AS academic_year_id, COALESCE(s.disability, false)::bool AS disability,
+    COALESCE(s.disability_details, '')::text AS disability_details, COALESCE(s.national_id, '')::text AS national_id,
+    COALESCE(s.jce_number, '')::text AS jce_number, s.status, s.left_on, COALESCE(s.leaving_reason, '')::text AS leaving_reason,
+    sc.name AS school_name, sc.district_id, d.name AS district_name, d.region_id, rg.name AS region_name
+FROM students s
+    JOIN schools sc ON sc.id = s.school_id
+    JOIN districts d ON d.id = sc.district_id
+    JOIN regions rg ON rg.id = d.region_id
+WHERE (sqlc.narg(region_id)::int IS NULL OR d.region_id = sqlc.narg(region_id)::int)
+    AND (sqlc.narg(district_id)::int IS NULL OR sc.district_id = sqlc.narg(district_id)::int)
+    AND (sqlc.narg(school_id)::int IS NULL OR s.school_id = sqlc.narg(school_id)::int)
+    AND (sqlc.narg(form_level)::int IS NULL OR s.form_level = sqlc.narg(form_level)::int)
+    AND (sqlc.narg(status)::text IS NULL
+        OR (sqlc.narg(status)::text = 'Left' AND s.status IN ('Withdrawn', 'DroppedOut'))
+        OR s.status = sqlc.narg(status)::text)
+    AND (sqlc.narg(search)::text IS NULL
+        OR s.student_number ILIKE '%' || sqlc.narg(search)::text || '%'
+        OR (s.first_name || ' ' || COALESCE(s.middle_name || ' ', '') || s.last_name) ILIKE '%' || sqlc.narg(search)::text || '%'
+        OR (s.last_name || ' ' || s.first_name) ILIKE '%' || sqlc.narg(search)::text || '%'
+        OR UPPER(s.national_id) = UPPER(sqlc.narg(search)::text)
+        OR UPPER(s.jce_number) = UPPER(sqlc.narg(search)::text))
+ORDER BY s.last_name, s.first_name, s.id
+LIMIT sqlc.arg(page_size)::int OFFSET sqlc.arg(page_offset)::int;
+
+-- name: CountStudents :one
+-- How many learners match SearchStudents' filters.
+SELECT COUNT(*)::int FROM students s
+    JOIN schools sc ON sc.id = s.school_id
+    JOIN districts d ON d.id = sc.district_id
+WHERE (sqlc.narg(region_id)::int IS NULL OR d.region_id = sqlc.narg(region_id)::int)
+    AND (sqlc.narg(district_id)::int IS NULL OR sc.district_id = sqlc.narg(district_id)::int)
+    AND (sqlc.narg(school_id)::int IS NULL OR s.school_id = sqlc.narg(school_id)::int)
+    AND (sqlc.narg(form_level)::int IS NULL OR s.form_level = sqlc.narg(form_level)::int)
+    AND (sqlc.narg(status)::text IS NULL
+        OR (sqlc.narg(status)::text = 'Left' AND s.status IN ('Withdrawn', 'DroppedOut'))
+        OR s.status = sqlc.narg(status)::text)
+    AND (sqlc.narg(search)::text IS NULL
+        OR s.student_number ILIKE '%' || sqlc.narg(search)::text || '%'
+        OR (s.first_name || ' ' || COALESCE(s.middle_name || ' ', '') || s.last_name) ILIKE '%' || sqlc.narg(search)::text || '%'
+        OR (s.last_name || ' ' || s.first_name) ILIKE '%' || sqlc.narg(search)::text || '%'
+        OR UPPER(s.national_id) = UPPER(sqlc.narg(search)::text)
+        OR UPPER(s.jce_number) = UPPER(sqlc.narg(search)::text));
+
+-- name: ListSubjectIDsForStudents :many
+-- Subject choices of several learners at once.
+SELECT student_id, subject_id FROM student_subjects
+WHERE student_id = ANY(sqlc.arg(student_ids)::int[])
+ORDER BY student_id, subject_id;
+
+-- name: ListTermMarkFingerprints :many
+-- The fingerprint of each term's marks at a school, worked out in the database; the
+-- same SHA-256 as computeTermReport, so it can be compared with saved reports.
+SELECT m.academic_year_id, m.term,
+    encode(sha256(convert_to(string_agg(m.student_id || ':' || m.subject_id || ':' || m.mark || ';', ''
+        ORDER BY m.student_id, m.subject_id), 'UTF8')), 'hex')::text AS fingerprint
+FROM student_marks m
+WHERE m.school_id = sqlc.arg(school_id)::int
+    AND (sqlc.narg(academic_year_id)::int IS NULL OR m.academic_year_id = sqlc.narg(academic_year_id)::int)
+    AND (sqlc.narg(term)::int IS NULL OR m.term = sqlc.narg(term)::int)
+GROUP BY m.academic_year_id, m.term;
+
+-- name: LockSchoolStage :one
+-- A school's stage, locked until the transaction ends, so two moves cannot overlap.
+SELECT academic_year_id, term FROM school_stages WHERE school_id = sqlc.arg(school_id)::int FOR UPDATE;
+
+-- name: CreatePromotions :exec
+-- Year-end results of many learners at once (arrays in the same order).
+INSERT INTO promotions (student_id, school_id, academic_year_id, from_form, to_form, subjects_passed, outcome, automatic, decided_by)
+SELECT unnest(sqlc.arg(student_ids)::int[]), sqlc.arg(school_id)::int, sqlc.arg(academic_year_id)::int,
+    unnest(sqlc.arg(from_forms)::int[]), unnest(sqlc.arg(to_forms)::int[]), unnest(sqlc.arg(subjects_passed)::int[]),
+    unnest(sqlc.arg(outcomes)::text[]), sqlc.arg(automatic)::bool, sqlc.arg(actor_user_id)::int;
+
+-- name: MoveStudentsAfterYearEnd :exec
+-- Moves many learners into the new academic year at once: Completed learners keep
+-- their form and become 'Completed'; everyone else is Active at their new form.
+UPDATE students s
+SET form_level = u.form_level, status = u.status, academic_year_id = sqlc.arg(academic_year_id)::int,
+    updated_at = CURRENT_TIMESTAMP
+FROM (
+    SELECT unnest(sqlc.arg(student_ids)::int[]) AS student_id, unnest(sqlc.arg(form_levels)::int[]) AS form_level,
+        unnest(sqlc.arg(statuses)::text[]) AS status
+) u
+WHERE s.id = u.student_id;
+
+-- name: ListYearLearners :many
+-- Learners who were at a school in an academic year (a year-end result or any marks
+-- there), with the form they were in that year. Used to correct a finished year, so it
+-- includes learners who have since completed Form 4, left or moved school.
+SELECT s.id, s.student_number, s.first_name, COALESCE(s.middle_name, '')::text AS middle_name, s.last_name,
+    COALESCE(s.gender, '')::text AS gender, s.status,
+    COALESCE(p.from_form, s.form_level, 1)::int AS year_form
+FROM students s
+    LEFT JOIN promotions p ON p.student_id = s.id AND p.academic_year_id = sqlc.arg(academic_year_id)::int
+WHERE s.id IN (
+        SELECT pr.student_id FROM promotions pr
+        WHERE pr.school_id = sqlc.arg(school_id)::int AND pr.academic_year_id = sqlc.arg(academic_year_id)::int
+        UNION
+        SELECT m.student_id FROM student_marks m
+        WHERE m.school_id = sqlc.arg(school_id)::int AND m.academic_year_id = sqlc.arg(academic_year_id)::int)
+    AND (sqlc.narg(form_level)::int IS NULL OR COALESCE(p.from_form, s.form_level, 1) = sqlc.narg(form_level)::int)
+ORDER BY s.last_name, s.first_name, s.id;
+
+-- name: ListYearMarksForSchool :many
+-- The marks a school recorded for some learners in one year and term.
+SELECT m.id, m.student_id, m.subject_id, m.academic_year_id, m.term, m.mark, m.school_id, m.updated_at
+FROM student_marks m
+WHERE m.school_id = sqlc.arg(school_id)::int AND m.academic_year_id = sqlc.arg(academic_year_id)::int
+    AND m.term = sqlc.arg(term)::int AND m.student_id = ANY(sqlc.arg(student_ids)::int[])
+ORDER BY m.student_id, m.subject_id;

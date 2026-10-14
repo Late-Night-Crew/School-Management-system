@@ -217,6 +217,12 @@ func saveTermReport(ctx context.Context, queries *dbsqlc.Queries, actorID, schoo
 	if err != nil {
 		return err
 	}
+	return saveTermReportWith(ctx, queries, rules, actorID, schoolID, yearID, term, note)
+}
+
+// saveTermReportWith is saveTermReport with the pass rules already loaded (when many
+// schools close a term at once).
+func saveTermReportWith(ctx context.Context, queries *dbsqlc.Queries, rules passRules, actorID, schoolID, yearID int64, term int, note string) error {
 	marks, err := queries.ListTermMarks(ctx, dbsqlc.ListTermMarksParams{SchoolID: int32(schoolID), AcademicYearID: int32(yearID), Term: int32(term)})
 	if err != nil {
 		return fmt.Errorf("failed to read term marks: %w", err)
@@ -252,6 +258,8 @@ type TermReportService interface {
 	ListForSchool(ctx context.Context, schoolID int64) ([]*schema.TermReport, error)
 	// Get returns a saved report, or the current term worked out live.
 	Get(ctx context.Context, schoolID, yearID int64, term int) (*schema.TermReport, error)
+	// Current works out the school's current term so far (ErrInUse: no term yet).
+	Current(ctx context.Context, schoolID int64) (*schema.TermReport, error)
 	Regenerate(ctx context.Context, actorID, schoolID, yearID int64, term int) (*schema.TermReport, error)
 	ListForTerm(ctx context.Context, filter *schema.TermReportFilter) ([]*schema.SchoolTermRow, error)
 	// LearnerProgress: schoolID limits it to that school's learners (0: any learner).
@@ -268,17 +276,36 @@ func NewTermReportService(queries *dbsqlc.Queries, promotions PromotionService, 
 	return &termReportService{queries: queries, promotions: promotions, logger: logger}
 }
 
-// currentFingerprint is the fingerprint of a term's marks as they are now.
-func (s *termReportService) currentFingerprint(ctx context.Context, schoolID, yearID int64, term int) (string, error) {
-	marks, err := s.queries.ListTermMarks(ctx, dbsqlc.ListTermMarksParams{SchoolID: int32(schoolID), AcademicYearID: int32(yearID), Term: int32(term)})
+// emptyFingerprint is the fingerprint of a term without marks.
+var emptyFingerprint = func() string { sum := sha256.Sum256(nil); return hex.EncodeToString(sum[:]) }()
+
+// fingerprints returns the fingerprint of each term's marks as they are now, keyed by
+// academic year and term (yearID 0: every term). Worked out in the database, so the
+// marks are not read into the server.
+func (s *termReportService) fingerprints(ctx context.Context, schoolID, yearID int64, term int) (map[[2]int64]string, error) {
+	rows, err := s.queries.ListTermMarkFingerprints(ctx, dbsqlc.ListTermMarkFingerprintsParams{
+		SchoolID: int32(schoolID), AcademicYearID: optionalID(yearID), Term: optionalID(int64(term)),
+	})
 	if err != nil {
-		return "", fmt.Errorf("failed to read term marks: %w", err)
+		return nil, fmt.Errorf("failed to check term marks: %w", err)
 	}
-	hash := sha256.New()
-	for _, m := range marks {
-		fmt.Fprintf(hash, "%d:%d:%d;", m.StudentID, m.SubjectID, m.Mark)
+	out := make(map[[2]int64]string, len(rows))
+	for _, r := range rows {
+		out[[2]int64{int64(r.AcademicYearID), int64(r.Term)}] = r.Fingerprint
 	}
-	return hex.EncodeToString(hash.Sum(nil)), nil
+	return out, nil
+}
+
+// currentFingerprint is the fingerprint of one term's marks as they are now.
+func (s *termReportService) currentFingerprint(ctx context.Context, schoolID, yearID int64, term int) (string, error) {
+	all, err := s.fingerprints(ctx, schoolID, yearID, term)
+	if err != nil {
+		return "", err
+	}
+	if f, ok := all[[2]int64{yearID, int64(term)}]; ok {
+		return f, nil
+	}
+	return emptyFingerprint, nil
 }
 
 func rate(v sql.NullFloat64) *float64 {
@@ -300,14 +327,18 @@ func (s *termReportService) ListForSchool(ctx context.Context, schoolID int64) (
 	} else if !errors.Is(err, ErrInUse) {
 		return nil, err
 	}
+	current, err := s.fingerprints(ctx, schoolID, 0, 0)
+	if err != nil {
+		return nil, err
+	}
 	for _, row := range rows {
 		var details schema.TermReportDetails
 		if err := json.Unmarshal(row.Details, &details); err != nil {
 			return nil, fmt.Errorf("failed to read term report: %w", err)
 		}
-		fingerprint, err := s.currentFingerprint(ctx, schoolID, int64(row.AcademicYearID), int(row.Term))
-		if err != nil {
-			return nil, err
+		fingerprint, ok := current[[2]int64{int64(row.AcademicYearID), int64(row.Term)}]
+		if !ok {
+			fingerprint = emptyFingerprint
 		}
 		reports = append(reports, &schema.TermReport{
 			SchoolID: schoolID, AcademicYearID: int64(row.AcademicYearID), Year: int(row.Year), Term: int(row.Term),
@@ -339,6 +370,10 @@ func (s *termReportService) live(ctx context.Context, schoolID int64) (*schema.T
 		LearnersAssessed: figures.learners, AverageMark: figures.average, PassRate: figures.passRate,
 		JCEPassRate: figures.jce, MSCEPassRate: figures.msce, Details: &figures.details, Live: true,
 	}, nil
+}
+
+func (s *termReportService) Current(ctx context.Context, schoolID int64) (*schema.TermReport, error) {
+	return s.live(ctx, schoolID)
 }
 
 func (s *termReportService) Get(ctx context.Context, schoolID, yearID int64, term int) (*schema.TermReport, error) {

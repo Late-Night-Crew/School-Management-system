@@ -5,7 +5,7 @@ import { autoTable } from "jspdf-autotable";
 import * as XLSX from "xlsx";
 
 import { listAcademicYears } from "../../api/academicYears";
-import { listSchoolExamResults, listSchoolMarks, listSchoolStudents } from "../../api/schoolPortal";
+import { listSchoolExamResults, listSchoolMarks, listAllSchoolStudents } from "../../api/schoolPortal";
 import { listSubjects } from "../../api/subjects";
 import { schoolPromotionBase } from "../../api/promotion";
 import { listTermReports } from "../../api/termReports";
@@ -316,7 +316,7 @@ export default function SchoolReports() {
   const { schoolId } = useParams();
   const [tab, setTab] = useState("marks");
   const lookups = useAsync(
-    useCallback(() => Promise.all([listSchoolStudents(schoolId), listSubjects(), listAcademicYears()]), [schoolId])
+    useCallback(() => Promise.all([listAllSchoolStudents(schoolId), listSubjects(), listAcademicYears()]), [schoolId])
   );
   const [students, subjects, years] = lookups.data || [];
 

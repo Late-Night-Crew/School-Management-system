@@ -2,9 +2,11 @@ import { useCallback } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { getRegion } from "../../api/regions";
+import { getRegionInsights } from "../../api/insights";
 import { getRegionDashboard, listRegionDistricts, listRegionTransfers } from "../../api/regionPortal";
 import useAsync from "../../hooks/useAsync";
 import { formatDate, formatNumber } from "../../utils/format";
+import InsightsPanel from "../../components/charts/InsightsPanel";
 import DataState from "../../components/DataState";
 import TransferStatusBadge from "../../components/TransferStatusBadge";
 import { Button, Card, Notice, Page, StatTile, Table } from "../../components/ui";
@@ -16,6 +18,7 @@ export default function RegionalDashboard() {
   const stats = useAsync(useCallback(() => getRegionDashboard(regionId), [regionId]));
   const districts = useAsync(useCallback(() => listRegionDistricts(regionId), [regionId]));
   const transfers = useAsync(useCallback(() => listRegionTransfers(regionId), [regionId]));
+  const insights = useAsync(useCallback(() => getRegionInsights(regionId), [regionId]));
 
   const s = stats.data || {};
   const recentTransfers = (transfers.data || []).slice(0, 5);
@@ -48,6 +51,10 @@ export default function RegionalDashboard() {
           loading={stats.loading}
         />
       </div>
+
+      <DataState loading={insights.loading} error={insights.error} onRetry={insights.reload}>
+        {insights.data && <InsightsPanel insights={insights.data} areaLabel="District" />}
+      </DataState>
 
       <div className="ui-grid ui-cols-2">
         <Card

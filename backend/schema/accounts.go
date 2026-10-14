@@ -23,7 +23,7 @@ type Account struct {
 // AccountFilter narrows the account list. A regional admin's list is always limited
 // to their own region.
 type AccountFilter struct {
-	Role     string `query:"role" validate:"omitempty,oneof=REGIONAL_ADMIN SCHOOL_MANAGER"`
+	Role     string `query:"role" validate:"omitempty,oneof=SUPER_ADMIN REGIONAL_ADMIN SCHOOL_MANAGER"`
 	RegionID int64  `query:"region_id" validate:"omitempty,min=1"`
 }
 
@@ -31,7 +31,7 @@ type AccountFilter struct {
 type CreateAccountRequest struct {
 	Name     string `json:"name" validate:"required,max=150"`
 	Email    string `json:"email" validate:"required,email,max=150"`
-	Role     string `json:"role" validate:"required,oneof=REGIONAL_ADMIN SCHOOL_MANAGER"`
+	Role     string `json:"role" validate:"required,oneof=SUPER_ADMIN REGIONAL_ADMIN SCHOOL_MANAGER"`
 	RegionID int64  `json:"region_id"`
 	SchoolID int64  `json:"school_id"`
 	Phone    string `json:"phone"`

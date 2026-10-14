@@ -4,6 +4,7 @@
 package promotion
 
 import (
+	"context"
 	"errors"
 
 	"nsms/common"
@@ -294,5 +295,71 @@ func CheckYearDates(service services.ReminderService, logger logging.Logger) fib
 			return errorResponse(ctx, logger, err, "Failed to check the term dates")
 		}
 		return ctx.Next()
+	}
+}
+
+func learnerStatusError(ctx *fiber.Ctx, logger logging.Logger, err error) error {
+	switch {
+	case errors.Is(err, services.ErrNotFound):
+		return problemdetail.NotFound(ctx, "Learner not found")
+	case errors.Is(err, services.ErrLearnerStatus):
+		return problemdetail.Conflict(ctx, err.Error())
+	}
+	logger.Error(module, "failed to change learner status", "error", err)
+	return problemdetail.ServerErrorProblem(ctx, "Failed to change the learner's status")
+}
+
+// learnerChanger is what MarkLeft and Reinstate need: the student and school-admin
+// services both provide it.
+type learnerChanger interface {
+	MarkLeft(ctx context.Context, actorID, schoolID, studentID int64, req *schema.LeaveRequest) error
+	Reinstate(ctx context.Context, actorID, schoolID, studentID int64) error
+}
+
+// MarkLearnerLeft records that a learner withdrew or dropped out. param names the
+// school ID in the path (coordinators); empty means any learner (MCDE).
+func MarkLearnerLeft(service learnerChanger, logger logging.Logger, param string) fiber.Handler {
+	return func(ctx *fiber.Ctx) error {
+		var schoolID int64
+		if param != "" {
+			id, err := schoolParam(ctx, param)
+			if err != nil {
+				return err
+			}
+			schoolID = id
+		}
+		studentID, err := common.ParseIDParam(ctx, "student_id")
+		if err != nil || studentID < 1 {
+			return problemdetail.BadRequest(ctx, "Invalid learner ID")
+		}
+		var req schema.LeaveRequest
+		if _, err := common.ParseBodyThenValidate(ctx, &req); err != nil {
+			return problemdetail.BadRequest(ctx, err.Error())
+		}
+		if err := service.MarkLeft(ctx.Context(), actorID(ctx), schoolID, studentID, &req); err != nil {
+			return learnerStatusError(ctx, logger, err)
+		}
+		return ctx.SendStatus(fiber.StatusNoContent)
+	}
+}
+
+func ReinstateLearner(service learnerChanger, logger logging.Logger, param string) fiber.Handler {
+	return func(ctx *fiber.Ctx) error {
+		var schoolID int64
+		if param != "" {
+			id, err := schoolParam(ctx, param)
+			if err != nil {
+				return err
+			}
+			schoolID = id
+		}
+		studentID, err := common.ParseIDParam(ctx, "student_id")
+		if err != nil || studentID < 1 {
+			return problemdetail.BadRequest(ctx, "Invalid learner ID")
+		}
+		if err := service.Reinstate(ctx.Context(), actorID(ctx), schoolID, studentID); err != nil {
+			return learnerStatusError(ctx, logger, err)
+		}
+		return ctx.SendStatus(fiber.StatusNoContent)
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"nsms/api/accounts"
 	"nsms/api/admin"
 	"nsms/api/comms"
+	"nsms/api/insights"
+	"nsms/api/learners"
 	"nsms/api/promotion"
 	"nsms/api/region"
 	"nsms/api/requests"
@@ -87,7 +89,7 @@ func (api *API) adminRoutes() {
 	adminApi.Post("/schools/:id/reopen", superAdmin, admin.ReopenSchool(api.SchoolService, api.logger))
 	adminApi.Post("/schools/:id/transfer_students", superAdmin, admin.TransferAllStudents(api.SchoolService, api.logger))
 
-	adminApi.Get("/students", superAdmin, admin.GetStudentList(api.StudentService, api.logger))
+	adminApi.Get("/students", superAdmin, learners.Search(api.LearnerSearch, api.logger, "", ""))
 	adminApi.Get("/students/duplicates", superAdmin, admin.FindSimilarStudents(api.StudentService, api.logger))
 	adminApi.Get("/students/:id", superAdmin, admin.GetStudentByID(api.StudentService, api.logger))
 	adminApi.Post("/students", superAdmin, admin.CreateStudent(api.StudentService, api.logger))
@@ -121,6 +123,9 @@ func (api *API) adminRoutes() {
 	adminApi.Patch("/transfers/:id/reject", superAdmin, admin.RejectTransfer(api.TransferService, api.logger))
 
 	adminApi.Get("/reports/schools", superAdmin, admin.GetSchoolReport(api.ReportService, api.logger))
+	adminApi.Get("/insights", superAdmin, insights.Get(api.Insights, api.logger, ""))
+	adminApi.Get("/audit_logs", superAdmin, admin.ListAuditLogs(api.Audit, api.logger))
+	adminApi.Get("/audit_logs/actors", superAdmin, admin.ListAuditActors(api.Audit, api.logger))
 
 	// Terms and year-end promotion, for any school or every school at once
 	promotions := api.Promotions
@@ -131,9 +136,10 @@ func (api *API) adminRoutes() {
 	adminApi.Post("/year_end/run_automatic", superAdmin, promotion.RunAutomatic(promotions, api.logger))
 	adminApi.Get("/schools/:id/stage", superAdmin, promotion.GetStage(promotions, api.logger, "id"))
 	// A school's marks, for MCDE's corrections (including years the school has finished)
-	adminApi.Get("/schools/:id/students", superAdmin, admin.ListSchoolStudents(api.SchoolAdminService, api.logger))
+	adminApi.Get("/schools/:id/students", superAdmin, learners.Search(api.LearnerSearch, api.logger, "", "id"))
 	adminApi.Get("/schools/:id/marks", superAdmin, admin.ListSchoolMarks(api.MarksService, api.logger))
 	adminApi.Put("/schools/:id/marks", superAdmin, admin.SaveSchoolMarks(api.MarksService, api.logger))
+	adminApi.Get("/schools/:id/marks/year", superAdmin, admin.ListYearMarks(api.MarksService, api.logger))
 	adminApi.Post("/schools/:id/stage/advance", superAdmin, promotion.AdvanceTerm(promotions, api.logger, "id"))
 	adminApi.Get("/schools/:id/year_end", superAdmin, promotion.PreviewYearEnd(promotions, api.logger, "id"))
 	adminApi.Post("/schools/:id/year_end", superAdmin, promotion.ApplyYearEnd(promotions, api.logger, "id"))
@@ -154,6 +160,8 @@ func (api *API) adminRoutes() {
 	adminApi.Get("/schools/:id/term_reports/:year_id/:term", superAdmin, promotion.GetTermReport(termReports, api.logger, "id"))
 	adminApi.Post("/schools/:id/term_reports/:year_id/:term/regenerate", superAdmin, promotion.RegenerateTermReport(termReports, api.logger, "id"))
 	adminApi.Get("/students/:student_id/progress", superAdmin, promotion.LearnerProgress(termReports, api.logger, ""))
+	adminApi.Post("/students/:student_id/leave", superAdmin, promotion.MarkLearnerLeft(api.StudentService, api.logger, ""))
+	adminApi.Post("/students/:student_id/reinstate", superAdmin, promotion.ReinstateLearner(api.StudentService, api.logger, ""))
 }
 
 func (api *API) SchoolRoutes() {
@@ -163,7 +171,8 @@ func (api *API) SchoolRoutes() {
 
 	// School admin student management
 	schoolAdminApi.Get("/dashboard", schoolAccess, school.GetSchoolDashboard(api.SchoolAdminService, api.logger))
-	schoolAdminApi.Get("/students", schoolAccess, school.GetStudentsForSchool(api.SchoolAdminService, api.logger))
+	schoolAdminApi.Get("/insights", schoolAccess, insights.Get(api.Insights, api.logger, "school_id"))
+	schoolAdminApi.Get("/students", schoolAccess, learners.Search(api.LearnerSearch, api.logger, "", "school_id"))
 	schoolAdminApi.Get("/students/duplicates", schoolAccess, school.FindSimilarStudents(api.SchoolAdminService, api.logger))
 	schoolAdminApi.Get("/students/:id", schoolAccess, school.GetStudentByIDForSchool(api.SchoolAdminService, api.logger))
 	schoolAdminApi.Post("/students", schoolAccess, school.CreateStudentForSchool(api.SchoolAdminService, api.logger))
@@ -187,6 +196,8 @@ func (api *API) SchoolRoutes() {
 	schoolAdminApi.Get("/term_reports/:year_id/:term", schoolAccess, promotion.GetTermReport(api.TermReports, api.logger, "school_id"))
 	schoolAdminApi.Post("/term_reports/:year_id/:term/regenerate", schoolAccess, promotion.RegenerateTermReport(api.TermReports, api.logger, "school_id"))
 	schoolAdminApi.Get("/students/:student_id/progress", schoolAccess, promotion.LearnerProgress(api.TermReports, api.logger, "school_id"))
+	schoolAdminApi.Post("/students/:student_id/leave", schoolAccess, promotion.MarkLearnerLeft(api.SchoolAdminService, api.logger, "school_id"))
+	schoolAdminApi.Post("/students/:student_id/reinstate", schoolAccess, promotion.ReinstateLearner(api.SchoolAdminService, api.logger, "school_id"))
 
 	// Per-student, per-subject marks
 	schoolAdminApi.Get("/marks", schoolAccess, school.ListMarks(api.MarksService, api.logger))
@@ -208,9 +219,10 @@ func (api *API) regionRoutes() {
 	regionAccess := RequireRegionAccess()
 
 	regionApi.Get("/dashboard", regionAccess, region.GetDashboard(api.RegionAdminService, api.logger))
+	regionApi.Get("/insights", regionAccess, insights.Get(api.Insights, api.logger, "region_id"))
 	regionApi.Get("/districts", regionAccess, region.ListDistricts(api.RegionAdminService, api.logger))
 	regionApi.Get("/schools", regionAccess, region.ListSchools(api.ReportService, api.logger))
-	regionApi.Get("/students", regionAccess, region.ListStudents(api.RegionAdminService, api.logger))
+	regionApi.Get("/students", regionAccess, learners.Search(api.LearnerSearch, api.logger, "region_id", ""))
 	regionApi.Get("/transfers", regionAccess, region.ListTransfers(api.RegionAdminService, api.logger))
 	regionApi.Get("/term_reports", regionAccess, promotion.CompareTerm(api.TermReports, api.logger, "region_id"))
 }

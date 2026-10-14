@@ -147,42 +147,99 @@ func getSchoolStage(ctx context.Context, queries *dbsqlc.Queries, schoolID int64
 	if err := schoolExists(ctx, queries, schoolID); err != nil {
 		return nil, err
 	}
-	stage := &schema.SchoolStage{SchoolID: schoolID, Term: 1}
+	var yearID, term sql.NullInt32
 	row, err := queries.GetSchoolStage(ctx, int32(schoolID))
 	switch {
 	case err == nil:
-		year, err := queries.GetAcademicYearByIDForStage(ctx, row.AcademicYearID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get academic year %d: %w", row.AcademicYearID, err)
-		}
-		stage.AcademicYearID, stage.Year, stage.Term = int64(year.ID), int(year.Year), int(row.Term)
-	case errors.Is(err, sql.ErrNoRows):
-		year, err := queries.GetDefaultAcademicYear(ctx)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, newUserError(ErrInUse, "No academic year has been set up yet. MCDE creates academic years under Manage → Academic Years.")
-		}
-		if err != nil {
-			return nil, fmt.Errorf("failed to get the active academic year: %w", err)
-		}
-		stage.AcademicYearID, stage.Year = int64(year.ID), int(year.Year)
-	default:
+		yearID, term = sql.NullInt32{Int32: row.AcademicYearID, Valid: true}, sql.NullInt32{Int32: row.Term, Valid: true}
+	case !errors.Is(err, sql.ErrNoRows):
 		return nil, fmt.Errorf("failed to get stage for school %d: %w", schoolID, err)
 	}
-	if dates, err := queries.GetTermDates(ctx, dbsqlc.GetTermDatesParams{AcademicYearID: int32(stage.AcademicYearID), Term: int32(stage.Term)}); err == nil {
+	return newStageResolver(queries).stage(ctx, schoolID, yearID, term)
+}
+
+// stageResolver works out schools' stages, reading each academic year, its term
+// dates and the year after it once however many schools share them.
+type stageResolver struct {
+	queries     *dbsqlc.Queries
+	today       time.Time
+	years       map[int32]dbsqlc.GetAcademicYearByIDForStageRow
+	defaultYear *dbsqlc.GetDefaultAcademicYearRow
+	dates       map[[2]int32]*dbsqlc.GetTermDatesRow // nil: no dates set
+	next        map[int32]*dbsqlc.GetNextAcademicYearRow
+}
+
+func newStageResolver(queries *dbsqlc.Queries) *stageResolver {
+	return &stageResolver{
+		queries: queries, today: TodayInMalawi(),
+		years: map[int32]dbsqlc.GetAcademicYearByIDForStageRow{},
+		dates: map[[2]int32]*dbsqlc.GetTermDatesRow{}, next: map[int32]*dbsqlc.GetNextAcademicYearRow{},
+	}
+}
+
+// stage builds the stage of a school whose school_stages row holds yearID and term
+// (both NULL when it has none: the default year, Term 1).
+func (r *stageResolver) stage(ctx context.Context, schoolID int64, yearID, term sql.NullInt32) (*schema.SchoolStage, error) {
+	stage := &schema.SchoolStage{SchoolID: schoolID, Term: 1}
+	if yearID.Valid {
+		year, ok := r.years[yearID.Int32]
+		if !ok {
+			var err error
+			if year, err = r.queries.GetAcademicYearByIDForStage(ctx, yearID.Int32); err != nil {
+				return nil, fmt.Errorf("failed to get academic year %d: %w", yearID.Int32, err)
+			}
+			r.years[yearID.Int32] = year
+		}
+		stage.AcademicYearID, stage.Year, stage.Term = int64(year.ID), int(year.Year), int(term.Int32)
+	} else {
+		if r.defaultYear == nil {
+			year, err := r.queries.GetDefaultAcademicYear(ctx, r.today)
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, newUserError(ErrInUse, "No academic year has been set up yet. MCDE creates academic years under Manage → Academic Years.")
+			}
+			if err != nil {
+				return nil, fmt.Errorf("failed to get the active academic year: %w", err)
+			}
+			r.defaultYear = &year
+		}
+		stage.AcademicYearID, stage.Year = int64(r.defaultYear.ID), int(r.defaultYear.Year)
+	}
+
+	key := [2]int32{int32(stage.AcademicYearID), int32(stage.Term)}
+	dates, ok := r.dates[key]
+	if !ok {
+		row, err := r.queries.GetTermDates(ctx, dbsqlc.GetTermDatesParams{AcademicYearID: key[0], Term: key[1]})
+		switch {
+		case err == nil:
+			dates = &row
+		case !errors.Is(err, sql.ErrNoRows):
+			return nil, fmt.Errorf("failed to get term dates: %w", err)
+		}
+		r.dates[key] = dates
+	}
+	if dates != nil {
 		stage.TermStartDate, stage.TermEndDate = dates.StartDate.Format(time.DateOnly), dates.EndDate.Format(time.DateOnly)
-		days := daysBetween(dates.EndDate, TodayInMalawi())
+		days := daysBetween(dates.EndDate, r.today)
 		if days > 0 {
 			stage.DaysOverdue = days
 		}
 		// The term's last day counts as over: schools usually close it that day
 		stage.CanMoveOn = days >= 0
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("failed to get term dates: %w", err)
 	}
-	if next, err := queries.GetNextAcademicYear(ctx, int32(stage.Year)); err == nil {
+
+	next, ok := r.next[int32(stage.Year)]
+	if !ok {
+		row, err := r.queries.GetNextAcademicYear(ctx, int32(stage.Year))
+		switch {
+		case err == nil:
+			next = &row
+		case !errors.Is(err, sql.ErrNoRows):
+			return nil, fmt.Errorf("failed to get the next academic year: %w", err)
+		}
+		r.next[int32(stage.Year)] = next
+	}
+	if next != nil {
 		stage.NextYearID, stage.NextYear = int64(next.ID), int(next.Year)
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("failed to get the next academic year: %w", err)
 	}
 	return stage, nil
 }
@@ -204,8 +261,9 @@ func (s *promotionService) ListStages(ctx context.Context) ([]*schema.SchoolStag
 		return nil, fmt.Errorf("failed to list school stages: %w", err)
 	}
 	stages := make([]*schema.SchoolStage, 0, len(rows))
+	resolver := newStageResolver(s.queries)
 	for _, row := range rows {
-		stage, err := s.GetStage(ctx, int64(row.SchoolID))
+		stage, err := resolver.stage(ctx, int64(row.SchoolID), row.AcademicYearID, row.Term)
 		if err != nil {
 			return nil, err
 		}
@@ -227,34 +285,69 @@ func (s *promotionService) AdvanceTerm(ctx context.Context, actorID, schoolID in
 	if err := termOver(stage); err != nil {
 		return nil, err
 	}
-	// Closing the term saves its report, together with the move
+	rules, err := loadPassRules(ctx, s.queries)
+	if err != nil {
+		return nil, err
+	}
+	moved, err := s.closeTerm(ctx, actorID, stage, rules)
+	if err != nil {
+		return nil, err
+	}
+	if !moved {
+		return nil, newUserError(ErrInvalidMove, "The school's term changed while this was being done. Reload and try again.")
+	}
+	return s.GetStage(ctx, schoolID)
+}
+
+// closeTerm saves the report of the school's current term and moves it to the next
+// term, in one transaction. It returns false, changing nothing, if the school is no
+// longer in that term (someone else moved it meanwhile).
+func (s *promotionService) closeTerm(ctx context.Context, actorID int64, stage *schema.SchoolStage, rules passRules) (bool, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to start transaction: %w", err)
+		return false, fmt.Errorf("failed to start transaction: %w", err)
 	}
 	defer tx.Rollback()
 	queries := s.queries.WithTx(tx)
-	if err := saveTermReport(ctx, queries, actorID, schoolID, stage.AcademicYearID, stage.Term, fmt.Sprintf("%d Term %d report saved as the term closed", stage.Year, stage.Term)); err != nil {
-		return nil, err
+	current, err := queries.LockSchoolStage(ctx, int32(stage.SchoolID))
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		// No stage saved yet: the school is in Term 1 of the default year
+		if stage.Term != 1 {
+			return false, nil
+		}
+	case err != nil:
+		return false, fmt.Errorf("failed to read school %d's term: %w", stage.SchoolID, err)
+	case int64(current.AcademicYearID) != stage.AcademicYearID || int(current.Term) != stage.Term:
+		return false, nil
+	}
+	note := fmt.Sprintf("%d Term %d report saved as the term closed", stage.Year, stage.Term)
+	if err := saveTermReportWith(ctx, queries, rules, actorID, stage.SchoolID, stage.AcademicYearID, stage.Term, note); err != nil {
+		return false, err
 	}
 	err = queries.SetSchoolStage(ctx, dbsqlc.SetSchoolStageParams{
-		SchoolID:       int32(schoolID),
+		SchoolID:       int32(stage.SchoolID),
 		AcademicYearID: int32(stage.AcademicYearID),
 		Term:           int32(stage.Term + 1),
 		ActorUserID:    int32(actorID),
 		Note:           fmt.Sprintf("%d: Term %d to Term %d", stage.Year, stage.Term, stage.Term+1),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to move school %d to the next term: %w", schoolID, err)
+		return false, fmt.Errorf("failed to move school %d to the next term: %w", stage.SchoolID, err)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("failed to move school %d to the next term: %w", schoolID, err)
+		return false, fmt.Errorf("failed to move school %d to the next term: %w", stage.SchoolID, err)
 	}
-	return s.GetStage(ctx, schoolID)
+	return true, nil
 }
 
 func (s *promotionService) AdvanceAll(ctx context.Context, actorID int64, fromTerm int) (int, error) {
 	stages, err := s.ListStages(ctx)
+	if err != nil {
+		return 0, err
+	}
+	// Read once for every school, not once per school
+	rules, err := loadPassRules(ctx, s.queries)
 	if err != nil {
 		return 0, err
 	}
@@ -263,10 +356,13 @@ func (s *promotionService) AdvanceAll(ctx context.Context, actorID int64, fromTe
 		if stage.Term != fromTerm || !stage.CanMoveOn {
 			continue // not in that term, or the term is not over yet
 		}
-		if _, err := s.AdvanceTerm(ctx, actorID, stage.SchoolID); err != nil {
+		ok, err := s.closeTerm(ctx, actorID, stage, rules)
+		if err != nil {
 			return moved, fmt.Errorf("moved %d schools, then %s failed: %w", moved, stage.SchoolName, err)
 		}
-		moved++
+		if ok {
+			moved++
+		}
 	}
 	return moved, nil
 }
@@ -371,40 +467,44 @@ func (s *promotionService) applyYearEnd(ctx context.Context, actorID, schoolID i
 	}
 
 	summary := &schema.YearEndSummary{SchoolID: schoolID, Outcomes: map[string]int{}, NextYear: stage.NextYear}
+	// Every learner's result and move, written in two statements
+	n := len(preview.Learners)
+	results := dbsqlc.CreatePromotionsParams{
+		SchoolID: int32(schoolID), AcademicYearID: int32(stage.AcademicYearID), Automatic: automatic, ActorUserID: int32(actorID),
+		StudentIds: make([]int32, 0, n), FromForms: make([]int32, 0, n), ToForms: make([]int32, 0, n),
+		SubjectsPassed: make([]int32, 0, n), Outcomes: make([]string, 0, n),
+	}
+	moves := dbsqlc.MoveStudentsAfterYearEndParams{
+		AcademicYearID: int32(stage.NextYearID),
+		StudentIds:     make([]int32, 0, n), FormLevels: make([]int32, 0, n), Statuses: make([]string, 0, n),
+	}
 	for _, learner := range preview.Learners {
 		outcome, ok := chosen[learner.StudentID]
 		if !ok {
 			outcome = learner.Recommended
 		}
 		toForm := formAfter(learner.FormLevel, outcome)
-		err := queries.CreatePromotion(ctx, dbsqlc.CreatePromotionParams{
-			StudentID:      int32(learner.StudentID),
-			SchoolID:       int32(schoolID),
-			AcademicYearID: int32(stage.AcademicYearID),
-			FromForm:       int32(learner.FormLevel),
-			ToForm:         int32(toForm),
-			SubjectsPassed: int32(learner.SubjectsPassed),
-			Outcome:        outcome,
-			Automatic:      automatic,
-			ActorUserID:    int32(actorID),
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to record result for learner %d: %w", learner.StudentID, err)
-		}
 		status := "Active"
 		if outcome == schema.OutcomeCompleted {
 			status = schema.StudentStatusCompleted
 		}
-		err = queries.MoveStudentAfterYearEnd(ctx, dbsqlc.MoveStudentAfterYearEndParams{
-			FormLevel:      int32(toForm),
-			Status:         status,
-			AcademicYearID: int32(stage.NextYearID),
-			StudentID:      int32(learner.StudentID),
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to move learner %d: %w", learner.StudentID, err)
-		}
+		results.StudentIds = append(results.StudentIds, int32(learner.StudentID))
+		results.FromForms = append(results.FromForms, int32(learner.FormLevel))
+		results.ToForms = append(results.ToForms, int32(toForm))
+		results.SubjectsPassed = append(results.SubjectsPassed, int32(learner.SubjectsPassed))
+		results.Outcomes = append(results.Outcomes, outcome)
+		moves.StudentIds = append(moves.StudentIds, int32(learner.StudentID))
+		moves.FormLevels = append(moves.FormLevels, int32(toForm))
+		moves.Statuses = append(moves.Statuses, status)
 		summary.Outcomes[outcome]++
+	}
+	if n > 0 {
+		if err := queries.CreatePromotions(ctx, results); err != nil {
+			return nil, fmt.Errorf("failed to record year-end results: %w", err)
+		}
+		if err := queries.MoveStudentsAfterYearEnd(ctx, moves); err != nil {
+			return nil, fmt.Errorf("failed to move learners into the next year: %w", err)
+		}
 	}
 
 	err = queries.SetSchoolStage(ctx, dbsqlc.SetSchoolStageParams{

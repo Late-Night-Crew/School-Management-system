@@ -94,7 +94,7 @@ export default function AccountsPage() {
       title="Accounts"
       subtitle={
         isSuper
-          ? "Create and manage regional admins and school managers. People are deactivated rather than deleted, so their history stays."
+          ? "Create and manage MCDE staff, regional admins and school managers. People are deactivated rather than deleted, so their history stays."
           : "Create and manage the school manager accounts for schools in your division."
       }
       stats={[
@@ -125,6 +125,7 @@ export default function AccountsPage() {
             <Field label="Role">
               <Select value={role} onChange={(e) => setRole(e.target.value)}>
                 <option value="">All roles</option>
+                <option value={ROLES.SUPER_ADMIN}>MCDE (Learner Support Managers)</option>
                 <option value={ROLES.REGIONAL_ADMIN}>Regional admins</option>
                 <option value={ROLES.SCHOOL_MANAGER}>School managers</option>
               </Select>
@@ -169,7 +170,11 @@ export default function AccountsPage() {
                   <td>
                     <div>{ROLE_LABELS[a.role]}</div>
                     <div className={styles.muted}>
-                      {a.role === ROLES.REGIONAL_ADMIN ? `${a.region_name} division` : `${a.school_name} · ${a.district_name}`}
+                      {a.role === ROLES.SUPER_ADMIN
+                        ? "MCDE"
+                        : a.role === ROLES.REGIONAL_ADMIN
+                          ? `${a.region_name} division`
+                          : `${a.school_name} · ${a.district_name}`}
                     </div>
                   </td>
                   <td>
@@ -187,7 +192,10 @@ export default function AccountsPage() {
                   </td>
                   <td className="end">
                     <div className={styles.actions}>
-                      {a.active ? (
+                      {String(a.id) === String(session.userId) ? (
+                        // Your own details and password are under My account (Settings)
+                        <Badge tone="blue">You</Badge>
+                      ) : a.active ? (
                         <>
                           <Button variant="ghost" size="sm" icon="bi-pencil" onClick={() => setDialog({ kind: "edit", account: a })}>
                             Edit
@@ -296,9 +304,10 @@ function AccountDialog({ account, isSuper, regions = [], schools = [], accounts 
   const update = (name) => (e) => setValues((prev) => ({ ...prev, [name]: e.target.value }));
 
   const isRegional = values.role === ROLES.REGIONAL_ADMIN;
+  const isMcde = values.role === ROLES.SUPER_ADMIN; // no division or school
   // Divisions that already have an active regional admin cannot get another one
   const takenRegions = new Set(accounts.filter((a) => a.active && a.role === ROLES.REGIONAL_ADMIN).map((a) => a.region_id));
-  const scopeChosen = editing || (isRegional ? values.region_id : values.school_id);
+  const scopeChosen = editing || isMcde || (isRegional ? values.region_id : values.school_id);
   const valid = scopeChosen && values.name.trim() && /\S+@\S+\.\S+/.test(values.email);
 
   const handleSubmit = async (e) => {
@@ -316,7 +325,7 @@ function AccountDialog({ account, isSuper, regions = [], schools = [], accounts 
             ...details,
             role: values.role,
             region_id: isRegional ? Number(values.region_id) : undefined,
-            school_id: isRegional ? undefined : Number(values.school_id),
+            school_id: isRegional || isMcde ? undefined : Number(values.school_id),
           })
         );
       }
@@ -354,9 +363,16 @@ function AccountDialog({ account, isSuper, regions = [], schools = [], accounts 
               <Select value={values.role} onChange={update("role")} disabled={!isSuper}>
                 {isSuper && <option value={ROLES.REGIONAL_ADMIN}>Regional admin</option>}
                 <option value={ROLES.SCHOOL_MANAGER}>School manager</option>
+                {isSuper && <option value={ROLES.SUPER_ADMIN}>MCDE: Learner Support Manager</option>}
               </Select>
             </Field>
-            {isRegional ? (
+            {isMcde ? (
+              <Field label="Access">
+                <div className="ui-hint" style={{ paddingTop: 8 }}>
+                  Full MCDE access, like yours. Everything they do is recorded in the activity log with their name.
+                </div>
+              </Field>
+            ) : isRegional ? (
               <Field label="Division" required hint="Each division has one active regional admin.">
                 <Select value={values.region_id} onChange={update("region_id")}>
                   <option value="">Choose a division…</option>

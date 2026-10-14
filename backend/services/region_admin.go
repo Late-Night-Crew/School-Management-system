@@ -14,7 +14,6 @@ import (
 type RegionAdminService interface {
 	GetDashboardStats(ctx context.Context, regionID int64) (*schema.RegionDashboardStats, error)
 	ListDistricts(ctx context.Context, regionID int64) ([]*schema.RegionDistrictSummary, error)
-	ListStudents(ctx context.Context, regionID int64, filter schema.RegionStudentFilter) ([]*schema.RegionStudent, error)
 	ListTransfers(ctx context.Context, regionID int64) ([]*schema.Transfer, error)
 }
 
@@ -61,34 +60,6 @@ func (s *regionAdminService) ListDistricts(ctx context.Context, regionID int64) 
 		})
 	}
 	return districts, nil
-}
-
-func (s *regionAdminService) ListStudents(ctx context.Context, regionID int64, filter schema.RegionStudentFilter) ([]*schema.RegionStudent, error) {
-	rows, err := s.queries.ListStudentsForRegion(ctx, dbsqlc.ListStudentsForRegionParams{
-		RegionID:   int32(regionID),
-		DistrictID: optionalID(filter.DistrictID),
-		SchoolID:   optionalID(filter.SchoolID),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list students for region %d: %w", regionID, err)
-	}
-	students := make([]*schema.RegionStudent, 0, len(rows))
-	for _, row := range rows {
-		students = append(students, &schema.RegionStudent{
-			ID:            int64(row.ID),
-			StudentNumber: row.StudentNumber,
-			FirstName:     row.FirstName,
-			LastName:      row.LastName,
-			Gender:        row.Gender.String,
-			FormLevel:     int(row.FormLevel.Int32),
-			Status:        row.Status.String,
-			SchoolID:      int64(row.SchoolID),
-			SchoolName:    row.SchoolName,
-			DistrictID:    int64(row.DistrictID),
-			DistrictName:  row.DistrictName,
-		})
-	}
-	return students, nil
 }
 
 func (s *regionAdminService) ListTransfers(ctx context.Context, regionID int64) ([]*schema.Transfer, error) {

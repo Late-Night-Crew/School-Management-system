@@ -119,7 +119,7 @@ func seedDemoData(ctx context.Context, dbConn *sqlx.DB, password string) error {
 				return fmt.Errorf("failed to find scope for %s: %w", u.email, err)
 			}
 		}
-		// DO NOTHING also covers the one-super-admin and one-admin-per-region indexes
+		// DO NOTHING also covers an existing email and the one-admin-per-region index
 		res, err := tx.ExecContext(ctx, `
 			INSERT INTO users (name, display_name, email, password, role, region_id, district_id, school_id, is_super_admin, is_activated)
 			VALUES ($1, $1, $2, $3, $4, $5, $6, $7, $8, TRUE)
@@ -154,7 +154,7 @@ func seedDemoData(ctx context.Context, dbConn *sqlx.DB, password string) error {
 	fmt.Println("Demo data loaded.")
 	fmt.Printf("\nLogins created (password: %s):\n%s\n", password, strings.Join(created, "\n"))
 	if len(skipped) > 0 {
-		fmt.Printf("\nSkipped because the email or role slot is already taken (e.g. an existing super admin):\n%s\n",
+		fmt.Printf("\nSkipped because the email or role slot is already taken (e.g. an existing division admin):\n%s\n",
 			strings.Join(skipped, "\n"))
 	}
 	return nil

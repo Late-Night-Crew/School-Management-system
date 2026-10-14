@@ -8,7 +8,7 @@ import {
     createSchoolStudent,
     deleteSchoolStudent,
     findSimilarSchoolStudents,
-    listSchoolStudents,
+    listAllSchoolStudents,
     updateSchoolStudent,
 } from "../../api/schoolPortal";
 import ToastNote from "../../components/ToastNote";
@@ -72,7 +72,7 @@ export default function StudentEnroll() {
 
     const fetchStudents           = async () => {
         try {
-            const list = await listSchoolStudents(schoolId);
+            const list = await listAllSchoolStudents(schoolId);
             setStudents(list);
             openRequestedEdit(list);
         } catch (e) {

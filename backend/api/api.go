@@ -13,6 +13,7 @@ import (
 )
 
 type API struct {
+	queries             *dbsqlc.Queries
 	logger              logging.Logger
 	app                 *fiber.App
 	Config              *config.Config
@@ -37,6 +38,9 @@ type API struct {
 	Promotions          services.PromotionService
 	TermReports         services.TermReportService
 	Reminders           services.ReminderService
+	Audit               services.AuditService
+	Insights            services.InsightsService
+	LearnerSearch       services.LearnerSearchService
 }
 
 func NewAPI(config *config.Config) *API {
@@ -45,8 +49,10 @@ func NewAPI(config *config.Config) *API {
 	logger := logging.NewFromConfig(&config.Logging)
 	accountService := services.NewAccountService(dbConn, logger)
 	promotionService := services.NewPromotionService(sqlDB.DB, dbConn, logger)
+	termReports := services.NewTermReportService(dbConn, promotionService, logger)
 
 	return &API{
+		queries:             dbConn,
 		logger:              logger,
 		app:                 fiber.New(fiberConfig(config)),
 		Config:              config,
@@ -69,8 +75,11 @@ func NewAPI(config *config.Config) *API {
 		SchoolRequests:      services.NewSchoolRequestService(dbConn, accountService, logger),
 		PasswordRequests:    services.NewPasswordRequestService(dbConn, accountService, logger),
 		Promotions:          promotionService,
-		TermReports:         services.NewTermReportService(dbConn, promotionService, logger),
+		TermReports:         termReports,
 		Reminders:           services.NewReminderService(sqlDB.DB, dbConn, promotionService, logger),
+		Audit:               services.NewAuditService(dbConn),
+		Insights:            services.NewInsightsService(dbConn, termReports),
+		LearnerSearch:       services.NewLearnerSearchService(dbConn),
 	}
 }
 
@@ -102,6 +111,10 @@ func (api *API) Start(addr string) error {
 // a reminder goes out soon after its day starts in Malawi.
 func (api *API) sendRemindersHourly() {
 	check := func() {
+		// Year statuses first: they follow the dates
+		if err := services.SyncAcademicYearStatuses(context.Background(), api.queries); err != nil {
+			api.logger.Error("academic-years", "status update failed", "error", err)
+		}
 		run, err := api.Reminders.SendDue(context.Background(), services.TodayInMalawi())
 		if err != nil {
 			api.logger.Error("reminders", "term reminder check failed", "error", err)

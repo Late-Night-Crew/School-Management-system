@@ -26,16 +26,10 @@ type Student struct {
 	// (Form 1 applicants often have neither) but unique when given.
 	NationalID string `json:"national_id"`
 	JCENumber  string `json:"jce_number"`
-}
-
-type GetStudentListRequest struct {
-	IDs            []int64 `json:"ids"`
-	FirstName      string  `json:"first_name"`
-	LastName       string  `json:"last_name"`
-	FormLevel      int     `json:"form_level"`
-	SchoolID       int64   `json:"school_id"`
-	AcademicYearID int64   `json:"academic_year_id"`
-	Status         string  `json:"status"`
+	// Status is Active, Withdrawn, DroppedOut or Completed; LeftOn and LeavingReason
+	// say when and why a learner left (the reason is optional)
+	LeftOn        string `json:"left_on,omitempty"`
+	LeavingReason string `json:"leaving_reason,omitempty"`
 }
 
 type CreateStudentRequest struct {
@@ -99,6 +93,21 @@ type UpdateStudentRequest struct {
 	JCENumber  string `json:"jce_number"`
 }
 
+// Learner statuses (see migration 29)
+const (
+	StudentActive     = "Active"
+	StudentWithdrawn  = "Withdrawn"
+	StudentDroppedOut = "DroppedOut"
+)
+
+// LeaveRequest marks a learner as having left: Withdrawn (formally) or DroppedOut
+// (stopped coming). The reason is optional; LeftOn defaults to today.
+type LeaveRequest struct {
+	Status string `json:"status" validate:"required,oneof=Withdrawn DroppedOut"`
+	LeftOn string `json:"left_on" validate:"omitempty,datetime=2006-01-02"`
+	Reason string `json:"reason" validate:"max=500"`
+}
+
 // DuplicateCheckRequest is a learner being registered or edited (ExcludeID), checked
 // against existing learners before saving.
 type DuplicateCheckRequest struct {
@@ -118,5 +127,37 @@ type SimilarLearner struct {
 	SchoolName    string `json:"school_name"`
 	FormLevel     int    `json:"form_level"`
 	HasNationalID bool   `json:"has_national_id"`
+	Status        string `json:"status"`
 	Reason        string `json:"reason"`
+}
+
+// StudentSearch filters a learner list. The route fixes the division or school for
+// division and school users; Status is Active, Left (withdrawn or dropped out) or
+// Completed. PageSize goes up to 5000 for downloads.
+type StudentSearch struct {
+	RegionID   int64  `query:"region_id"`
+	DistrictID int64  `query:"district_id"`
+	SchoolID   int64  `query:"school_id"`
+	FormLevel  int    `query:"form_level" validate:"omitempty,min=1,max=4"`
+	Status     string `query:"status" validate:"omitempty,oneof=Active Left Completed"`
+	Search     string `query:"q" validate:"max=100"`
+	Page       int    `query:"page" validate:"omitempty,min=1"`
+	PageSize   int    `query:"page_size" validate:"omitempty,min=1,max=5000"`
+}
+
+// StudentListItem is a learner with where they are.
+type StudentListItem struct {
+	Student
+	SchoolName   string `json:"school_name"`
+	DistrictID   int64  `json:"district_id"`
+	DistrictName string `json:"district_name"`
+	RegionID     int64  `json:"region_id"`
+	RegionName   string `json:"region_name"`
+}
+
+type StudentPage struct {
+	Students []StudentListItem `json:"students"`
+	Total    int               `json:"total"`
+	Page     int               `json:"page"`
+	PageSize int               `json:"page_size"`
 }

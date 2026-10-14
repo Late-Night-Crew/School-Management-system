@@ -566,27 +566,91 @@ function AuditTrailDialog({ transfer, onHide }) {
   );
 }
 
+// Finds a current learner by name, number or National ID (searched on the server).
+function StudentPicker({ value, onChange }) {
+  const [search, setSearch] = useState("");
+  const [q, setQ] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setQ(search.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+  const matches = useAsync(
+    useCallback(() => (q.length >= 2 ? listStudents({ q, status: "Active", page_size: 8 }) : Promise.resolve(null)), [q])
+  );
+
+  if (value) {
+    return (
+      <div className="ui-list-item" style={{ border: "1px solid var(--ui-border)", borderRadius: "var(--ui-radius-sm)" }}>
+        <div className="ui-list-main">
+          <div className="ui-list-title">
+            {value.first_name} {value.last_name} · Form {value.form_level}
+          </div>
+          <div className="ui-list-sub">
+            {value.student_number} · {value.school_name}, {value.district_name}
+          </div>
+        </div>
+        <Button size="sm" variant="ghost" onClick={() => onChange(null)}>
+          Change
+        </Button>
+      </div>
+    );
+  }
+  const found = matches.data?.students || [];
+  return (
+    <div>
+      <SearchInput value={search} onChange={setSearch} placeholder="Type a name, student number or National ID…" />
+      {q.length >= 2 && (
+        <ul className="ui-list" style={{ marginTop: 6 }}>
+          {matches.loading && <li className="ui-list-item ui-hint">Searching…</li>}
+          {!matches.loading && !found.length && <li className="ui-list-item ui-hint">No current learner matches.</li>}
+          {found.map((s) => (
+            <li key={s.id} className="ui-list-item">
+              <div className="ui-list-main">
+                <div className="ui-list-title">
+                  {s.first_name} {s.last_name} · Form {s.form_level}
+                </div>
+                <div className="ui-list-sub">
+                  {s.student_number} · {s.school_name}, {s.district_name}
+                </div>
+              </div>
+              <Button size="sm" variant="ghost" onClick={() => onChange(s)}>
+                Choose
+              </Button>
+            </li>
+          ))}
+          {matches.data?.total > found.length && (
+            <li className="ui-list-item ui-hint">{matches.data.total - found.length} more; type more of the name to narrow it.</li>
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function CreateTransferForm({ onCreated, onError }) {
   const [formData, setFormData] = useState(emptyForm);
   const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const { data: lists, loading, error, reload } = useAsync(
-    useCallback(() => Promise.all([listStudents(), listSchools()]), [])
+    useCallback(() => listSchools(), [])
   );
-  const [students = [], schools = []] = lists || [];
+  const schools = lists || [];
+  const [student, setStudent] = useState(null);
+
+  // Picking a student fills in their current school as the origin
+  const pickStudent = (picked) => {
+    setStudent(picked);
+    setFormData((prev) => ({
+      ...prev,
+      student_id: picked ? String(picked.id) : "",
+      from_school: picked ? String(picked.school_id) : prev.from_school,
+    }));
+  };
 
   const handleFormChange = (e) => {
     const { name, value } = e.target;
-    setFormData((prev) => {
-      const next = { ...prev, [name]: value };
-      // Picking a student fills in their current school as the origin
-      if (name === "student_id") {
-        const student = students.find((s) => s.id === Number(value));
-        if (student?.school_id) next.from_school = String(student.school_id);
-      }
-      return next;
-    });
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleCreate = async () => {
@@ -600,6 +664,7 @@ function CreateTransferForm({ onCreated, onError }) {
         reason: formData.reason,
       });
       setFormData(emptyForm());
+      setStudent(null);
       onCreated();
     } catch (err) {
       onError(err.message);
@@ -630,14 +695,7 @@ function CreateTransferForm({ onCreated, onError }) {
       <DataState loading={loading} error={error} onRetry={reload}>
         <div className="ui-grid ui-cols-2">
           <Field label="Student" required className="ui-span-all">
-            <Select name="student_id" value={formData.student_id} onChange={handleFormChange} required>
-              <option value="">Select a student...</option>
-              {students.map((student) => (
-                <option key={student.id} value={student.id}>
-                  {student.first_name} {student.last_name} (ID: {student.student_number})
-                </option>
-              ))}
-            </Select>
+            <StudentPicker value={student} onChange={pickStudent} />
           </Field>
           <Field label="From School" required>
             <Select name="from_school" value={formData.from_school} onChange={handleFormChange} required>

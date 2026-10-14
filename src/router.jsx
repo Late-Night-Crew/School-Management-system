@@ -14,6 +14,7 @@ import AdminPromotion from "./pages/promotion/AdminPromotion";
 import SchoolPromotion from "./pages/promotion/SchoolPromotion";
 
 // Super admin
+import ActivityLog from "./pages/admin/ActivityLog";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminNotifications from "./pages/admin/AdminNotifications";
 import AdminReports from "./pages/admin/AdminReports";
@@ -79,6 +80,7 @@ const router = createHashRouter([
           { path: "notifications", element: <AdminNotifications /> },
           { path: "contacts", element: <ContactsPage /> },
           { path: "accounts", element: <AccountsPage /> },
+          { path: "activity", element: <ActivityLog /> },
           { path: "school-requests", element: <SchoolRequestsPage /> },
           { path: "school-requests/:requestId", element: <SchoolRequestView /> },
           { path: "promotion", element: <AdminPromotion /> },

@@ -73,17 +73,17 @@ func (s *regionService) CreateRegion(ctx context.Context, req *schema.CreateRegi
 }
 
 func (s *regionService) UpdateRegion(ctx context.Context, req *schema.UpdateRegionRequest) (*schema.Region, error) {
-    region, err := s.queries.UpdateRegion(ctx, dbsqlc.UpdateRegionParams{
-        ID:   int32(req.ID),
-        Name: req.Name,
-    })
-    if err != nil {
-        return nil, err
-    }
-    return &schema.Region{
-        ID:   int64(region.ID),
-        Name: region.Name,
-    }, nil
+	region, err := s.queries.UpdateRegion(ctx, dbsqlc.UpdateRegionParams{
+		ID:   int32(req.ID),
+		Name: req.Name,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &schema.Region{
+		ID:   int64(region.ID),
+		Name: region.Name,
+	}, nil
 }
 
 func (s *regionService) GetRegionUsage(ctx context.Context, regionID int64) (*schema.RegionUsage, error) {

@@ -32,6 +32,7 @@ function menuFor(session) {
         { name: "Promotion", path: "/admin/promotion", icon: "bi-mortarboard" },
         { name: "Transfers", path: "/admin/transfers", icon: "bi-arrow-left-right" },
         { name: "Reports", path: "/admin/reports", icon: "bi-file-earmark-text" },
+        { name: "Activity Log", path: "/admin/activity", icon: "bi-clock-history" },
         { name: "Contacts", path: "/admin/contacts", icon: "bi-person-lines-fill" },
         { name: "Notifications", path: "/admin/notifications", icon: "bi-bell" },
         { name: "Settings", path: "/admin/settings", icon: "bi-gear" },
