@@ -27,4 +27,13 @@ type SchoolReportRow struct {
 	PendingIn       int64    `json:"pending_in"`
 	JcePassRate     *float64 `json:"jce_pass_rate"`
 	MscePassRate    *float64 `json:"msce_pass_rate"`
+	// PassRateSource says where the JCE/MSCE rates come from (empty when there are none)
+	PassRateSource string `json:"pass_rate_source,omitempty"`
 }
+
+// Where exam pass rates come from: calculated from Term 3 marks (the exam results), or
+// recorded by hand before term reports existed.
+const (
+	PassRateCalculated = "calculated"
+	PassRateRecorded   = "recorded"
+)

@@ -1,3 +1,4 @@
+import { startedYears } from "../utils/years";
 import { useCallback, useState } from "react";
 import { jsPDF } from "jspdf";
 import { autoTable } from "jspdf-autotable";
@@ -24,6 +25,8 @@ const COLUMNS = [
   { header: "Pending In", value: (r) => r.pending_in, numeric: true },
   { header: "JCE Pass Rate", value: (r) => formatRate(r.jce_pass_rate), numeric: true },
   { header: "MSCE Pass Rate", value: (r) => formatRate(r.msce_pass_rate), numeric: true },
+  // Calculated from Term 3 results, or recorded by hand before term reports existed
+  { header: "Exam rates", value: (r) => ({ calculated: "From Term 3", recorded: "Recorded" })[r.pass_rate_source] || "-" },
 ];
 
 const COUNT_KEYS = ["student_count", "male_count", "female_count", "disability_count", "transfers_in", "transfers_out", "pending_in"];
@@ -37,7 +40,7 @@ const COUNT_KEYS = ["student_count", "male_count", "female_count", "disability_c
 // - academicYears: pass rates default to the active year, else the latest
 // - scopeName: describes the unfiltered scope, e.g. "All regions"
 export default function SchoolReport({ loadReport, regions, districts, academicYears, scopeName }) {
-  const years = [...academicYears].sort((a, b) => b.year - a.year);
+  const years = startedYears(academicYears).sort((a, b) => b.year - a.year);
   const [filters, setFilters] = useState(() => {
     const defaultYear = years.find((y) => y.status === "Active") || years[0];
     return { region_id: "", district_id: "", academic_year_id: defaultYear ? String(defaultYear.id) : "" };
@@ -96,7 +99,8 @@ export default function SchoolReport({ loadReport, regions, districts, academicY
       label: "Average JCE / MSCE pass rate",
       icon: "bi-mortarboard",
       tone: "purple",
-      value: `${formatRate(average(jceRates))} / ${formatRate(average(msceRates))}`,
+      // "66.7 / 72.1%": one % sign so both figures fit the tile
+      value: `${formatRate(average(jceRates)).replace("%", "")} / ${formatRate(average(msceRates))}`,
       detail: selectedYear
         ? `${reportingSchools} of ${rows.length} schools reported for ${selectedYear.year}`
         : "No academic year selected",

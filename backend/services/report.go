@@ -43,6 +43,13 @@ func parseRate(value sql.NullString) (*float64, error) {
 	return &rate, nil
 }
 
+func nullRate(value sql.NullFloat64) *float64 {
+	if !value.Valid {
+		return nil
+	}
+	return &value.Float64
+}
+
 func (s *reportService) GetSchoolReport(ctx context.Context, filter schema.SchoolReportFilter) ([]*schema.SchoolReportRow, error) {
 	rows, err := s.queries.GetSchoolReport(ctx, dbsqlc.GetSchoolReportParams{
 		RegionID:       optionalID(filter.RegionID),
@@ -63,6 +70,14 @@ func (s *reportService) GetSchoolReport(ctx context.Context, filter schema.Schoo
 		if err != nil {
 			return nil, err
 		}
+		// Rates calculated from Term 3 marks (the exam results) replace recorded ones
+		source := ""
+		if jce != nil || msce != nil {
+			source = schema.PassRateRecorded
+		}
+		if row.TermJcePassRate.Valid || row.TermMscePassRate.Valid {
+			jce, msce, source = nullRate(row.TermJcePassRate), nullRate(row.TermMscePassRate), schema.PassRateCalculated
+		}
 		report = append(report, &schema.SchoolReportRow{
 			SchoolID:        int64(row.ID),
 			SchoolName:      row.Name,
@@ -80,6 +95,7 @@ func (s *reportService) GetSchoolReport(ctx context.Context, filter schema.Schoo
 			PendingIn:       row.PendingIn,
 			JcePassRate:     jce,
 			MscePassRate:    msce,
+			PassRateSource:  source,
 		})
 	}
 	return report, nil

@@ -1,6 +1,9 @@
 package api
 
 import (
+	"context"
+	"time"
+
 	"nsms/config"
 	"nsms/database/dbsqlc"
 	"nsms/logging"
@@ -30,6 +33,10 @@ type API struct {
 	ContactService      services.ContactService
 	GradingService      services.GradingService
 	SchoolRequests      services.SchoolRequestService
+	PasswordRequests    services.PasswordRequestService
+	Promotions          services.PromotionService
+	TermReports         services.TermReportService
+	Reminders           services.ReminderService
 }
 
 func NewAPI(config *config.Config) *API {
@@ -37,10 +44,11 @@ func NewAPI(config *config.Config) *API {
 	dbConn := dbsqlc.New(sqlDB)
 	logger := logging.NewFromConfig(&config.Logging)
 	accountService := services.NewAccountService(dbConn, logger)
+	promotionService := services.NewPromotionService(sqlDB.DB, dbConn, logger)
 
 	return &API{
 		logger:              logger,
-		app:                 fiber.New(),
+		app:                 fiber.New(fiberConfig(config)),
 		Config:              config,
 		AuthService:         services.NewAuthService(&config.Auth, dbConn, logger),
 		RegionService:       services.NewRegionService(dbConn, logger),
@@ -59,6 +67,10 @@ func NewAPI(config *config.Config) *API {
 		ContactService:      services.NewContactService(dbConn, logger),
 		GradingService:      services.NewGradingService(sqlDB.DB, dbConn, logger),
 		SchoolRequests:      services.NewSchoolRequestService(dbConn, accountService, logger),
+		PasswordRequests:    services.NewPasswordRequestService(dbConn, accountService, logger),
+		Promotions:          promotionService,
+		TermReports:         services.NewTermReportService(dbConn, promotionService, logger),
+		Reminders:           services.NewReminderService(sqlDB.DB, dbConn, promotionService, logger),
 	}
 }
 
@@ -81,5 +93,41 @@ func (api *API) Start(addr string) error {
 		addr = ":1629"
 	}
 
+	go api.sendRemindersHourly()
 	return api.app.Listen(addr)
+}
+
+// sendRemindersHourly runs the term reminder check when the server starts and then
+// every hour. Each reminder is sent once, so running it often is safe; it just means
+// a reminder goes out soon after its day starts in Malawi.
+func (api *API) sendRemindersHourly() {
+	check := func() {
+		run, err := api.Reminders.SendDue(context.Background(), services.TodayInMalawi())
+		if err != nil {
+			api.logger.Error("reminders", "term reminder check failed", "error", err)
+			return
+		}
+		if len(run.Sent) > 0 || len(run.Failures) > 0 {
+			api.logger.Info("reminders", "term reminders sent", "sent", run.Sent, "failures", run.Failures)
+		}
+	}
+	check()
+	for range time.Tick(time.Hour) {
+		check()
+	}
+}
+
+// fiberConfig trusts X-Forwarded-For only from the configured reverse proxies, so
+// c.IP() (and the login rate limit) sees the real client behind the main website's
+// proxy without letting anyone else spoof their address.
+func fiberConfig(config *config.Config) fiber.Config {
+	if len(config.Server.TrustedProxies) == 0 {
+		return fiber.Config{}
+	}
+	return fiber.Config{
+		ProxyHeader:             fiber.HeaderXForwardedFor,
+		EnableTrustedProxyCheck: true,
+		TrustedProxies:          config.Server.TrustedProxies,
+		EnableIPValidation:      true,
+	}
 }

@@ -18,6 +18,8 @@ type StudentService interface {
 	CreateStudent(ctx context.Context, req *schema.CreateStudentRequest) (*schema.Student, error)
 	UpdateStudent(ctx context.Context, req *schema.UpdateStudentRequest) (*schema.Student, error)
 	DeleteStudent(ctx context.Context, studentID int64) error
+	// FindSimilar lists existing learners who may be the one being registered.
+	FindSimilar(ctx context.Context, check *schema.DuplicateCheckRequest) ([]schema.SimilarLearner, error)
 }
 
 type studentService struct {
@@ -128,6 +130,8 @@ func (s *studentService) GetStudentList(ctx context.Context, req *schema.GetStud
 			PreviousSchoolID:     int64(dbStudent.PreviousSchoolID.Int32),
 			Disability:           dbStudent.Disability.Bool,
 			DisabilityDetails:    disabilityDetails,
+			NationalID:           dbStudent.NationalID.String,
+			JCENumber:            dbStudent.JceNumber.String,
 			SubjectIDs:           subjectIDs,
 		})
 	}
@@ -216,6 +220,8 @@ func (s *studentService) GetStudentByID(ctx context.Context, studentID int64) (*
 		PreviousSchoolID:     int64(student.PreviousSchoolID.Int32),
 		Disability:           student.Disability.Bool,
 		DisabilityDetails:    disabilityDetails,
+		NationalID:           student.NationalID.String,
+		JCENumber:            student.JceNumber.String,
 		SubjectIDs:           subjectIDsByStudent[int32(student.ID)],
 	}, nil
 }
@@ -260,6 +266,14 @@ func (s *studentService) CreateStudent(ctx context.Context, req *schema.CreateSt
 	if err := checkSchoolOpen(ctx, s.queries, req.SchoolID); err != nil {
 		return nil, err
 	}
+	if err := prepareLearnerIdentity(ctx, s.queries, &req.NationalID, &req.JCENumber, 0); err != nil {
+		return nil, err
+	}
+	if req.AcademicYearID > 0 {
+		if err := checkYearStarted(ctx, s.queries, req.AcademicYearID); err != nil {
+			return nil, err
+		}
+	}
 	guardianName := req.GuardianName
 	if guardianName == "" {
 		guardianName = strings.TrimSpace(req.GuardianFirstname + " " + req.GuardianLastname)
@@ -284,6 +298,8 @@ func (s *studentService) CreateStudent(ctx context.Context, req *schema.CreateSt
 		AcademicYearID:       sql.NullInt32{Int32: int32(req.AcademicYearID), Valid: req.AcademicYearID != 0},
 		Disability:           sql.NullBool{Bool: req.Disability, Valid: true},
 		DisabilityDetails:    sql.NullString{String: req.DisabilityDetails, Valid: req.DisabilityDetails != ""},
+		NationalID:           common.NullString(req.NationalID),
+		JceNumber:            common.NullString(req.JCENumber),
 		Status:               sql.NullString{String: req.Status, Valid: req.Status != ""},
 	})
 	if err != nil {
@@ -320,11 +336,21 @@ func (s *studentService) CreateStudent(ctx context.Context, req *schema.CreateSt
 		PreviousSchoolID:     int64(dbStudent.PreviousSchoolID.Int32),
 		Disability:           dbStudent.Disability.Bool,
 		DisabilityDetails:    dbStudent.DisabilityDetails.String,
+		NationalID:           dbStudent.NationalID.String,
+		JCENumber:            dbStudent.JceNumber.String,
 		SubjectIDs:           req.SubjectIDs,
 	}, nil
 }
 
 func (s *studentService) UpdateStudent(ctx context.Context, req *schema.UpdateStudentRequest) (*schema.Student, error) {
+	if err := prepareLearnerIdentity(ctx, s.queries, &req.NationalID, &req.JCENumber, req.ID); err != nil {
+		return nil, err
+	}
+	if req.AcademicYearID > 0 {
+		if err := checkYearStarted(ctx, s.queries, req.AcademicYearID); err != nil {
+			return nil, err
+		}
+	}
 	// A student can stay at a closed school but cannot be moved into one
 	current, err := s.queries.GetStudentByID(ctx, int32(req.ID))
 	if err != nil {
@@ -360,6 +386,8 @@ func (s *studentService) UpdateStudent(ctx context.Context, req *schema.UpdateSt
 		AcademicYearID:       sql.NullInt32{Int32: int32(req.AcademicYearID), Valid: req.AcademicYearID != 0},
 		Disability:           sql.NullBool{Bool: req.Disability, Valid: true},
 		DisabilityDetails:    sql.NullString{String: req.DisabilityDetails, Valid: req.DisabilityDetails != ""},
+		NationalID:           common.NullString(req.NationalID),
+		JceNumber:            common.NullString(req.JCENumber),
 		Status:               sql.NullString{String: req.Status, Valid: req.Status != ""},
 	})
 	if err != nil {
@@ -399,6 +427,8 @@ func (s *studentService) UpdateStudent(ctx context.Context, req *schema.UpdateSt
 		PreviousSchoolID:     int64(dbStudent.PreviousSchoolID.Int32),
 		Disability:           dbStudent.Disability.Bool,
 		DisabilityDetails:    dbStudent.DisabilityDetails.String,
+		NationalID:           dbStudent.NationalID.String,
+		JCENumber:            dbStudent.JceNumber.String,
 		SubjectIDs:           req.SubjectIDs,
 	}, nil
 }
@@ -409,4 +439,8 @@ func (s *studentService) DeleteStudent(ctx context.Context, studentID int64) err
 		return fmt.Errorf("failed to delete student: %w", err)
 	}
 	return nil
+}
+
+func (s *studentService) FindSimilar(ctx context.Context, check *schema.DuplicateCheckRequest) ([]schema.SimilarLearner, error) {
+	return FindSimilarLearners(ctx, s.queries, check)
 }

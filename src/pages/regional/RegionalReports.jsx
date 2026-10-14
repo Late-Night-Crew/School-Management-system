@@ -7,6 +7,7 @@ import { listRegionDistricts, listRegionSchools } from "../../api/regionPortal";
 import useAsync from "../../hooks/useAsync";
 import DataState from "../../components/DataState";
 import SchoolReport from "../../components/SchoolReport";
+import TermComparison from "../../components/TermComparison";
 import { Page } from "../../components/ui";
 
 export default function RegionalReports() {
@@ -36,6 +37,7 @@ export default function RegionalReports() {
             scopeName={`${region.name} region`}
           />
         )}
+        {lookups.data && <TermComparison academicYears={academicYears} regionId={regionId} />}
       </DataState>
     </Page>
   );

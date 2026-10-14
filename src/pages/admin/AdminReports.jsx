@@ -7,6 +7,7 @@ import { getSchoolReport } from "../../api/reports";
 import useAsync from "../../hooks/useAsync";
 import DataState from "../../components/DataState";
 import SchoolReport from "../../components/SchoolReport";
+import TermComparison from "../../components/TermComparison";
 import { Page } from "../../components/ui";
 
 export default function AdminReports() {
@@ -25,6 +26,7 @@ export default function AdminReports() {
             scopeName="All regions"
           />
         )}
+        {lookups.data && <TermComparison academicYears={academicYears} />}
       </DataState>
     </Page>
   );

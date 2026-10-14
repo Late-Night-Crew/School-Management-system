@@ -1,0 +1,36 @@
+# Copy to config.yaml and fill in. config.yaml is not committed.
+# Secrets are better set as environment variables than written here:
+#   NSMS_JWT_SECRET         signs login tokens (required in PRODUCTION, 32+ characters)
+#   NSMS_DATABASE_PASSWORD  the database password
+#   NSMS_ENVIRONMENT        overrides "environment" below
+
+# DEVELOPMENT or PRODUCTION. PRODUCTION refuses to start without a strong JWT secret
+# and refuses to load demo data.
+environment: DEVELOPMENT
+
+database:
+  host: localhost
+  port: 5432
+  database: "nsms"
+  username: "nsms"
+  password: ""          # or NSMS_DATABASE_PASSWORD
+  sslmode: disable      # require when the database is on another machine
+
+server:
+  # Reverse proxies in front of the API (IPs or CIDR ranges). Leave empty when the API
+  # is reached directly; set it when it sits behind the main website's proxy, so login
+  # rate limits apply per user.
+  trusted_proxies: []
+
+auth:
+  jwt_secret_key: ""    # or NSMS_JWT_SECRET; generate with: openssl rand -hex 32
+
+storage:
+  type: "local"
+  localStorage:
+    rootDirectory: ./data
+    enabled: true
+
+logging:
+  log_file: ./data/NSMS.log
+  log_level: info

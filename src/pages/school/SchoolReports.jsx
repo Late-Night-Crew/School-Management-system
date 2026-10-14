@@ -5,14 +5,12 @@ import { autoTable } from "jspdf-autotable";
 import * as XLSX from "xlsx";
 
 import { listAcademicYears } from "../../api/academicYears";
-import {
-  createSchoolExamResult,
-  listSchoolExamResults,
-  listSchoolMarks,
-  listSchoolStudents,
-  updateSchoolExamResult,
-} from "../../api/schoolPortal";
+import { listSchoolExamResults, listSchoolMarks, listSchoolStudents } from "../../api/schoolPortal";
 import { listSubjects } from "../../api/subjects";
+import { schoolPromotionBase } from "../../api/promotion";
+import { listTermReports } from "../../api/termReports";
+import { startedYears } from "../../utils/years";
+import TermReports from "./TermReports";
 import useAsync from "../../hooks/useAsync";
 import { formatRate, fullName } from "../../utils/format";
 import { average, formatMark, gradeFor, isPass, passRate, useGradingScale } from "../../utils/grades";
@@ -29,7 +27,7 @@ const FORMS = [1, 2, 3, 4];
 // year(s) and term(s), their overall average, grade and position in the selection.
 function MarksReport({ schoolId, students, subjects, years }) {
   const scale = useGradingScale();
-  const sortedYears = [...years].sort((a, b) => b.year - a.year);
+  const sortedYears = startedYears(years).sort((a, b) => b.year - a.year);
   const defaultYear = sortedYears.find((y) => y.status === "Active") || sortedYears[0];
   const [filters, setFilters] = useState({
     academic_year_id: defaultYear ? String(defaultYear.id) : "",
@@ -246,144 +244,71 @@ function MarksReport({ schoolId, students, subjects, years }) {
   );
 }
 
-// The school's JCE/MSCE pass rates per academic year (one result per year).
-// These feed the national and regional school reports.
+// The school's JCE/MSCE pass rates by year. They are calculated from Term 3 results
+// (Form 2's are the JCE, Form 4's the MSCE) when the year's Term 3 closes; rates
+// typed in before term reports existed are still listed.
 function ExamPassRates({ schoolId, years }) {
-  const results = useAsync(useCallback(() => listSchoolExamResults(schoolId), [schoolId]));
-  const sortedYears = [...years].sort((a, b) => b.year - a.year);
-  const [form, setForm] = useState({ academic_year_id: "", jce_pass_rate: "", msce_pass_rate: "" });
-  const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState({ show: false, message: "", variant: "success" });
+  const data = useAsync(
+    useCallback(
+      () => Promise.all([listTermReports(schoolPromotionBase(false, schoolId)), listSchoolExamResults(schoolId)]),
+      [schoolId]
+    )
+  );
+  const [reports = [], recorded = []] = data.data || [];
+  const yearOf = (id) => years.find((y) => y.id === id)?.year || `Year #${id}`;
+  const term3 = reports.filter((r) => r.term === 3);
+  const calculatedYears = new Set(term3.map((r) => r.academic_year_id));
+  const rows = [
+    ...term3.map((r) => ({ id: `t-${r.academic_year_id}`, year: r.year, jce: r.jce_pass_rate, msce: r.msce_pass_rate, source: r.live ? "live" : "calculated", outOfDate: r.out_of_date })),
+    ...recorded
+      .filter((r) => !calculatedYears.has(r.academic_year_id))
+      .map((r) => ({ id: `r-${r.id}`, year: yearOf(r.academic_year_id), jce: r.jce_pass_rate, msce: r.msce_pass_rate, source: "recorded" })),
+  ].sort((a, b) => Number(b.year) - Number(a.year));
 
-  const existing = (results.data || []).find((r) => String(r.academic_year_id) === form.academic_year_id);
-
-  // Picking a year loads that year's recorded rates into the form
-  const selectYear = (yearId) => {
-    const result = (results.data || []).find((r) => String(r.academic_year_id) === yearId);
-    setForm({
-      academic_year_id: yearId,
-      jce_pass_rate: result?.jce_pass_rate || "",
-      msce_pass_rate: result?.msce_pass_rate || "",
-    });
+  const sourceBadge = {
+    calculated: <Badge tone="green">From Term 3 results</Badge>,
+    live: <Badge tone="blue">Term 3 in progress</Badge>,
+    recorded: <Badge tone="slate">Recorded by hand</Badge>,
   };
-
-  const validRate = (value) => value === "" || (Number(value) >= 0 && Number(value) <= 100);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!validRate(form.jce_pass_rate) || !validRate(form.msce_pass_rate)) {
-      setToast({ show: true, message: "Pass rates must be between 0 and 100.", variant: "warning" });
-      return;
-    }
-    setSaving(true);
-    try {
-      const rates = { jce_pass_rate: String(form.jce_pass_rate), msce_pass_rate: String(form.msce_pass_rate) };
-      if (existing) {
-        await updateSchoolExamResult(schoolId, existing.id, rates);
-      } else {
-        await createSchoolExamResult(schoolId, { academic_year_id: Number(form.academic_year_id), ...rates });
-      }
-      setToast({ show: true, message: "Pass rates saved.", variant: "success" });
-      results.reload();
-    } catch (err) {
-      setToast({ show: true, message: err.message, variant: "danger" });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const yearOf = (id) => years.find((y) => y.id === id);
 
   return (
-    <>
-      <ToastNote {...toast} onClose={() => setToast((t) => ({ ...t, show: false }))} />
-      <div className="ui-grid ui-cols-2">
-        <form onSubmit={handleSubmit}>
-          <Card
-            accent="blue"
-            icon="bi-pencil-square"
-            title="Record Pass Rates"
-            subtitle="Pick a year to enter or update its JCE and MSCE pass rates"
-            footer={
-              <Button type="submit" icon="bi-check-lg" disabled={!form.academic_year_id || saving}>
-                {saving ? "Saving…" : existing ? "Update pass rates" : "Save pass rates"}
-              </Button>
-            }
-          >
-            <div className="ui-grid">
-              <Field label="Academic Year" required>
-                <Select value={form.academic_year_id} onChange={(e) => selectYear(e.target.value)} required>
-                  <option value="">Select a year…</option>
-                  {sortedYears.map((y) => (
-                    <option key={y.id} value={y.id}>{y.year}</option>
-                  ))}
-                </Select>
-              </Field>
-              <div className="ui-grid ui-cols-2">
-                <Field label="JCE pass rate (%)">
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min={0}
-                    max={100}
-                    value={form.jce_pass_rate}
-                    onChange={(e) => setForm((f) => ({ ...f, jce_pass_rate: e.target.value }))}
-                  />
-                </Field>
-                <Field label="MSCE pass rate (%)">
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min={0}
-                    max={100}
-                    value={form.msce_pass_rate}
-                    onChange={(e) => setForm((f) => ({ ...f, msce_pass_rate: e.target.value }))}
-                  />
-                </Field>
-              </div>
-            </div>
-          </Card>
-        </form>
-
-        <Card accent="green" icon="bi-award" title="Recorded Pass Rates" subtitle="One result per academic year" flush>
-          <DataState
-            loading={results.loading}
-            error={results.error}
-            onRetry={results.reload}
-            empty={!results.data?.length}
-            emptyMessage="No pass rates recorded yet."
-          >
-            <Table>
-              <thead>
-                <tr>
-                  <th>Academic Year</th>
-                  <th className="num">JCE</th>
-                  <th className="num">MSCE</th>
-                  <th className="end">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...(results.data || [])]
-                  .sort((a, b) => (yearOf(b.academic_year_id)?.year || 0) - (yearOf(a.academic_year_id)?.year || 0))
-                  .map((r) => {
-                    const year = yearOf(r.academic_year_id)?.year || `Year #${r.academic_year_id}`;
-                    return (
-                      <tr key={r.id}>
-                        <td className="strong">{year}</td>
-                        <td className="num">{formatRate(r.jce_pass_rate)}</td>
-                        <td className="num">{formatRate(r.msce_pass_rate)}</td>
-                        <td className="end">
-                          <IconButton kind="edit" title={`Edit ${year} pass rates`} onClick={() => selectYear(String(r.academic_year_id))} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-              </tbody>
-            </Table>
-          </DataState>
-        </Card>
-      </div>
-    </>
+    <Card
+      accent="green"
+      icon="bi-award"
+      title="JCE and MSCE pass rates"
+      subtitle="Worked out from Term 3 results, using MANEB's pass rule (see Promotion settings); nothing to type in"
+      flush
+    >
+      <DataState loading={data.loading} error={data.error} onRetry={data.reload} empty={!rows.length} emptyMessage="No exam results yet.">
+        <Table>
+          <thead>
+            <tr>
+              <th>Academic Year</th>
+              <th className="num">JCE (Form 2)</th>
+              <th className="num">MSCE (Form 4)</th>
+              <th>Source</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id}>
+                <td className="strong">{r.year}</td>
+                <td className="num">{formatRate(r.jce)}</td>
+                <td className="num">{formatRate(r.msce)}</td>
+                <td>
+                  {sourceBadge[r.source]}
+                  {r.outOfDate && (
+                    <span className="ms-2">
+                      <Badge tone="amber">Marks changed: regenerate on Term Reports</Badge>
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      </DataState>
+    </Card>
   );
 }
 
@@ -399,9 +324,10 @@ export default function SchoolReports() {
     <Page
       icon="bi-bar-chart-line-fill"
       title="Reports"
-      subtitle="Student marks and national exam pass rates for your school."
+      subtitle="Student marks, end-of-term reports and national exam pass rates for your school."
       tabs={[
         { key: "marks", label: "Student Marks", icon: "bi-table" },
+        { key: "terms", label: "Term Reports", icon: "bi-clipboard-data" },
         { key: "exams", label: "Exam Pass Rates", icon: "bi-award" },
       ]}
       activeTab={tab}
@@ -412,6 +338,9 @@ export default function SchoolReports() {
           <>
             <div className={styles.pane} hidden={tab !== "marks"}>
               <MarksReport schoolId={schoolId} students={students} subjects={subjects} years={years} />
+            </div>
+            <div className={styles.pane} hidden={tab !== "terms"}>
+              <TermReports base={schoolPromotionBase(false, schoolId)} />
             </div>
             <div className={styles.pane} hidden={tab !== "exams"}>
               <ExamPassRates schoolId={schoolId} years={years} />

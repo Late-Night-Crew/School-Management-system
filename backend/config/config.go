@@ -1,8 +1,13 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
+	"os"
+	"strings"
 	"time"
 
 	_ "github.com/jackc/pgx/v4/stdlib"
@@ -10,7 +15,8 @@ import (
 )
 
 type Config struct {
-	Environment string                  `mapstructure:"environment" default:"DEVELOPMENT"`
+	// Environment is DEVELOPMENT (the default) or PRODUCTION
+	Environment string                  `mapstructure:"environment"`
 	Server      HTTPServerConfiguration `mapstructure:"server"`
 	Database    DatabaseConfiguration
 	Admin       AdminConfiguration   `mapstructure:"admin"`
@@ -31,24 +37,30 @@ type DatabaseConfiguration struct {
 }
 
 type HTTPServerConfiguration struct {
-	FQDN string `mapstructure:"fqdn" envconfig:"KWACHAKONVERTERS_SERVER_FQDN"`
-	Host string `mapstructure:"host" envconfig:"KWACHAKONVERTERS_SERVER_HOST"`
-	Port int    `mapstructure:"port" envconfig:"KWACHAKONVERTERS_SERVER_PORT"`
+	FQDN string `mapstructure:"fqdn"`
+	Host string `mapstructure:"host"`
+	Port int    `mapstructure:"port"`
+	// TrustedProxies are the reverse proxies (IPs or CIDR ranges) in front of the API.
+	// Requests from them are attributed to the client in X-Forwarded-For, so login
+	// rate limits apply per user rather than to everyone behind the proxy.
+	TrustedProxies []string `mapstructure:"trusted_proxies"`
 }
 type AdminConfiguration struct {
-	Username string `mapstructure:"username" envconfig:"KWACHAKONVERTERS_ADMIN_USERNAME"`
-	Password string `mapstructure:"password" envconfig:"KWACHAKONVERTERS_ADMIN_PASSWORD"`
-	Email    string `mapstructure:"email" envconfig:"KWACHAKONVERTERS_ADMIN_EMAIL"`
-	Enabled  bool   `mapstructure:"enabled" envconfig:"KWACHAKONVERTERS_ADMIN_ENABLED"`
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
+	Email    string `mapstructure:"email"`
+	Enabled  bool   `mapstructure:"enabled"`
 }
 
 type AuthConfiguration struct {
-	SignupEnabled           bool   `mapstructure:"signup_enabled" envconfig:"KWACHAKONVERTERS_AUTH_SIGNUP_ENABLED"`
-	MaxLoginAttempts        int    `mapstructure:"max_login_attempts" envconfig:"KWACHAKONVERTERS_AUTH_MAX_LOGIN_ATTEMPTS"`
-	RequireVerifiedAccounts bool   `mapstructure:"require_verified_accounts" envconfig:"KWACHAKONVERTERS_AUTH_REQUIRE_VERIFIED_ACCOUNTS"`
-	JwtSecretKey            string `mapstructure:"jwt_secret_key" envconfig:"KWACHAKONVERTERS_AUTH_JWT_SECRET_KEY"`
-	JwtIssuer               string `mapstructure:"jwt_issuer" envconfig:"KWACHAKONVERTERS_AUTH_JWT_ISSUER"`
-	JwtExpiryTimeout        int    `mapstructure:"jwt_expiry_timeout" envconfig:"KWACHAKONVERTERS_AUTH_JWT_EXPIRY_TIMEOUT"`
+	SignupEnabled           bool `mapstructure:"signup_enabled"`
+	MaxLoginAttempts        int  `mapstructure:"max_login_attempts"`
+	RequireVerifiedAccounts bool `mapstructure:"require_verified_accounts"`
+	// JwtSecretKey signs login tokens. Set it with NSMS_JWT_SECRET rather than in the
+	// file; see ApplyEnvironment and CheckAuth.
+	JwtSecretKey     string `mapstructure:"jwt_secret_key"`
+	JwtIssuer        string `mapstructure:"jwt_issuer"`
+	JwtExpiryTimeout int    `mapstructure:"jwt_expiry_timeout"`
 }
 type LoggingConfiguration struct {
 	Level string `mapstructure:"log_level"`
@@ -83,4 +95,51 @@ func (c *Config) OpenDB() *sqlx.DB {
 	db.SetMaxIdleConns(10)
 
 	return db
+}
+
+// MinJwtSecretLength is the shortest JWT secret accepted in production.
+const MinJwtSecretLength = 32
+
+// IsProduction reports whether the config is for a live deployment.
+func (c *Config) IsProduction() bool {
+	return strings.EqualFold(strings.TrimSpace(c.Environment), "PRODUCTION")
+}
+
+// ApplyEnvironment lets secrets come from environment variables instead of the
+// config file: NSMS_JWT_SECRET, NSMS_DATABASE_PASSWORD and NSMS_ENVIRONMENT.
+func (c *Config) ApplyEnvironment() {
+	if v := os.Getenv("NSMS_ENVIRONMENT"); v != "" {
+		c.Environment = v
+	}
+	if v := os.Getenv("NSMS_JWT_SECRET"); v != "" {
+		c.Auth.JwtSecretKey = v
+	}
+	if v := os.Getenv("NSMS_DATABASE_PASSWORD"); v != "" {
+		c.Database.Password = v
+	}
+}
+
+// ErrWeakJwtSecret means production was started without a usable JWT secret.
+var ErrWeakJwtSecret = errors.New("set a JWT secret of at least 32 characters in NSMS_JWT_SECRET (or auth.jwt_secret_key) before running in production")
+
+// CheckAuth makes sure login tokens cannot be forged. In production the JWT secret
+// must be set and long enough; in development a random one is generated if missing
+// (everyone is signed out when the server restarts). It reports whether it generated one.
+func (c *Config) CheckAuth() (generated bool, err error) {
+	secret := strings.TrimSpace(c.Auth.JwtSecretKey)
+	if c.IsProduction() {
+		if len(secret) < MinJwtSecretLength {
+			return false, ErrWeakJwtSecret
+		}
+		return false, nil
+	}
+	if secret != "" {
+		return false, nil
+	}
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return false, fmt.Errorf("failed to generate a development JWT secret: %w", err)
+	}
+	c.Auth.JwtSecretKey = hex.EncodeToString(buf)
+	return true, nil
 }

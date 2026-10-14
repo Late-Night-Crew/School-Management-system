@@ -16,8 +16,8 @@
 
   --ui-text: #111827;
   --ui-text-body: #374151;
-  --ui-text-muted: #6b7280;
-  --ui-text-faint: #9ca3af;
+  --ui-text-muted: #4b5563;
+  --ui-text-faint: #6b7280; /* the lightest text; still 4.8:1 on white (WCAG AA) */
 
   --ui-navy: #1e3a5f;
   --ui-blue: #2563a8;
@@ -244,14 +244,14 @@
 /* ── Form fields ──────────────────────────────────────────────────────── */
 .ui-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .ui-label {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.7px;
   text-transform: uppercase;
   color: var(--ui-text-faint);
   margin: 0;
 }
-.ui-hint { font-size: 11.5px; color: var(--ui-text-faint); }
+.ui-hint { font-size: 12.5px; color: var(--ui-text-faint); line-height: 1.45; }
 .ui-input,
 .ui-select,
 .ui-textarea {
@@ -315,6 +315,7 @@
   cursor: pointer;
 }
 .ui-segmented button.active { background: #fff; color: var(--ui-navy); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1); }
+.ui-segmented button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* Toggle switch */
 .ui-switch {

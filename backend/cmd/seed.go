@@ -34,6 +34,9 @@ exam pass rates and transfers, plus logins for every role:
 Run "nsms migrate" first. The command refuses to run if demo data already exists.
 Do not run it against a production database.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if nsmsConfig.IsProduction() {
+			return fmt.Errorf("refusing to load demo data: environment is PRODUCTION (demo logins have a published password)")
+		}
 		if len(seedPassword) < 8 {
 			return fmt.Errorf("--password must be at least 8 characters")
 		}

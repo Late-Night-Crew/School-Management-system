@@ -301,10 +301,12 @@ INSERT INTO
         academic_year_id,
         disability,
         disability_details,
-        status
+        status,
+        national_id,
+        jce_number
     )
 VALUES
-    ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING id,
+    ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21) RETURNING id,
     student_number,
     first_name,
     middle_name,
@@ -323,6 +325,8 @@ VALUES
     academic_year_id,
     disability,
     disability_details,
+    national_id,
+    jce_number,
     status,
     created_at,
     updated_at;
@@ -348,6 +352,8 @@ SELECT
     academic_year_id,
     disability,
     disability_details,
+    national_id,
+    jce_number,
     status,
     created_at,
     updated_at
@@ -377,6 +383,8 @@ SELECT
     academic_year_id,
     disability,
     disability_details,
+    national_id,
+    jce_number,
     status,
     created_at,
     updated_at
@@ -410,6 +418,8 @@ SET
     disability = $18,
     disability_details = $19,
     status = $20,
+    national_id = $21,
+    jce_number = $22,
     updated_at = NOW()
 WHERE
     id = $1 RETURNING id,
@@ -431,6 +441,8 @@ WHERE
     academic_year_id,
     disability,
     disability_details,
+    national_id,
+    jce_number,
     status,
     created_at,
     updated_at;
@@ -462,6 +474,8 @@ SELECT
     academic_year_id,
     disability,
     disability_details,
+    national_id,
+    jce_number,
     status,
     created_at,
     updated_at
@@ -494,6 +508,8 @@ SELECT
     academic_year_id,
     disability,
     disability_details,
+    national_id,
+    jce_number,
     status,
     created_at,
     updated_at
@@ -526,6 +542,8 @@ SET
     disability = $18,
     disability_details = $19,
     status = $20,
+    national_id = $22,
+    jce_number = $23,
     updated_at = NOW()
 WHERE
     id = $1
@@ -549,6 +567,8 @@ RETURNING id,
     academic_year_id,
     disability,
     disability_details,
+    national_id,
+    jce_number,
     status,
     created_at,
     updated_at;
@@ -1154,13 +1174,18 @@ SELECT
     (SELECT COUNT(*) FROM transfers t WHERE t.from_school = sc.id) AS transfers_out,
     (SELECT COUNT(*) FROM transfers t WHERE t.to_school = sc.id AND t.status = 'Pending') AS pending_in,
     e.jce_pass_rate,
-    e.msce_pass_rate
+    e.msce_pass_rate,
+    -- Calculated from Term 3 marks (the exam results); preferred over the recorded rates
+    tr.jce_pass_rate AS term_jce_pass_rate,
+    tr.msce_pass_rate AS term_msce_pass_rate
 FROM
     schools sc
     JOIN districts d ON d.id = sc.district_id
     JOIN regions r ON r.id = d.region_id
     LEFT JOIN exam_results e ON e.school_id = sc.id
         AND e.academic_year_id = sqlc.narg(academic_year_id)::int
+    LEFT JOIN term_reports tr ON tr.school_id = sc.id AND tr.term = 3
+        AND tr.academic_year_id = sqlc.narg(academic_year_id)::int
 WHERE
     (sqlc.narg(region_id)::int IS NULL OR r.id = sqlc.narg(region_id)::int)
     AND (sqlc.narg(district_id)::int IS NULL OR d.id = sqlc.narg(district_id)::int)
@@ -1454,7 +1479,7 @@ SELECT
     COALESCE(CASE n.sender_party_type
         WHEN 'SUPER_ADMIN' THEN 'Ministry Headquarters'
         WHEN 'REGION' THEN rg.name || ' Regional Office'
-        WHEN 'SYSTEM' THEN 'NSMS (automatic)'
+        WHEN 'SYSTEM' THEN 'OSS (automatic)'
     END, 'Unknown')::text AS sender_label,
     n.created_at,
     n.withdrawn_at,
@@ -2351,3 +2376,400 @@ SELECT action, COALESCE(actor_name, '')::text AS actor_name, COALESCE(actor_role
 FROM audit_logs
 WHERE entity_type = 'school_request' AND entity_id = sqlc.arg(request_id)::int
 ORDER BY created_at, id;
+
+-- ============================================================================
+-- Forgot-password requests (see migration 22) and the public lists the sign-in page
+-- needs to ask for them.
+-- ============================================================================
+
+-- name: ListPublicRegions :many
+SELECT id, name FROM regions ORDER BY name;
+
+-- name: ListPublicSchools :many
+SELECT sc.id, sc.name, d.region_id
+FROM schools sc JOIN districts d ON d.id = sc.district_id
+WHERE sc.closed_at IS NULL
+ORDER BY sc.name;
+
+-- name: FindAccountForPasswordRequest :one
+-- The active account matching what the person told us: email, role, and their division
+-- (division officers) or school (school users). Returns who should handle the request.
+SELECT u.id,
+    -- 0 means MCDE handles it (division officers); otherwise the school's division
+    (CASE WHEN u.role = 'SCHOOL_MANAGER' THEN COALESCE(d.region_id, 0) ELSE 0 END)::int AS handler_region_id
+FROM users u
+    LEFT JOIN schools sc ON sc.id = u.school_id
+    LEFT JOIN districts d ON d.id = sc.district_id
+WHERE lower(u.email) = lower(sqlc.arg(email)::text)
+    AND u.role = sqlc.arg(role)::text
+    AND u.is_activated AND u.deleted_at IS NULL
+    AND ((u.role = 'REGIONAL_ADMIN' AND u.region_id = sqlc.narg(region_id)::int)
+        OR (u.role = 'SCHOOL_MANAGER' AND u.school_id = sqlc.narg(school_id)::int));
+
+-- name: CreatePasswordRequest :exec
+WITH created AS (
+    INSERT INTO password_reset_requests (user_id, handler_region_id, contact_phone, note, requester_ip)
+    VALUES (sqlc.arg(user_id)::int, sqlc.narg(handler_region_id)::int, sqlc.narg(contact_phone)::text,
+        sqlc.narg(note)::text, sqlc.narg(requester_ip)::text)
+    ON CONFLICT (user_id) WHERE status = 'Pending' DO NOTHING
+    RETURNING id, user_id
+)
+INSERT INTO audit_logs (entity_type, entity_id, action, note)
+SELECT 'user', created.user_id, 'PasswordResetRequested', 'Forgot-password request ' || created.id FROM created;
+
+-- name: ListPasswordRequests :many
+-- Pending requests the actor handles: all for the super admin, their schools' for a
+-- division officer (handler_region_id NULL means MCDE).
+SELECT r.id, r.user_id, u.name, u.email, u.role, u.phone, u.whatsapp,
+    COALESCE(sc.name, '')::text AS school_name, COALESCE(rg.name, '')::text AS region_name,
+    r.contact_phone, r.note, r.handler_region_id, r.created_at
+FROM password_reset_requests r
+    JOIN users u ON u.id = r.user_id
+    LEFT JOIN schools sc ON sc.id = u.school_id
+    LEFT JOIN regions rg ON rg.id = COALESCE(u.region_id, r.handler_region_id)
+WHERE r.status = 'Pending'
+    AND (sqlc.narg(handler_region_id)::int IS NULL OR r.handler_region_id = sqlc.narg(handler_region_id)::int)
+ORDER BY r.created_at;
+
+-- name: GetPasswordRequest :one
+SELECT id, user_id, handler_region_id, status FROM password_reset_requests WHERE id = sqlc.arg(request_id)::int;
+
+-- name: ClosePasswordRequest :one
+WITH closed AS (
+    UPDATE password_reset_requests
+    SET status = sqlc.arg(status)::text, resolved_by = sqlc.arg(actor_user_id)::int, resolved_at = CURRENT_TIMESTAMP
+    WHERE id = sqlc.arg(request_id)::int AND status = 'Pending'
+    RETURNING id, user_id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'user', closed.user_id, 'PasswordRequest' || sqlc.arg(status)::text, a.id, a.name, a.role, a.school_id,
+        'Forgot-password request ' || closed.id
+    FROM closed LEFT JOIN users a ON a.id = sqlc.arg(actor_user_id)::int
+)
+SELECT id FROM closed;
+
+-- name: FindStudentByNationalID :one
+-- Another learner already holding this National ID (exclude_id: the learner being edited).
+SELECT s.id, s.first_name, s.last_name, s.student_number, COALESCE(sc.name, '')::text AS school_name
+FROM students s LEFT JOIN schools sc ON sc.id = s.school_id
+WHERE UPPER(s.national_id) = UPPER(sqlc.arg(national_id)::text) AND s.id <> sqlc.arg(exclude_id)::int
+LIMIT 1;
+
+-- name: FindStudentByJCENumber :one
+SELECT s.id, s.first_name, s.last_name, s.student_number, COALESCE(sc.name, '')::text AS school_name
+FROM students s LEFT JOIN schools sc ON sc.id = s.school_id
+WHERE UPPER(s.jce_number) = UPPER(sqlc.arg(jce_number)::text) AND s.id <> sqlc.arg(exclude_id)::int
+LIMIT 1;
+
+-- name: ListPossibleDuplicateStudents :many
+-- Learners who look like the same person: same first and last name (ignoring case) and
+-- the same date of birth or guardian phone. Used to warn, not to block, since two
+-- learners can genuinely share a name.
+SELECT s.id, s.first_name, s.last_name, s.student_number, s.date_of_birth, s.guardian_phone,
+    s.form_level, s.national_id, COALESCE(sc.name, '')::text AS school_name
+FROM students s LEFT JOIN schools sc ON sc.id = s.school_id
+WHERE LOWER(s.last_name) = LOWER(sqlc.arg(last_name)::text)
+    AND LOWER(s.first_name) = LOWER(sqlc.arg(first_name)::text)
+    AND s.id <> sqlc.arg(exclude_id)::int
+    AND ((sqlc.narg(date_of_birth)::date IS NOT NULL AND s.date_of_birth = sqlc.narg(date_of_birth)::date)
+        -- Phones are stored as typed, so compare the last 9 digits (any Malawi format)
+        OR (sqlc.narg(guardian_phone)::text IS NOT NULL
+            AND RIGHT(regexp_replace(s.guardian_phone, '\D', '', 'g'), 9) = RIGHT(regexp_replace(sqlc.narg(guardian_phone)::text, '\D', '', 'g'), 9)))
+ORDER BY s.last_name, s.first_name
+LIMIT 10;
+
+-- ============================================================================
+-- Terms and year-end promotion (see migration 24).
+-- ============================================================================
+
+-- name: GetPromotionSettings :one
+SELECT automatic, subjects_to_pass, jce_subjects_to_pass, msce_subjects_to_pass, updated_at FROM promotion_settings WHERE id = 1;
+
+-- name: UpdatePromotionSettings :exec
+WITH updated AS (
+    UPDATE promotion_settings
+    SET automatic = sqlc.arg(automatic)::bool, subjects_to_pass = sqlc.arg(subjects_to_pass)::int,
+        jce_subjects_to_pass = sqlc.arg(jce_subjects_to_pass)::int, msce_subjects_to_pass = sqlc.arg(msce_subjects_to_pass)::int,
+        updated_by = sqlc.arg(actor_user_id)::int, updated_at = CURRENT_TIMESTAMP
+    WHERE id = 1
+    RETURNING id
+)
+INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+SELECT 'promotion_settings', NULL, 'Updated', u.id, u.name, u.role, u.school_id,
+    CASE WHEN sqlc.arg(automatic)::bool THEN 'Automatic' ELSE 'Manual' END || ' promotion, '
+        || sqlc.arg(subjects_to_pass)::int || ' subjects to pass; JCE ' || sqlc.arg(jce_subjects_to_pass)::int
+        || ', MSCE ' || sqlc.arg(msce_subjects_to_pass)::int || ' (plus compulsory subjects)'
+FROM updated LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int;
+
+-- name: GetDefaultAcademicYear :one
+-- The year a school without a stage is in: the active one, else the latest.
+SELECT id, year FROM academic_years
+ORDER BY (status = 'Active') DESC, year DESC
+LIMIT 1;
+
+-- name: GetAcademicYearByIDForStage :one
+SELECT id, year FROM academic_years WHERE id = sqlc.arg(academic_year_id)::int;
+
+-- name: GetNextAcademicYear :one
+SELECT id, year FROM academic_years WHERE year > sqlc.arg(year)::int ORDER BY year LIMIT 1;
+
+-- name: GetSchoolStage :one
+SELECT academic_year_id, term FROM school_stages WHERE school_id = sqlc.arg(school_id)::int;
+
+-- name: ListSchoolStages :many
+-- Every open school with its stage (NULL when it has none yet) and division.
+SELECT sc.id AS school_id, sc.name AS school_name, sc.school_number, d.name AS district_name,
+    rg.name AS region_name, st.academic_year_id, st.term,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = sc.id AND COALESCE(s.status, 'Active') <> 'Completed')::int AS learners
+FROM schools sc
+    JOIN districts d ON d.id = sc.district_id
+    JOIN regions rg ON rg.id = d.region_id
+    LEFT JOIN school_stages st ON st.school_id = sc.id
+WHERE sc.closed_at IS NULL
+ORDER BY rg.name, d.name, sc.name;
+
+-- name: SetSchoolStage :exec
+WITH saved AS (
+    INSERT INTO school_stages (school_id, academic_year_id, term, updated_by, updated_at)
+    VALUES (sqlc.arg(school_id)::int, sqlc.arg(academic_year_id)::int, sqlc.arg(term)::int,
+        sqlc.arg(actor_user_id)::int, CURRENT_TIMESTAMP)
+    ON CONFLICT (school_id) DO UPDATE
+    SET academic_year_id = EXCLUDED.academic_year_id, term = EXCLUDED.term,
+        updated_by = EXCLUDED.updated_by, updated_at = EXCLUDED.updated_at
+    RETURNING school_id
+)
+INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+SELECT 'school', saved.school_id, 'StageChanged', u.id, u.name, u.role, u.school_id, sqlc.arg(note)::text
+FROM saved LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int;
+
+-- name: ListYearEndLearners :many
+-- A school's current learners with how many subjects they passed in Term 3 of the year.
+-- Learners who already have a result for the year are left out.
+-- For Forms 2 and 4 (JCE, MSCE) it also counts the exam's compulsory subjects passed.
+SELECT s.id, s.first_name, s.last_name, s.student_number, COALESCE(s.form_level, 1)::int AS form_level,
+    (COUNT(m.id) FILTER (WHERE m.mark >= sqlc.arg(pass_mark)::int))::int AS subjects_passed,
+    COUNT(m.id)::int AS subjects_marked,
+    (COUNT(m.id) FILTER (WHERE m.mark >= sqlc.arg(pass_mark)::int AND m.subject_id IN (
+        SELECT c.subject_id FROM exam_compulsory_subjects c
+        WHERE c.exam = CASE s.form_level WHEN 2 THEN 'JCE' WHEN 4 THEN 'MSCE' END)))::int AS compulsory_passed,
+    (SELECT COUNT(*) FROM exam_compulsory_subjects c
+        WHERE c.exam = CASE s.form_level WHEN 2 THEN 'JCE' WHEN 4 THEN 'MSCE' END)::int AS compulsory_required
+FROM students s
+    LEFT JOIN student_marks m ON m.student_id = s.id AND m.academic_year_id = sqlc.arg(academic_year_id)::int AND m.term = 3
+WHERE s.school_id = sqlc.arg(school_id)::int
+    AND COALESCE(s.status, 'Active') <> 'Completed'
+    AND NOT EXISTS (SELECT 1 FROM promotions p WHERE p.student_id = s.id AND p.academic_year_id = sqlc.arg(academic_year_id)::int)
+GROUP BY s.id
+ORDER BY s.form_level, s.last_name, s.first_name;
+
+-- name: CreatePromotion :exec
+INSERT INTO promotions (student_id, school_id, academic_year_id, from_form, to_form, subjects_passed, outcome, automatic, decided_by)
+VALUES (sqlc.arg(student_id)::int, sqlc.arg(school_id)::int, sqlc.arg(academic_year_id)::int, sqlc.arg(from_form)::int,
+    sqlc.arg(to_form)::int, sqlc.arg(subjects_passed)::int, sqlc.arg(outcome)::text, sqlc.arg(automatic)::bool,
+    sqlc.arg(actor_user_id)::int);
+
+-- name: MoveStudentAfterYearEnd :exec
+-- Completed learners keep their form and become 'Completed'; everyone else is Active
+-- in the new academic year at their new form.
+UPDATE students
+SET form_level = sqlc.arg(form_level)::int, status = sqlc.arg(status)::text,
+    academic_year_id = sqlc.arg(academic_year_id)::int, updated_at = CURRENT_TIMESTAMP
+WHERE id = sqlc.arg(student_id)::int;
+
+-- name: ListYearResults :many
+-- A school's year-end results for one academic year.
+SELECT p.student_id, s.first_name, s.last_name, s.student_number, p.from_form, p.to_form,
+    p.subjects_passed, p.outcome, p.automatic, COALESCE(u.name, '')::text AS decided_by_name, p.decided_at
+FROM promotions p
+    JOIN students s ON s.id = p.student_id
+    LEFT JOIN users u ON u.id = p.decided_by
+WHERE p.school_id = sqlc.arg(school_id)::int AND p.academic_year_id = sqlc.arg(academic_year_id)::int
+ORDER BY p.from_form, s.last_name, s.first_name;
+
+-- name: GetPromotionForProceed :one
+SELECT p.id, p.from_form, p.outcome, s.school_id AS current_school_id, COALESCE(s.form_level, 0)::int AS current_form
+FROM promotions p JOIN students s ON s.id = p.student_id
+WHERE p.student_id = sqlc.arg(student_id)::int AND p.academic_year_id = sqlc.arg(academic_year_id)::int;
+
+-- name: ProceedAfterRepeat :exec
+-- A Form 1 or Form 3 learner who failed is allowed to move up after all.
+WITH changed AS (
+    UPDATE promotions SET outcome = 'Proceeded', to_form = from_form + 1, decided_by = sqlc.arg(actor_user_id)::int,
+        decided_at = CURRENT_TIMESTAMP
+    WHERE id = sqlc.arg(promotion_id)::int AND outcome = 'Repeat' AND from_form IN (1, 3)
+    RETURNING student_id, from_form
+),
+moved AS (
+    UPDATE students SET form_level = changed.from_form + 1, updated_at = CURRENT_TIMESTAMP
+    FROM changed WHERE students.id = changed.student_id
+    RETURNING students.id
+)
+INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+SELECT 'student', changed.student_id, 'AllowedToProceed', u.id, u.name, u.role, u.school_id,
+    'Failed Form ' || changed.from_form || ' but allowed to proceed to Form ' || (changed.from_form + 1)
+FROM changed LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int;
+
+-- name: GetPreviousAcademicYear :one
+SELECT id, year FROM academic_years WHERE year < sqlc.arg(year)::int ORDER BY year DESC LIMIT 1;
+
+-- ============================================================================
+-- Exam pass rules and end-of-term reports (see migration 25).
+-- ============================================================================
+
+-- name: ListExamCompulsorySubjects :many
+SELECT c.exam, c.subject_id, sb.name AS subject_name
+FROM exam_compulsory_subjects c JOIN subjects sb ON sb.id = c.subject_id
+ORDER BY c.exam, sb.name;
+
+-- name: ClearExamCompulsorySubjects :exec
+DELETE FROM exam_compulsory_subjects WHERE exam = sqlc.arg(exam)::text;
+
+-- name: AddExamCompulsorySubject :exec
+INSERT INTO exam_compulsory_subjects (exam, subject_id) VALUES (sqlc.arg(exam)::text, sqlc.arg(subject_id)::int)
+ON CONFLICT DO NOTHING;
+
+-- name: ListTermMarks :many
+-- Every mark a school recorded in one term, with each learner's form during that year
+-- (from their year-end result if the year is finished, otherwise their current form).
+SELECT m.student_id, m.subject_id, sb.name AS subject_name, m.mark,
+    COALESCE((SELECT p.from_form FROM promotions p WHERE p.student_id = m.student_id AND p.academic_year_id = m.academic_year_id),
+        s.form_level, 1)::int AS form_level
+FROM student_marks m
+    JOIN students s ON s.id = m.student_id
+    JOIN subjects sb ON sb.id = m.subject_id
+WHERE m.school_id = sqlc.arg(school_id)::int AND m.academic_year_id = sqlc.arg(academic_year_id)::int
+    AND m.term = sqlc.arg(term)::int
+ORDER BY m.student_id, m.subject_id;
+
+-- name: SaveTermReport :exec
+WITH saved AS (
+    INSERT INTO term_reports (school_id, academic_year_id, term, learners_assessed, average_mark, pass_rate,
+        jce_pass_rate, msce_pass_rate, details, marks_fingerprint, generated_by, generated_at)
+    VALUES (sqlc.arg(school_id)::int, sqlc.arg(academic_year_id)::int, sqlc.arg(term)::int,
+        sqlc.arg(learners_assessed)::int, sqlc.narg(average_mark)::float8, sqlc.narg(pass_rate)::float8,
+        sqlc.narg(jce_pass_rate)::float8, sqlc.narg(msce_pass_rate)::float8, sqlc.arg(details)::jsonb,
+        sqlc.arg(marks_fingerprint)::text, sqlc.arg(actor_user_id)::int, CURRENT_TIMESTAMP)
+    ON CONFLICT (school_id, academic_year_id, term) DO UPDATE
+    SET learners_assessed = EXCLUDED.learners_assessed, average_mark = EXCLUDED.average_mark,
+        pass_rate = EXCLUDED.pass_rate, jce_pass_rate = EXCLUDED.jce_pass_rate,
+        msce_pass_rate = EXCLUDED.msce_pass_rate, details = EXCLUDED.details,
+        marks_fingerprint = EXCLUDED.marks_fingerprint, generated_by = EXCLUDED.generated_by,
+        generated_at = EXCLUDED.generated_at
+    RETURNING school_id
+)
+INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+SELECT 'school', saved.school_id, 'TermReport', u.id, u.name, u.role, u.school_id, sqlc.arg(note)::text
+FROM saved LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int;
+
+-- name: GetTermReport :one
+SELECT tr.id, tr.school_id, tr.academic_year_id, ay.year, tr.term, tr.learners_assessed, tr.average_mark,
+    tr.pass_rate, tr.jce_pass_rate, tr.msce_pass_rate, tr.details, tr.marks_fingerprint,
+    COALESCE(u.name, '')::text AS generated_by_name, tr.generated_at
+FROM term_reports tr
+    JOIN academic_years ay ON ay.id = tr.academic_year_id
+    LEFT JOIN users u ON u.id = tr.generated_by
+WHERE tr.school_id = sqlc.arg(school_id)::int AND tr.academic_year_id = sqlc.arg(academic_year_id)::int
+    AND tr.term = sqlc.arg(term)::int;
+
+-- name: ListSchoolTermReports :many
+SELECT tr.academic_year_id, ay.year, tr.term, tr.learners_assessed, tr.average_mark, tr.pass_rate,
+    tr.jce_pass_rate, tr.msce_pass_rate, tr.details, tr.marks_fingerprint, tr.generated_at
+FROM term_reports tr JOIN academic_years ay ON ay.id = tr.academic_year_id
+WHERE tr.school_id = sqlc.arg(school_id)::int
+ORDER BY ay.year DESC, tr.term DESC;
+
+-- name: ListTermReportsForTerm :many
+-- Every school's report for one term, for the national and division comparisons.
+SELECT sc.id AS school_id, sc.name AS school_name, sc.school_number, d.name AS district_name,
+    rg.id AS region_id, rg.name AS region_name,
+    tr.learners_assessed, tr.average_mark, tr.pass_rate, tr.jce_pass_rate, tr.msce_pass_rate, tr.generated_at
+FROM term_reports tr
+    JOIN schools sc ON sc.id = tr.school_id
+    JOIN districts d ON d.id = sc.district_id
+    JOIN regions rg ON rg.id = d.region_id
+WHERE tr.academic_year_id = sqlc.arg(academic_year_id)::int AND tr.term = sqlc.arg(term)::int
+    AND (sqlc.narg(region_id)::int IS NULL OR rg.id = sqlc.narg(region_id)::int)
+ORDER BY rg.name, d.name, sc.name;
+
+-- name: ListStudentTermSummaries :many
+-- A learner's average and subjects passed in each term they have marks for.
+SELECT m.academic_year_id, ay.year, m.term, COUNT(*)::int AS subjects_marked,
+    AVG(m.mark)::float8 AS average_mark,
+    (COUNT(*) FILTER (WHERE m.mark >= sqlc.arg(pass_mark)::int))::int AS subjects_passed,
+    COALESCE(MAX(sc.name), '')::text AS school_name
+FROM student_marks m
+    JOIN academic_years ay ON ay.id = m.academic_year_id
+    LEFT JOIN schools sc ON sc.id = m.school_id
+WHERE m.student_id = sqlc.arg(student_id)::int
+GROUP BY m.academic_year_id, ay.year, m.term
+ORDER BY ay.year DESC, m.term DESC;
+
+-- ============================================================================
+-- Term dates and reminders (see migration 26).
+-- ============================================================================
+
+-- name: ListTermDates :many
+SELECT t.academic_year_id, ay.year, t.term, t.start_date, t.end_date
+FROM academic_year_terms t JOIN academic_years ay ON ay.id = t.academic_year_id
+ORDER BY ay.year DESC, t.term;
+
+-- name: GetTermDates :one
+SELECT start_date, end_date FROM academic_year_terms
+WHERE academic_year_id = sqlc.arg(academic_year_id)::int AND term = sqlc.arg(term)::int;
+
+-- name: ClearTermDates :exec
+DELETE FROM academic_year_terms WHERE academic_year_id = sqlc.arg(academic_year_id)::int;
+
+-- name: AddTermDates :exec
+INSERT INTO academic_year_terms (academic_year_id, term, start_date, end_date)
+VALUES (sqlc.arg(academic_year_id)::int, sqlc.arg(term)::int, sqlc.arg(start_date)::date, sqlc.arg(end_date)::date);
+
+-- name: LogTermDatesChange :exec
+INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+SELECT 'academic_year', sqlc.arg(academic_year_id)::int, 'TermDatesSet', u.id, u.name, u.role, u.school_id, sqlc.arg(note)::text
+FROM (SELECT 1) AS one LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int;
+
+-- name: ClaimTermReminder :one
+-- Records that a reminder is being sent; returns no row if it already was.
+INSERT INTO term_reminders (school_id, academic_year_id, term, kind)
+VALUES (sqlc.arg(school_id)::int, sqlc.arg(academic_year_id)::int, sqlc.arg(term)::int, sqlc.arg(kind)::text)
+ON CONFLICT DO NOTHING
+RETURNING kind;
+
+-- name: CreateTermReminderNotice :exec
+-- An automatic notice to one school or division office, with a priority and due date.
+WITH n AS (
+    INSERT INTO notices (kind, sender_party_type, sender_party_id, title, body, priority, due_date, audience_type, audience_id)
+    VALUES ('SYSTEM', 'SYSTEM', 0, sqlc.arg(title)::text, sqlc.arg(body)::text, sqlc.arg(priority)::text,
+        sqlc.narg(due_date)::date, CASE sqlc.arg(party_type)::text WHEN 'REGION' THEN 'REGIONAL_ADMIN' ELSE 'SCHOOL' END,
+        sqlc.arg(party_id)::int)
+    RETURNING id
+)
+INSERT INTO notice_recipients (notice_id, party_type, party_id)
+SELECT n.id, sqlc.arg(party_type)::text, sqlc.arg(party_id)::int FROM n;
+
+-- name: GetSchoolRegionForReminder :one
+SELECT d.region_id, sc.name FROM schools sc JOIN districts d ON d.id = sc.district_id WHERE sc.id = sqlc.arg(school_id)::int;
+
+-- name: GetReminderSettings :one
+SELECT days_before, overdue_after, escalate_after, updated_at FROM reminder_settings WHERE id = 1;
+
+-- name: UpdateReminderSettings :exec
+WITH updated AS (
+    UPDATE reminder_settings
+    SET days_before = sqlc.arg(days_before)::int, overdue_after = sqlc.arg(overdue_after)::int,
+        escalate_after = sqlc.arg(escalate_after)::int, updated_by = sqlc.arg(actor_user_id)::int,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = 1
+    RETURNING id
+)
+INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+SELECT 'reminder_settings', NULL, 'Updated', u.id, u.name, u.role, u.school_id,
+    'Remind ' || sqlc.arg(days_before)::int || ' days before; urgent ' || sqlc.arg(overdue_after)::int
+        || ' days after; division told ' || sqlc.arg(escalate_after)::int || ' days after'
+FROM updated LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int;
+
+-- name: ListTermDatesForYear :many
+SELECT term, start_date, end_date FROM academic_year_terms
+WHERE academic_year_id = sqlc.arg(academic_year_id)::int ORDER BY term;

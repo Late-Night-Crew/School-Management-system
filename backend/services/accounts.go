@@ -434,6 +434,12 @@ func strongEnough(password string) bool {
 const temporaryPasswordAlphabet = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
 // newTemporaryPassword returns a random 10-character password and its hash.
+// NewTemporaryPassword returns a random temporary password and its hash, for the
+// command-line tools that create or reset accounts outside the API.
+func NewTemporaryPassword() (password, hash string, err error) {
+	return newTemporaryPassword()
+}
+
 func newTemporaryPassword() (string, string, error) {
 	for {
 		buf := make([]byte, 10)

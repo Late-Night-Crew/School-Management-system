@@ -20,6 +20,7 @@ import usePagination from "../../hooks/usePagination";
 import { formatDate, formatPhone } from "../../utils/format";
 import { Badge, Button, Card, Dialog, Field, Input, Notice, Page, SearchInput, Select, Table, Textarea } from "../../components/ui";
 import styles from "./Accounts.module.css";
+import PasswordRequests from "./PasswordRequests";
 
 const DATE_TIME = { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" };
 
@@ -107,6 +108,13 @@ export default function AccountsPage() {
       }
     >
       {alert && <Notice tone={alert.tone}>{alert.message}</Notice>}
+
+      <PasswordRequests
+        onIssued={(result) => {
+          setIssued({ ...result, reason: "reset" });
+          accounts.reload();
+        }}
+      />
 
       <Card accent="slate" icon="bi-funnel" title="Filters">
         <div className={`ui-grid ${isSuper ? "ui-cols-3" : "ui-cols-2"}`}>
@@ -482,6 +490,7 @@ function TemporaryPasswordDialog({ issued, onHide }) {
         <div>
           Sign-in email: <strong>{account.email}</strong>
         </div>
+        {issued.contact_phone && <PhoneLinks phone={issued.contact_phone} label="They asked to be called on" />}
         <PhoneLinks phone={account.phone} whatsapp={account.whatsapp} label="Call them" />
         <EmailLink email={account.email} />
       </div>

@@ -34,3 +34,20 @@ export const getDirectory = () => client.get("/contacts/directory").then(data);
 export const updateRegionOffice = (id, office) => client.put(`/contacts/regions/${id}/office`, office);
 // office: { phone, email, postal_address, head_teacher_name, head_teacher_phone }
 export const updateSchoolOffice = (id, office) => client.put(`/contacts/schools/${id}/office`, office);
+
+// "Forgot password" requests. The sign-in page sends them without an account; the
+// office above the person handles them: MCDE for division officers, the division for
+// school users (the super admin sees every request).
+// { regions: [{ id, name }], schools: [{ id, name, region_id }] } for the public form
+export const getPublicPlaces = () => client.get("/public/places").then(data);
+// request: { role, email, region_id | school_id, contact_phone, note }. Resolves to
+// { message }, the same whether or not the details matched an account.
+export const requestPasswordReset = (request) => client.post("/public/password_requests", request).then(data);
+export const listPasswordRequests = () => client.get("/accounts/password_requests").then(list);
+// Resolves to { account, temporary_password }
+export const resolvePasswordRequest = (id) => client.post(`/accounts/password_requests/${id}/resolve`).then(data);
+export const dismissPasswordRequest = (id) => client.post(`/accounts/password_requests/${id}/dismiss`).then(data);
+
+// Fired after a request is handled, so the sidebar badge refreshes
+export const PASSWORD_REQUESTS_CHANGED = "nsms:password-requests-changed";
+export const notifyPasswordRequestsChanged = () => window.dispatchEvent(new Event(PASSWORD_REQUESTS_CHANGED));

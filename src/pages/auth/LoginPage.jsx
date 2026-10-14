@@ -1,7 +1,7 @@
 import { useState } from "react";
 import * as Yup from "yup";
 import { useFormik } from "formik";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { login, logout } from "../../api/auth";
 import { getSession, homePath } from "../../auth/session";
 import { Button, Field, Input, Notice } from "../../components/ui";
@@ -100,6 +100,9 @@ export default function LoginPage() {
           <Button type="submit" icon="bi-box-arrow-in-right" className={styles.submit} disabled={formik.isSubmitting}>
             {formik.isSubmitting ? "Signing in..." : "Sign in"}
           </Button>
+          <Link to="/forgot-password" className={styles.link}>
+            Forgot your password?
+          </Link>
         </form>
 
         <div className={styles.footer}>© {new Date().getFullYear()} Open Secondary School</div>

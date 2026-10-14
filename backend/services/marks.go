@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 
 	"nsms/database/dbsqlc"
@@ -15,8 +14,9 @@ import (
 type MarksService interface {
 	ListMarks(ctx context.Context, schoolID int64, filter schema.MarksFilter) ([]*schema.StudentMark, error)
 	// SaveMarks upserts the given marks and deletes those sent with a null mark.
-	// recordedBy is the user ID saving the marks (0 if unknown).
-	SaveMarks(ctx context.Context, schoolID int64, recordedBy int64, req *schema.SaveMarksRequest) (*schema.SaveMarksResult, error)
+	// recordedBy is the user ID saving the marks (0 if unknown). Only canCorrectPast
+	// (MCDE) may change a year the school has finished; that is recorded in the audit log.
+	SaveMarks(ctx context.Context, schoolID int64, recordedBy int64, req *schema.SaveMarksRequest, canCorrectPast bool) (*schema.SaveMarksResult, error)
 }
 
 type marksService struct {
@@ -59,13 +59,14 @@ func (s *marksService) ListMarks(ctx context.Context, schoolID int64, filter sch
 
 type enrolment struct{ studentID, subjectID int32 }
 
-func (s *marksService) SaveMarks(ctx context.Context, schoolID int64, recordedBy int64, req *schema.SaveMarksRequest) (*schema.SaveMarksResult, error) {
-	if _, err := s.queries.GetAcademicYearByID(ctx, int32(req.AcademicYearID)); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrAcademicYearNotFound
-		}
-		return nil, fmt.Errorf("failed to look up academic year %d: %w", req.AcademicYearID, err)
+func (s *marksService) SaveMarks(ctx context.Context, schoolID int64, recordedBy int64, req *schema.SaveMarksRequest, canCorrectPast bool) (*schema.SaveMarksResult, error) {
+	// Not an upcoming year, nor a term the school has not reached, nor (for coordinators)
+	// a year the school has finished
+	past, err := checkMarksTerm(ctx, s.queries, schoolID, req.AcademicYearID, req.Term, canCorrectPast)
+	if err != nil {
+		return nil, err
 	}
+
 
 	studentIDs := make([]int32, 0, len(req.Marks))
 	for _, entry := range req.Marks {
@@ -120,6 +121,20 @@ func (s *marksService) SaveMarks(ctx context.Context, schoolID int64, recordedBy
 		upsert.RecordedBy = sql.NullInt32{Int32: int32(recordedBy), Valid: recordedBy > 0}
 		if err := s.queries.UpsertMarks(ctx, upsert); err != nil {
 			return nil, fmt.Errorf("failed to save marks: %w", err)
+		}
+	}
+
+	// Corrections to a finished year are recorded against the school
+	if past {
+		err := s.queries.CreateAuditLog(ctx, dbsqlc.CreateAuditLogParams{
+			EntityType:  "school",
+			EntityID:    sql.NullInt32{Int32: int32(schoolID), Valid: true},
+			Action:      "PastMarksCorrected",
+			ActorUserID: int32(recordedBy),
+			Note:        sql.NullString{String: fmt.Sprintf("%d saved, %d cleared for academic year %d, Term %d", len(upsert.StudentIds), len(clear.StudentIds), req.AcademicYearID, req.Term), Valid: true},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to record the correction: %w", err)
 		}
 	}
 

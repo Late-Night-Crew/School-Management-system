@@ -22,6 +22,8 @@ type SchoolAdminService interface {
 	GetExamResultBySchoolIDAndYear(ctx context.Context, schoolID int64, academicYearID int64) (*schema.ExamResult, error)
 	CreateExamResult(ctx context.Context, schoolID int64, req *schema.CreateExamResultRequest) (*schema.ExamResult, error)
 	UpdateExamResult(ctx context.Context, schoolID int64, examResultID int64, req *schema.UpdateExamResultRequest) (*schema.ExamResult, error)
+	// FindSimilar lists existing learners (at any school) who may be the one being registered.
+	FindSimilar(ctx context.Context, check *schema.DuplicateCheckRequest) ([]schema.SimilarLearner, error)
 }
 
 type schoolAdminService struct {
@@ -121,6 +123,8 @@ func mapDBStudent(dbStudent dbsqlc.GetStudentsBySchoolIDRow, subjectIDs []int64)
 		AcademicYearID:       academicYearID,
 		Disability:           dbStudent.Disability.Bool,
 		DisabilityDetails:    disabilityDetails,
+		NationalID:           dbStudent.NationalID.String,
+		JCENumber:            dbStudent.JceNumber.String,
 		Status:               status,
 		SubjectIDs:           subjectIDs,
 	}
@@ -203,6 +207,8 @@ func (s *schoolAdminService) GetStudentByIDAndSchoolID(ctx context.Context, scho
 		}(),
 		Disability:        dbStudent.Disability.Bool,
 		DisabilityDetails: dbStudent.DisabilityDetails.String,
+		NationalID:        dbStudent.NationalID.String,
+		JCENumber:         dbStudent.JceNumber.String,
 		Status:            dbStudent.Status.String,
 		SubjectIDs:        subjectIDsByStudent[int32(dbStudent.ID)],
 	}, nil
@@ -245,6 +251,14 @@ func (s *schoolAdminService) loadStudentSubjectIDs(ctx context.Context, studentI
 }
 
 func (s *schoolAdminService) CreateStudentForSchool(ctx context.Context, schoolID int64, req *schema.CreateStudentRequest) (*schema.Student, error) {
+	if req.AcademicYearID > 0 {
+		if err := checkYearStarted(ctx, s.queries, req.AcademicYearID); err != nil {
+			return nil, err
+		}
+	}
+	if err := prepareLearnerIdentity(ctx, s.queries, &req.NationalID, &req.JCENumber, 0); err != nil {
+		return nil, err
+	}
 	guardianName := req.GuardianName
 	if guardianName == "" {
 		guardianName = strings.TrimSpace(req.GuardianFirstname + " " + req.GuardianLastname)
@@ -269,6 +283,8 @@ func (s *schoolAdminService) CreateStudentForSchool(ctx context.Context, schoolI
 		AcademicYearID:       sql.NullInt32{Int32: int32(req.AcademicYearID), Valid: req.AcademicYearID != 0},
 		Disability:           sql.NullBool{Bool: req.Disability, Valid: true},
 		DisabilityDetails:    sql.NullString{String: req.DisabilityDetails, Valid: req.DisabilityDetails != ""},
+		NationalID:           common.NullString(req.NationalID),
+		JceNumber:            common.NullString(req.JCENumber),
 		Status:               sql.NullString{String: req.Status, Valid: req.Status != ""},
 	})
 	if err != nil {
@@ -309,12 +325,22 @@ func (s *schoolAdminService) CreateStudentForSchool(ctx context.Context, schoolI
 		}(),
 		Disability:        dbStudent.Disability.Bool,
 		DisabilityDetails: dbStudent.DisabilityDetails.String,
+		NationalID:        dbStudent.NationalID.String,
+		JCENumber:         dbStudent.JceNumber.String,
 		Status:            dbStudent.Status.String,
 		SubjectIDs:        req.SubjectIDs,
 	}, nil
 }
 
 func (s *schoolAdminService) UpdateStudentForSchool(ctx context.Context, schoolID int64, req *schema.UpdateStudentRequest) (*schema.Student, error) {
+	if req.AcademicYearID > 0 {
+		if err := checkYearStarted(ctx, s.queries, req.AcademicYearID); err != nil {
+			return nil, err
+		}
+	}
+	if err := prepareLearnerIdentity(ctx, s.queries, &req.NationalID, &req.JCENumber, req.ID); err != nil {
+		return nil, err
+	}
 	guardianName := req.GuardianName
 	if guardianName == "" {
 		guardianName = strings.TrimSpace(req.GuardianFirstname + " " + req.GuardianLastname)
@@ -340,6 +366,8 @@ func (s *schoolAdminService) UpdateStudentForSchool(ctx context.Context, schoolI
 		AcademicYearID:       sql.NullInt32{Int32: int32(req.AcademicYearID), Valid: req.AcademicYearID != 0},
 		Disability:           sql.NullBool{Bool: req.Disability, Valid: true},
 		DisabilityDetails:    sql.NullString{String: req.DisabilityDetails, Valid: req.DisabilityDetails != ""},
+		NationalID:           common.NullString(req.NationalID),
+		JceNumber:            common.NullString(req.JCENumber),
 		Status:               sql.NullString{String: req.Status, Valid: req.Status != ""},
 		SchoolID_2:           int32(schoolID),
 	})
@@ -384,6 +412,8 @@ func (s *schoolAdminService) UpdateStudentForSchool(ctx context.Context, schoolI
 		}(),
 		Disability:        dbStudent.Disability.Bool,
 		DisabilityDetails: dbStudent.DisabilityDetails.String,
+		NationalID:        dbStudent.NationalID.String,
+		JCENumber:         dbStudent.JceNumber.String,
 		Status:            dbStudent.Status.String,
 		SubjectIDs:        req.SubjectIDs,
 	}, nil
@@ -417,6 +447,9 @@ func (s *schoolAdminService) GetExamResultBySchoolIDAndYear(ctx context.Context,
 }
 
 func (s *schoolAdminService) CreateExamResult(ctx context.Context, schoolID int64, req *schema.CreateExamResultRequest) (*schema.ExamResult, error) {
+	if err := checkYearStarted(ctx, s.queries, req.AcademicYearID); err != nil {
+		return nil, err
+	}
 	dbExam, err := s.queries.CreateExamResult(ctx, dbsqlc.CreateExamResultParams{
 		SchoolID:       int32(schoolID),
 		AcademicYearID: int32(req.AcademicYearID),
@@ -454,4 +487,8 @@ func (s *schoolAdminService) UpdateExamResult(ctx context.Context, schoolID int6
 		return nil, fmt.Errorf("failed to update exam result %d for school %d: %w", examResultID, schoolID, err)
 	}
 	return mapDBExamResult(dbExam), nil
+}
+
+func (s *schoolAdminService) FindSimilar(ctx context.Context, check *schema.DuplicateCheckRequest) ([]schema.SimilarLearner, error) {
+	return FindSimilarLearners(ctx, s.queries, check)
 }

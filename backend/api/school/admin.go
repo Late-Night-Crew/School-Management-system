@@ -116,6 +116,12 @@ func CreateStudentForSchool(schoolAdminService services.SchoolAdminService, logg
 		}
 
 		student, err := schoolAdminService.CreateStudentForSchool(ctx.Context(), pathSchoolID, &req)
+		if errors.Is(err, services.ErrInvalidLearnerID) || errors.Is(err, services.ErrYearNotOpen) || errors.Is(err, services.ErrAcademicYearNotFound) {
+			return problemdetail.BadRequest(ctx, err.Error())
+		}
+		if errors.Is(err, services.ErrDuplicateLearner) {
+			return problemdetail.Conflict(ctx, err.Error())
+		}
 		if err != nil {
 			logger.Error("failed to create student for school", "error", err)
 			return problemdetail.ServerErrorProblem(ctx, "Failed to create student")
@@ -152,6 +158,12 @@ func UpdateStudentForSchool(schoolAdminService services.SchoolAdminService, logg
 		req.ID = studentID
 
 		student, err := schoolAdminService.UpdateStudentForSchool(ctx.Context(), pathSchoolID, &req)
+		if errors.Is(err, services.ErrInvalidLearnerID) || errors.Is(err, services.ErrYearNotOpen) || errors.Is(err, services.ErrAcademicYearNotFound) {
+			return problemdetail.BadRequest(ctx, err.Error())
+		}
+		if errors.Is(err, services.ErrDuplicateLearner) {
+			return problemdetail.Conflict(ctx, err.Error())
+		}
 		if err != nil {
 			logger.Error("failed to update student for school", "error", err)
 			return problemdetail.ServerErrorProblem(ctx, "Failed to update student")
@@ -266,6 +278,9 @@ func CreateExamResultForSchool(schoolAdminService services.SchoolAdminService, l
 		}
 
 		examResult, err := schoolAdminService.CreateExamResult(ctx.Context(), pathSchoolID, &req)
+		if errors.Is(err, services.ErrYearNotOpen) || errors.Is(err, services.ErrAcademicYearNotFound) {
+			return problemdetail.BadRequest(ctx, err.Error())
+		}
 		if err != nil {
 			logger.Error("failed to create exam result for school", "error", err)
 			return problemdetail.ServerErrorProblem(ctx, "Failed to create exam result")
@@ -306,5 +321,21 @@ func UpdateExamResultForSchool(schoolAdminService services.SchoolAdminService, l
 			return problemdetail.ServerErrorProblem(ctx, "Failed to update exam result")
 		}
 		return ctx.Status(fiber.StatusOK).JSON(examResult)
+	}
+}
+
+// FindSimilarStudents warns about likely duplicates (at any school) before a learner is saved.
+func FindSimilarStudents(schoolAdminService services.SchoolAdminService, logger logging.Logger) fiber.Handler {
+	return func(ctx *fiber.Ctx) error {
+		var check schema.DuplicateCheckRequest
+		if err := ctx.QueryParser(&check); err != nil {
+			return problemdetail.BadRequest(ctx, "Invalid duplicate check")
+		}
+		similar, err := schoolAdminService.FindSimilar(ctx.Context(), &check)
+		if err != nil {
+			logger.Error("school", "failed to look for similar learners", "error", err)
+			return problemdetail.ServerErrorProblem(ctx, "Failed to check for duplicates")
+		}
+		return ctx.JSON(similar)
 	}
 }

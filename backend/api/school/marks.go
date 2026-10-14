@@ -53,9 +53,10 @@ func SaveMarks(marksService services.MarksService, logger logging.Logger) fiber.
 		}
 		userID, _ := common.GetUserIDFromCtx(ctx)
 
-		result, err := marksService.SaveMarks(ctx.Context(), schoolID, userID, &req)
+		// Coordinators work in their school's current year; only MCDE corrects past years
+		result, err := marksService.SaveMarks(ctx.Context(), schoolID, userID, &req, false)
 		switch {
-		case errors.Is(err, services.ErrMarkNotAllowed), errors.Is(err, services.ErrAcademicYearNotFound):
+		case errors.Is(err, services.ErrMarkNotAllowed), errors.Is(err, services.ErrAcademicYearNotFound), errors.Is(err, services.ErrYearNotOpen):
 			return problemdetail.BadRequest(ctx, err.Error())
 		case err != nil:
 			logger.Error(loggedmodule.Marks, "failed to save marks", "error", err)

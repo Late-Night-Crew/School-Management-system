@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { listRegions } from "../../api/regions";
 import { listSchools } from "../../api/schools";
 import { listDistricts } from "../../api/districts";
-import { createStudent, deleteStudent, listStudents, updateStudent } from "../../api/students";
+import { createStudent, deleteStudent, findSimilarStudents, listStudents, updateStudent } from "../../api/students";
+import DuplicateLearnerDialog from "../../components/DuplicateLearnerDialog";
 import { listAcademicYears } from "../../api/academicYears";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
@@ -43,6 +44,7 @@ const ManageStudents = () => {
   const [editingStudent, setEditingStudent] = useState(null);
   const [allYears, setAllYears] = useState([]);
   const [deleting, setDeleting] = useState(null);
+  const [duplicates, setDuplicates] = useState(null); // { matches, fields } awaiting confirmation
 
   const studentsPerPage = 5;
 
@@ -209,6 +211,8 @@ const ManageStudents = () => {
     status: "active",
     school_id: "",
     academic_year_id: academicYears.length > 0 ? academicYears[0].id.toString() : "",
+    national_id: "",
+    jce_number: "",
   });
 
   const openAddModal = () => {
@@ -231,6 +235,8 @@ const ManageStudents = () => {
       status: student.status || "active",
       school_id: student.school_id ? String(student.school_id) : "",
       academic_year_id: student.academic_year_id ? String(student.academic_year_id) : "",
+      national_id: student.national_id || "",
+      jce_number: student.jce_number || "",
     });
     setShowModal(true);
   };
@@ -251,6 +257,28 @@ const ManageStudents = () => {
       academic_year_id: parseInt(newStudent.academic_year_id, 10),
     };
 
+    try {
+      // Same name plus same date of birth or guardian phone: warn before saving
+      const matches = await findSimilarStudents({
+        first_name: fields.first_name,
+        last_name: fields.last_name,
+        date_of_birth: fields.date_of_birth,
+        guardian_phone: editingStudent?.guardian_phone,
+        exclude_id: editingStudent?.id,
+      });
+      if (matches.length) {
+        setDuplicates({ matches, fields });
+        return;
+      }
+      await saveStudent(fields);
+    } catch (err) {
+      alert(`Failed to save student: ${err.message}`);
+    }
+  };
+
+  // Saves the student; called directly, or after the possible-duplicate warning
+  const saveStudent = async (fields) => {
+    setDuplicates(null);
     try {
       if (editingStudent) {
         await updateStudent(editingStudent.id, { ...editingStudent, ...fields });
@@ -451,6 +479,22 @@ const ManageStudents = () => {
           <Field label="Last Name" required>
             <Input name="last_name" value={newStudent.last_name} onChange={handleNewStudentChange} required />
           </Field>
+          <Field label="National ID" hint="8 letters and numbers; leave empty if the learner has none yet">
+            <Input
+              name="national_id"
+              maxLength={8}
+              value={newStudent.national_id}
+              onChange={(e) => setNewStudent({ ...newStudent, national_id: e.target.value.toUpperCase() })}
+            />
+          </Field>
+          <Field label="JCE Number" hint="Given in Form 2">
+            <Input
+              name="jce_number"
+              maxLength={30}
+              value={newStudent.jce_number}
+              onChange={(e) => setNewStudent({ ...newStudent, jce_number: e.target.value.toUpperCase() })}
+            />
+          </Field>
           <Field label="Date of Birth" required>
             <Input
               type="date"
@@ -515,6 +559,12 @@ const ManageStudents = () => {
           </Field>
         </div>
       </Dialog>
+
+      <DuplicateLearnerDialog
+        matches={duplicates?.matches}
+        onCancel={() => setDuplicates(null)}
+        onConfirm={() => saveStudent(duplicates.fields)}
+      />
 
       <TypeToConfirm
         show={!!deleting}

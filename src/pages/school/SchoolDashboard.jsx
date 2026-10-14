@@ -3,6 +3,8 @@ import { Link, useParams } from "react-router-dom";
 
 import { listAcademicYears } from "../../api/academicYears";
 import { getSchool } from "../../api/schools";
+import { schoolPromotionBase } from "../../api/promotion";
+import { listTermReports } from "../../api/termReports";
 import {
   getSchoolDashboard,
   listSchoolExamResults,
@@ -38,12 +40,13 @@ const SchoolDashboard = () => {
     useEffect(() => {
         const load = async () => {
             setLoading(true);
-            const [statsRes, schoolRes, yearsRes, resultsRes, incomingRes, outgoingRes] = await Promise.allSettled([
+            const [statsRes, schoolRes, yearsRes, resultsRes, incomingRes, termRes, outgoingRes] = await Promise.allSettled([
                 getSchoolDashboard(schoolId),
                 getSchool(schoolId),
                 listAcademicYears(),
                 listSchoolExamResults(schoolId),
                 listSchoolIncomingTransfers(schoolId),
+                listTermReports(schoolPromotionBase(false, schoolId)),
                 listSchoolOutgoingTransfers(schoolId),
             ]);
 
@@ -54,12 +57,15 @@ const SchoolDashboard = () => {
             const years = valueOr(yearsRes, []);
             setActiveYear(years.find((y) => y.status === "Active") || null);
 
-            // Latest exam result: the active year's if recorded, otherwise the most recent year's
+            // Latest exam result: the newest saved Term 3 report (calculated from the JCE/MSCE
+            // results), otherwise the newest rate recorded by hand before term reports
             const yearById = Object.fromEntries(years.map((y) => [y.id, y]));
-            const results = valueOr(resultsRes, [])
-                .map((r) => ({ ...r, year: yearById[r.academic_year_id] }))
-                .sort((a, b) => (b.year?.year || 0) - (a.year?.year || 0));
-            setLatestResult(results.find((r) => r.year?.status === "Active") || results[0] || null);
+            const calculated = valueOr(termRes, [])
+                .filter((r) => r.term === 3 && !r.live)
+                .map((r) => ({ ...r, year: yearById[r.academic_year_id] }));
+            const recorded = valueOr(resultsRes, []).map((r) => ({ ...r, year: yearById[r.academic_year_id] }));
+            const results = [...calculated, ...recorded].sort((a, b) => (b.year?.year || 0) - (a.year?.year || 0));
+            setLatestResult(results[0] || null);
 
             const transfers = [
                 ...valueOr(incomingRes, []).map((t) => ({ ...t, direction: "in" })),

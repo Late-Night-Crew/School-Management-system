@@ -3,8 +3,10 @@ import {
   createAcademicYear,
   deleteAcademicYear,
   listAcademicYears,
+  listTermDates,
   updateAcademicYear,
 } from "../../api/academicYears";
+import TermDatesDialog from "./TermDatesDialog";
 import ConfirmModal from "../../components/ConfirmModal";
 import DataState from "../../components/DataState";
 import { formatDate } from "../../utils/format";
@@ -21,21 +23,31 @@ const ManageAcademicYears = () => {
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState({ type: "", message: "" });
   const [deleting, setDeleting] = useState(null);
+  const [termDates, setTermDates] = useState([]);
+  const [datingYear, setDatingYear] = useState(null);
+  const blankTerms = () => [1, 2, 3].map((term) => ({ term, start_date: "", end_date: "" }));
   const [formData, setFormData] = useState({
     year: "",
     start_date: "",
     end_date: "",
     status: "Upcoming",
   });
+  // A new year must say when each term runs (edit an existing year's terms with the calendar icon)
+  const [terms, setTerms] = useState(blankTerms);
+  const setTerm = (term, field) => (e) =>
+    setTerms((list) => list.map((t) => (t.term === term ? { ...t, [field]: e.target.value } : t)));
 
   const showAlert = (type, message) => {
     setAlert({ type, message });
     setTimeout(() => setAlert({ type: "", message: "" }), 3000);
   };
 
+  const fetchTermDates = () => listTermDates().then(setTermDates, () => setTermDates([]));
+
   // --- Data Fetching ---
   const fetchAcademics = async () => {
     setLoading(true);
+    fetchTermDates();
     try {
       const data = await listAcademicYears();
       setAcademics(data);
@@ -67,6 +79,7 @@ const ManageAcademicYears = () => {
 
   const handleClear = () => {
     setEditingItem(null);
+    setTerms(blankTerms());
     setFormData({
       year: "",
       start_date: "",
@@ -91,7 +104,11 @@ const ManageAcademicYears = () => {
         await updateAcademicYear(editingItem.id, payload);
         showAlert("success", `Academic Year ${payload.year} updated successfully.`);
       } else {
-        await createAcademicYear(payload);
+        if (terms.some((t) => !t.start_date || !t.end_date)) {
+          showAlert("danger", "Give the start and end date of all three terms.");
+          return;
+        }
+        await createAcademicYear({ ...payload, terms });
         showAlert("success", `Academic Year ${payload.year} created successfully.`);
       }
   
@@ -134,7 +151,11 @@ const ManageAcademicYears = () => {
           accent={editingItem ? "amber" : "green"}
           icon={editingItem ? "bi-pencil-square" : "bi-plus-circle"}
           title={editingItem ? `Update Academic Year ${editingItem.year}` : "Create New Academic Year"}
-          subtitle="The end date must be after the start date"
+          subtitle={
+            editingItem
+              ? "Change the year's dates; its term dates are edited with the calendar icon in the list"
+              : "Set when the year and each of its three terms start and end. Schools cannot move to the next term before it ends, and are reminded as it ends."
+          }
           footer={
             <>
               {editingItem && (
@@ -174,6 +195,20 @@ const ManageAcademicYears = () => {
               </Select>
             </Field>
           </div>
+          {!editingItem && (
+            <div className="ui-grid ui-cols-3 mt-3">
+              {terms.map((t) => (
+                <div key={t.term} className="ui-grid ui-cols-2">
+                  <Field label={`Term ${t.term} starts`} required>
+                    <Input type="date" min={formData.start_date} max={formData.end_date} value={t.start_date} onChange={setTerm(t.term, "start_date")} required />
+                  </Field>
+                  <Field label={`Term ${t.term} ends`} required>
+                    <Input type="date" min={t.start_date || formData.start_date} max={formData.end_date} value={t.end_date} onChange={setTerm(t.term, "end_date")} required />
+                  </Field>
+                </div>
+              ))}
+            </div>
+          )}
         </Card>
       </form>
 
@@ -187,6 +222,7 @@ const ManageAcademicYears = () => {
                 <th>Start Date</th>
                 <th>End Date</th>
                 <th>Status</th>
+                <th>Terms</th>
                 <th className="end">Actions</th>
               </tr>
             </thead>
@@ -200,7 +236,18 @@ const ManageAcademicYears = () => {
                   <td>{formatDate(item.start_date)}</td>
                   <td>{formatDate(item.end_date)}</td>
                   <td><Badge tone={STATUS_TONES[item.status]}>{item.status}</Badge></td>
+                  <td>
+                    {termDates
+                      .filter((t) => t.academic_year_id === item.id)
+                      .map((t) => (
+                        <div key={t.term} className="ui-hint">
+                          Term {t.term}: {formatDate(t.start_date, { day: "numeric", month: "short" })} – {formatDate(t.end_date, { day: "numeric", month: "short" })}
+                        </div>
+                      ))}
+                    {!termDates.some((t) => t.academic_year_id === item.id) && <span className="ui-hint">Not set</span>}
+                  </td>
                   <td className="end">
+                    <IconButton kind="view" icon="bi-calendar3-range" title={`Set term dates for ${item.year}`} tip="Term dates" onClick={() => setDatingYear(item)} />
                     <IconButton kind="edit" title={`Edit ${item.year}`} onClick={() => handleEdit(item)} />
                     <IconButton kind="delete" title={`Delete ${item.year}`} onClick={() => setDeleting(item)} />
                   </td>
@@ -210,6 +257,17 @@ const ManageAcademicYears = () => {
           </Table>
         </DataState>
       </Card>
+
+      <TermDatesDialog
+        year={datingYear}
+        dates={termDates}
+        onHide={() => setDatingYear(null)}
+        onSaved={(message) => {
+          setDatingYear(null);
+          fetchTermDates();
+          showAlert("success", message);
+        }}
+      />
 
       <ConfirmModal
         show={!!deleting}

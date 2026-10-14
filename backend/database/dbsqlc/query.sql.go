@@ -65,6 +65,43 @@ func (q *Queries) AcceptSchoolRequest(ctx context.Context, arg AcceptSchoolReque
 	return id, err
 }
 
+const addExamCompulsorySubject = `-- name: AddExamCompulsorySubject :exec
+INSERT INTO exam_compulsory_subjects (exam, subject_id) VALUES ($1::text, $2::int)
+ON CONFLICT DO NOTHING
+`
+
+type AddExamCompulsorySubjectParams struct {
+	Exam      string
+	SubjectID int32
+}
+
+func (q *Queries) AddExamCompulsorySubject(ctx context.Context, arg AddExamCompulsorySubjectParams) error {
+	_, err := q.db.ExecContext(ctx, addExamCompulsorySubject, arg.Exam, arg.SubjectID)
+	return err
+}
+
+const addTermDates = `-- name: AddTermDates :exec
+INSERT INTO academic_year_terms (academic_year_id, term, start_date, end_date)
+VALUES ($1::int, $2::int, $3::date, $4::date)
+`
+
+type AddTermDatesParams struct {
+	AcademicYearID int32
+	Term           int32
+	StartDate      time.Time
+	EndDate        time.Time
+}
+
+func (q *Queries) AddTermDates(ctx context.Context, arg AddTermDatesParams) error {
+	_, err := q.db.ExecContext(ctx, addTermDates,
+		arg.AcademicYearID,
+		arg.Term,
+		arg.StartDate,
+		arg.EndDate,
+	)
+	return err
+}
+
 const approveTransfer = `-- name: ApproveTransfer :one
 
 WITH approved AS (
@@ -173,6 +210,80 @@ type ChangeOwnPasswordParams struct {
 func (q *Queries) ChangeOwnPassword(ctx context.Context, arg ChangeOwnPasswordParams) error {
 	_, err := q.db.ExecContext(ctx, changeOwnPassword, arg.PasswordHash, arg.UserID)
 	return err
+}
+
+const claimTermReminder = `-- name: ClaimTermReminder :one
+INSERT INTO term_reminders (school_id, academic_year_id, term, kind)
+VALUES ($1::int, $2::int, $3::int, $4::text)
+ON CONFLICT DO NOTHING
+RETURNING kind
+`
+
+type ClaimTermReminderParams struct {
+	SchoolID       int32
+	AcademicYearID int32
+	Term           int32
+	Kind           string
+}
+
+// Records that a reminder is being sent; returns no row if it already was.
+func (q *Queries) ClaimTermReminder(ctx context.Context, arg ClaimTermReminderParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, claimTermReminder,
+		arg.SchoolID,
+		arg.AcademicYearID,
+		arg.Term,
+		arg.Kind,
+	)
+	var kind string
+	err := row.Scan(&kind)
+	return kind, err
+}
+
+const clearExamCompulsorySubjects = `-- name: ClearExamCompulsorySubjects :exec
+DELETE FROM exam_compulsory_subjects WHERE exam = $1::text
+`
+
+func (q *Queries) ClearExamCompulsorySubjects(ctx context.Context, exam string) error {
+	_, err := q.db.ExecContext(ctx, clearExamCompulsorySubjects, exam)
+	return err
+}
+
+const clearTermDates = `-- name: ClearTermDates :exec
+DELETE FROM academic_year_terms WHERE academic_year_id = $1::int
+`
+
+func (q *Queries) ClearTermDates(ctx context.Context, academicYearID int32) error {
+	_, err := q.db.ExecContext(ctx, clearTermDates, academicYearID)
+	return err
+}
+
+const closePasswordRequest = `-- name: ClosePasswordRequest :one
+WITH closed AS (
+    UPDATE password_reset_requests
+    SET status = $1::text, resolved_by = $2::int, resolved_at = CURRENT_TIMESTAMP
+    WHERE id = $3::int AND status = 'Pending'
+    RETURNING id, user_id
+),
+logged AS (
+    INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+    SELECT 'user', closed.user_id, 'PasswordRequest' || $1::text, a.id, a.name, a.role, a.school_id,
+        'Forgot-password request ' || closed.id
+    FROM closed LEFT JOIN users a ON a.id = $2::int
+)
+SELECT id FROM closed
+`
+
+type ClosePasswordRequestParams struct {
+	Status      string
+	ActorUserID int32
+	RequestID   int32
+}
+
+func (q *Queries) ClosePasswordRequest(ctx context.Context, arg ClosePasswordRequestParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, closePasswordRequest, arg.Status, arg.ActorUserID, arg.RequestID)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
 }
 
 const closeSchool = `-- name: CloseSchool :one
@@ -808,6 +919,71 @@ func (q *Queries) CreateNotice(ctx context.Context, arg CreateNoticeParams) (Cre
 	return i, err
 }
 
+const createPasswordRequest = `-- name: CreatePasswordRequest :exec
+WITH created AS (
+    INSERT INTO password_reset_requests (user_id, handler_region_id, contact_phone, note, requester_ip)
+    VALUES ($1::int, $2::int, $3::text,
+        $4::text, $5::text)
+    ON CONFLICT (user_id) WHERE status = 'Pending' DO NOTHING
+    RETURNING id, user_id
+)
+INSERT INTO audit_logs (entity_type, entity_id, action, note)
+SELECT 'user', created.user_id, 'PasswordResetRequested', 'Forgot-password request ' || created.id FROM created
+`
+
+type CreatePasswordRequestParams struct {
+	UserID          int32
+	HandlerRegionID sql.NullInt32
+	ContactPhone    sql.NullString
+	Note            sql.NullString
+	RequesterIp     sql.NullString
+}
+
+func (q *Queries) CreatePasswordRequest(ctx context.Context, arg CreatePasswordRequestParams) error {
+	_, err := q.db.ExecContext(ctx, createPasswordRequest,
+		arg.UserID,
+		arg.HandlerRegionID,
+		arg.ContactPhone,
+		arg.Note,
+		arg.RequesterIp,
+	)
+	return err
+}
+
+const createPromotion = `-- name: CreatePromotion :exec
+INSERT INTO promotions (student_id, school_id, academic_year_id, from_form, to_form, subjects_passed, outcome, automatic, decided_by)
+VALUES ($1::int, $2::int, $3::int, $4::int,
+    $5::int, $6::int, $7::text, $8::bool,
+    $9::int)
+`
+
+type CreatePromotionParams struct {
+	StudentID      int32
+	SchoolID       int32
+	AcademicYearID int32
+	FromForm       int32
+	ToForm         int32
+	SubjectsPassed int32
+	Outcome        string
+	Automatic      bool
+	ActorUserID    int32
+}
+
+func (q *Queries) CreatePromotion(ctx context.Context, arg CreatePromotionParams) error {
+	_, err := q.db.ExecContext(ctx, createPromotion,
+		arg.StudentID,
+		arg.SchoolID,
+		arg.AcademicYearID,
+		arg.FromForm,
+		arg.ToForm,
+		arg.SubjectsPassed,
+		arg.Outcome,
+		arg.Automatic,
+		arg.ActorUserID,
+	)
+	return err
+}
+
 const createRegion = `-- name: CreateRegion :one
 INSERT INTO
     regions (name)
@@ -979,10 +1155,12 @@ INSERT INTO
         academic_year_id,
         disability,
         disability_details,
-        status
+        status,
+        national_id,
+        jce_number
     )
 VALUES
-    ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING id,
+    ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21) RETURNING id,
     student_number,
     first_name,
     middle_name,
@@ -1001,6 +1179,8 @@ VALUES
     academic_year_id,
     disability,
     disability_details,
+    national_id,
+    jce_number,
     status,
     created_at,
     updated_at
@@ -1026,6 +1206,8 @@ type CreateStudentParams struct {
 	Disability           sql.NullBool
 	DisabilityDetails    sql.NullString
 	Status               sql.NullString
+	NationalID           sql.NullString
+	JceNumber            sql.NullString
 }
 
 type CreateStudentRow struct {
@@ -1048,6 +1230,8 @@ type CreateStudentRow struct {
 	AcademicYearID       sql.NullInt32
 	Disability           sql.NullBool
 	DisabilityDetails    sql.NullString
+	NationalID           sql.NullString
+	JceNumber            sql.NullString
 	Status               sql.NullString
 	CreatedAt            sql.NullTime
 	UpdatedAt            sql.NullTime
@@ -1074,6 +1258,8 @@ func (q *Queries) CreateStudent(ctx context.Context, arg CreateStudentParams) (C
 		arg.Disability,
 		arg.DisabilityDetails,
 		arg.Status,
+		arg.NationalID,
+		arg.JceNumber,
 	)
 	var i CreateStudentRow
 	err := row.Scan(
@@ -1096,6 +1282,8 @@ func (q *Queries) CreateStudent(ctx context.Context, arg CreateStudentParams) (C
 		&i.AcademicYearID,
 		&i.Disability,
 		&i.DisabilityDetails,
+		&i.NationalID,
+		&i.JceNumber,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -1173,6 +1361,40 @@ type CreateSystemNoticeParams struct {
 // An automatic notice to one school, e.g. about a transfer.
 func (q *Queries) CreateSystemNotice(ctx context.Context, arg CreateSystemNoticeParams) error {
 	_, err := q.db.ExecContext(ctx, createSystemNotice, arg.SchoolID, arg.Title, arg.Body)
+	return err
+}
+
+const createTermReminderNotice = `-- name: CreateTermReminderNotice :exec
+WITH n AS (
+    INSERT INTO notices (kind, sender_party_type, sender_party_id, title, body, priority, due_date, audience_type, audience_id)
+    VALUES ('SYSTEM', 'SYSTEM', 0, $3::text, $4::text, $5::text,
+        $6::date, CASE $1::text WHEN 'REGION' THEN 'REGIONAL_ADMIN' ELSE 'SCHOOL' END,
+        $2::int)
+    RETURNING id
+)
+INSERT INTO notice_recipients (notice_id, party_type, party_id)
+SELECT n.id, $1::text, $2::int FROM n
+`
+
+type CreateTermReminderNoticeParams struct {
+	PartyType string
+	PartyID   int32
+	Title     string
+	Body      string
+	Priority  string
+	DueDate   sql.NullTime
+}
+
+// An automatic notice to one school or division office, with a priority and due date.
+func (q *Queries) CreateTermReminderNotice(ctx context.Context, arg CreateTermReminderNoticeParams) error {
+	_, err := q.db.ExecContext(ctx, createTermReminderNotice,
+		arg.PartyType,
+		arg.PartyID,
+		arg.Title,
+		arg.Body,
+		arg.Priority,
+		arg.DueDate,
+	)
 	return err
 }
 
@@ -1560,6 +1782,46 @@ func (q *Queries) FinalizeTransferForSchool(ctx context.Context, arg FinalizeTra
 	return id, err
 }
 
+const findAccountForPasswordRequest = `-- name: FindAccountForPasswordRequest :one
+SELECT u.id,
+    -- 0 means MCDE handles it (division officers); otherwise the school's division
+    (CASE WHEN u.role = 'SCHOOL_MANAGER' THEN COALESCE(d.region_id, 0) ELSE 0 END)::int AS handler_region_id
+FROM users u
+    LEFT JOIN schools sc ON sc.id = u.school_id
+    LEFT JOIN districts d ON d.id = sc.district_id
+WHERE lower(u.email) = lower($1::text)
+    AND u.role = $2::text
+    AND u.is_activated AND u.deleted_at IS NULL
+    AND ((u.role = 'REGIONAL_ADMIN' AND u.region_id = $3::int)
+        OR (u.role = 'SCHOOL_MANAGER' AND u.school_id = $4::int))
+`
+
+type FindAccountForPasswordRequestParams struct {
+	Email    string
+	Role     string
+	RegionID sql.NullInt32
+	SchoolID sql.NullInt32
+}
+
+type FindAccountForPasswordRequestRow struct {
+	ID              int32
+	HandlerRegionID int32
+}
+
+// The active account matching what the person told us: email, role, and their division
+// (division officers) or school (school users). Returns who should handle the request.
+func (q *Queries) FindAccountForPasswordRequest(ctx context.Context, arg FindAccountForPasswordRequestParams) (FindAccountForPasswordRequestRow, error) {
+	row := q.db.QueryRowContext(ctx, findAccountForPasswordRequest,
+		arg.Email,
+		arg.Role,
+		arg.RegionID,
+		arg.SchoolID,
+	)
+	var i FindAccountForPasswordRequestRow
+	err := row.Scan(&i.ID, &i.HandlerRegionID)
+	return i, err
+}
+
 const findDistrictById = `-- name: FindDistrictById :one
 SELECT
     id,
@@ -1630,6 +1892,73 @@ func (q *Queries) FindSchoolById(ctx context.Context, id int32) (FindSchoolByIdR
 		&i.Name,
 		&i.DistrictID,
 		&i.ClosedAt,
+	)
+	return i, err
+}
+
+const findStudentByJCENumber = `-- name: FindStudentByJCENumber :one
+SELECT s.id, s.first_name, s.last_name, s.student_number, COALESCE(sc.name, '')::text AS school_name
+FROM students s LEFT JOIN schools sc ON sc.id = s.school_id
+WHERE UPPER(s.jce_number) = UPPER($1::text) AND s.id <> $2::int
+LIMIT 1
+`
+
+type FindStudentByJCENumberParams struct {
+	JceNumber string
+	ExcludeID int32
+}
+
+type FindStudentByJCENumberRow struct {
+	ID            int32
+	FirstName     string
+	LastName      string
+	StudentNumber string
+	SchoolName    string
+}
+
+func (q *Queries) FindStudentByJCENumber(ctx context.Context, arg FindStudentByJCENumberParams) (FindStudentByJCENumberRow, error) {
+	row := q.db.QueryRowContext(ctx, findStudentByJCENumber, arg.JceNumber, arg.ExcludeID)
+	var i FindStudentByJCENumberRow
+	err := row.Scan(
+		&i.ID,
+		&i.FirstName,
+		&i.LastName,
+		&i.StudentNumber,
+		&i.SchoolName,
+	)
+	return i, err
+}
+
+const findStudentByNationalID = `-- name: FindStudentByNationalID :one
+SELECT s.id, s.first_name, s.last_name, s.student_number, COALESCE(sc.name, '')::text AS school_name
+FROM students s LEFT JOIN schools sc ON sc.id = s.school_id
+WHERE UPPER(s.national_id) = UPPER($1::text) AND s.id <> $2::int
+LIMIT 1
+`
+
+type FindStudentByNationalIDParams struct {
+	NationalID string
+	ExcludeID  int32
+}
+
+type FindStudentByNationalIDRow struct {
+	ID            int32
+	FirstName     string
+	LastName      string
+	StudentNumber string
+	SchoolName    string
+}
+
+// Another learner already holding this National ID (exclude_id: the learner being edited).
+func (q *Queries) FindStudentByNationalID(ctx context.Context, arg FindStudentByNationalIDParams) (FindStudentByNationalIDRow, error) {
+	row := q.db.QueryRowContext(ctx, findStudentByNationalID, arg.NationalID, arg.ExcludeID)
+	var i FindStudentByNationalIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.FirstName,
+		&i.LastName,
+		&i.StudentNumber,
+		&i.SchoolName,
 	)
 	return i, err
 }
@@ -1759,6 +2088,22 @@ func (q *Queries) GetAcademicYearByID(ctx context.Context, id int32) (AcademicYe
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
+	return i, err
+}
+
+const getAcademicYearByIDForStage = `-- name: GetAcademicYearByIDForStage :one
+SELECT id, year FROM academic_years WHERE id = $1::int
+`
+
+type GetAcademicYearByIDForStageRow struct {
+	ID   int32
+	Year int32
+}
+
+func (q *Queries) GetAcademicYearByIDForStage(ctx context.Context, academicYearID int32) (GetAcademicYearByIDForStageRow, error) {
+	row := q.db.QueryRowContext(ctx, getAcademicYearByIDForStage, academicYearID)
+	var i GetAcademicYearByIDForStageRow
+	err := row.Scan(&i.ID, &i.Year)
 	return i, err
 }
 
@@ -1926,6 +2271,25 @@ func (q *Queries) GetConversation(ctx context.Context, conversationID int32) (Ge
 	return i, err
 }
 
+const getDefaultAcademicYear = `-- name: GetDefaultAcademicYear :one
+SELECT id, year FROM academic_years
+ORDER BY (status = 'Active') DESC, year DESC
+LIMIT 1
+`
+
+type GetDefaultAcademicYearRow struct {
+	ID   int32
+	Year int32
+}
+
+// The year a school without a stage is in: the active one, else the latest.
+func (q *Queries) GetDefaultAcademicYear(ctx context.Context) (GetDefaultAcademicYearRow, error) {
+	row := q.db.QueryRowContext(ctx, getDefaultAcademicYear)
+	var i GetDefaultAcademicYearRow
+	err := row.Scan(&i.ID, &i.Year)
+	return i, err
+}
+
 const getDistrictRegionID = `-- name: GetDistrictRegionID :one
 SELECT region_id FROM districts WHERE id = $1
 `
@@ -1998,6 +2362,22 @@ func (q *Queries) GetIncomingTransferCountBySchoolID(ctx context.Context, toScho
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const getNextAcademicYear = `-- name: GetNextAcademicYear :one
+SELECT id, year FROM academic_years WHERE year > $1::int ORDER BY year LIMIT 1
+`
+
+type GetNextAcademicYearRow struct {
+	ID   int32
+	Year int32
+}
+
+func (q *Queries) GetNextAcademicYear(ctx context.Context, year int32) (GetNextAcademicYearRow, error) {
+	row := q.db.QueryRowContext(ctx, getNextAcademicYear, year)
+	var i GetNextAcademicYearRow
+	err := row.Scan(&i.ID, &i.Year)
+	return i, err
 }
 
 const getNoticeForSender = `-- name: GetNoticeForSender :one
@@ -2128,6 +2508,106 @@ func (q *Queries) GetOutgoingTransfers(ctx context.Context, fromSchool int32) ([
 	return items, nil
 }
 
+const getPasswordRequest = `-- name: GetPasswordRequest :one
+SELECT id, user_id, handler_region_id, status FROM password_reset_requests WHERE id = $1::int
+`
+
+type GetPasswordRequestRow struct {
+	ID              int32
+	UserID          int32
+	HandlerRegionID sql.NullInt32
+	Status          string
+}
+
+func (q *Queries) GetPasswordRequest(ctx context.Context, requestID int32) (GetPasswordRequestRow, error) {
+	row := q.db.QueryRowContext(ctx, getPasswordRequest, requestID)
+	var i GetPasswordRequestRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.HandlerRegionID,
+		&i.Status,
+	)
+	return i, err
+}
+
+const getPreviousAcademicYear = `-- name: GetPreviousAcademicYear :one
+SELECT id, year FROM academic_years WHERE year < $1::int ORDER BY year DESC LIMIT 1
+`
+
+type GetPreviousAcademicYearRow struct {
+	ID   int32
+	Year int32
+}
+
+func (q *Queries) GetPreviousAcademicYear(ctx context.Context, year int32) (GetPreviousAcademicYearRow, error) {
+	row := q.db.QueryRowContext(ctx, getPreviousAcademicYear, year)
+	var i GetPreviousAcademicYearRow
+	err := row.Scan(&i.ID, &i.Year)
+	return i, err
+}
+
+const getPromotionForProceed = `-- name: GetPromotionForProceed :one
+SELECT p.id, p.from_form, p.outcome, s.school_id AS current_school_id, COALESCE(s.form_level, 0)::int AS current_form
+FROM promotions p JOIN students s ON s.id = p.student_id
+WHERE p.student_id = $1::int AND p.academic_year_id = $2::int
+`
+
+type GetPromotionForProceedParams struct {
+	StudentID      int32
+	AcademicYearID int32
+}
+
+type GetPromotionForProceedRow struct {
+	ID              int32
+	FromForm        int32
+	Outcome         string
+	CurrentSchoolID int32
+	CurrentForm     int32
+}
+
+func (q *Queries) GetPromotionForProceed(ctx context.Context, arg GetPromotionForProceedParams) (GetPromotionForProceedRow, error) {
+	row := q.db.QueryRowContext(ctx, getPromotionForProceed, arg.StudentID, arg.AcademicYearID)
+	var i GetPromotionForProceedRow
+	err := row.Scan(
+		&i.ID,
+		&i.FromForm,
+		&i.Outcome,
+		&i.CurrentSchoolID,
+		&i.CurrentForm,
+	)
+	return i, err
+}
+
+const getPromotionSettings = `-- name: GetPromotionSettings :one
+
+SELECT automatic, subjects_to_pass, jce_subjects_to_pass, msce_subjects_to_pass, updated_at FROM promotion_settings WHERE id = 1
+`
+
+type GetPromotionSettingsRow struct {
+	Automatic          bool
+	SubjectsToPass     int32
+	JceSubjectsToPass  int32
+	MsceSubjectsToPass int32
+	UpdatedAt          time.Time
+}
+
+// ============================================================================
+// Terms and year-end promotion (see migration 24).
+// ============================================================================
+func (q *Queries) GetPromotionSettings(ctx context.Context) (GetPromotionSettingsRow, error) {
+	row := q.db.QueryRowContext(ctx, getPromotionSettings)
+	var i GetPromotionSettingsRow
+	err := row.Scan(
+		&i.Automatic,
+		&i.SubjectsToPass,
+		&i.JceSubjectsToPass,
+		&i.MsceSubjectsToPass,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getRegionDashboardStats = `-- name: GetRegionDashboardStats :one
 WITH region_schools AS (
     SELECT sc.id
@@ -2252,6 +2732,29 @@ func (q *Queries) GetRegionUsage(ctx context.Context, regionID int32) (GetRegion
 	return i, err
 }
 
+const getReminderSettings = `-- name: GetReminderSettings :one
+SELECT days_before, overdue_after, escalate_after, updated_at FROM reminder_settings WHERE id = 1
+`
+
+type GetReminderSettingsRow struct {
+	DaysBefore    int32
+	OverdueAfter  int32
+	EscalateAfter int32
+	UpdatedAt     time.Time
+}
+
+func (q *Queries) GetReminderSettings(ctx context.Context) (GetReminderSettingsRow, error) {
+	row := q.db.QueryRowContext(ctx, getReminderSettings)
+	var i GetReminderSettingsRow
+	err := row.Scan(
+		&i.DaysBefore,
+		&i.OverdueAfter,
+		&i.EscalateAfter,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getSchoolClosedAt = `-- name: GetSchoolClosedAt :one
 SELECT closed_at FROM schools WHERE id = $1::int
 `
@@ -2305,6 +2808,22 @@ func (q *Queries) GetSchoolDashboardStats(ctx context.Context, schoolID int32) (
 	return i, err
 }
 
+const getSchoolRegionForReminder = `-- name: GetSchoolRegionForReminder :one
+SELECT d.region_id, sc.name FROM schools sc JOIN districts d ON d.id = sc.district_id WHERE sc.id = $1::int
+`
+
+type GetSchoolRegionForReminderRow struct {
+	RegionID int32
+	Name     string
+}
+
+func (q *Queries) GetSchoolRegionForReminder(ctx context.Context, schoolID int32) (GetSchoolRegionForReminderRow, error) {
+	row := q.db.QueryRowContext(ctx, getSchoolRegionForReminder, schoolID)
+	var i GetSchoolRegionForReminderRow
+	err := row.Scan(&i.RegionID, &i.Name)
+	return i, err
+}
+
 const getSchoolRegionID = `-- name: GetSchoolRegionID :one
 SELECT d.region_id FROM schools sc JOIN districts d ON d.id = sc.district_id WHERE sc.id = $1
 `
@@ -2333,13 +2852,18 @@ SELECT
     (SELECT COUNT(*) FROM transfers t WHERE t.from_school = sc.id) AS transfers_out,
     (SELECT COUNT(*) FROM transfers t WHERE t.to_school = sc.id AND t.status = 'Pending') AS pending_in,
     e.jce_pass_rate,
-    e.msce_pass_rate
+    e.msce_pass_rate,
+    -- Calculated from Term 3 marks (the exam results); preferred over the recorded rates
+    tr.jce_pass_rate AS term_jce_pass_rate,
+    tr.msce_pass_rate AS term_msce_pass_rate
 FROM
     schools sc
     JOIN districts d ON d.id = sc.district_id
     JOIN regions r ON r.id = d.region_id
     LEFT JOIN exam_results e ON e.school_id = sc.id
         AND e.academic_year_id = $1::int
+    LEFT JOIN term_reports tr ON tr.school_id = sc.id AND tr.term = 3
+        AND tr.academic_year_id = $1::int
 WHERE
     ($2::int IS NULL OR r.id = $2::int)
     AND ($3::int IS NULL OR d.id = $3::int)
@@ -2353,22 +2877,24 @@ type GetSchoolReportParams struct {
 }
 
 type GetSchoolReportRow struct {
-	ID              int32
-	Name            string
-	SchoolNumber    string
-	DistrictID      int32
-	DistrictName    string
-	RegionID        int32
-	RegionName      string
-	StudentCount    int64
-	MaleCount       int64
-	FemaleCount     int64
-	DisabilityCount int64
-	TransfersIn     int64
-	TransfersOut    int64
-	PendingIn       int64
-	JcePassRate     sql.NullString
-	MscePassRate    sql.NullString
+	ID               int32
+	Name             string
+	SchoolNumber     string
+	DistrictID       int32
+	DistrictName     string
+	RegionID         int32
+	RegionName       string
+	StudentCount     int64
+	MaleCount        int64
+	FemaleCount      int64
+	DisabilityCount  int64
+	TransfersIn      int64
+	TransfersOut     int64
+	PendingIn        int64
+	JcePassRate      sql.NullString
+	MscePassRate     sql.NullString
+	TermJcePassRate  sql.NullFloat64
+	TermMscePassRate sql.NullFloat64
 }
 
 // One row per school for the admin reports page. Region and district filters are
@@ -2399,6 +2925,8 @@ func (q *Queries) GetSchoolReport(ctx context.Context, arg GetSchoolReportParams
 			&i.PendingIn,
 			&i.JcePassRate,
 			&i.MscePassRate,
+			&i.TermJcePassRate,
+			&i.TermMscePassRate,
 		); err != nil {
 			return nil, err
 		}
@@ -2500,6 +3028,22 @@ func (q *Queries) GetSchoolScope(ctx context.Context, schoolID int32) (GetSchool
 	return i, err
 }
 
+const getSchoolStage = `-- name: GetSchoolStage :one
+SELECT academic_year_id, term FROM school_stages WHERE school_id = $1::int
+`
+
+type GetSchoolStageRow struct {
+	AcademicYearID int32
+	Term           int32
+}
+
+func (q *Queries) GetSchoolStage(ctx context.Context, schoolID int32) (GetSchoolStageRow, error) {
+	row := q.db.QueryRowContext(ctx, getSchoolStage, schoolID)
+	var i GetSchoolStageRow
+	err := row.Scan(&i.AcademicYearID, &i.Term)
+	return i, err
+}
+
 const getSchoolUsage = `-- name: GetSchoolUsage :one
 
 SELECT
@@ -2564,6 +3108,8 @@ SELECT
     academic_year_id,
     disability,
     disability_details,
+    national_id,
+    jce_number,
     status,
     created_at,
     updated_at
@@ -2593,6 +3139,8 @@ type GetStudentByIDRow struct {
 	AcademicYearID       sql.NullInt32
 	Disability           sql.NullBool
 	DisabilityDetails    sql.NullString
+	NationalID           sql.NullString
+	JceNumber            sql.NullString
 	Status               sql.NullString
 	CreatedAt            sql.NullTime
 	UpdatedAt            sql.NullTime
@@ -2621,6 +3169,8 @@ func (q *Queries) GetStudentByID(ctx context.Context, id int32) (GetStudentByIDR
 		&i.AcademicYearID,
 		&i.Disability,
 		&i.DisabilityDetails,
+		&i.NationalID,
+		&i.JceNumber,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -2649,6 +3199,8 @@ SELECT
     academic_year_id,
     disability,
     disability_details,
+    national_id,
+    jce_number,
     status,
     created_at,
     updated_at
@@ -2684,6 +3236,8 @@ type GetStudentByIDAndSchoolIDRow struct {
 	AcademicYearID       sql.NullInt32
 	Disability           sql.NullBool
 	DisabilityDetails    sql.NullString
+	NationalID           sql.NullString
+	JceNumber            sql.NullString
 	Status               sql.NullString
 	CreatedAt            sql.NullTime
 	UpdatedAt            sql.NullTime
@@ -2712,6 +3266,8 @@ func (q *Queries) GetStudentByIDAndSchoolID(ctx context.Context, arg GetStudentB
 		&i.AcademicYearID,
 		&i.Disability,
 		&i.DisabilityDetails,
+		&i.NationalID,
+		&i.JceNumber,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -2753,6 +3309,8 @@ SELECT
     academic_year_id,
     disability,
     disability_details,
+    national_id,
+    jce_number,
     status,
     created_at,
     updated_at
@@ -2785,6 +3343,8 @@ type GetStudentsBySchoolIDRow struct {
 	AcademicYearID       sql.NullInt32
 	Disability           sql.NullBool
 	DisabilityDetails    sql.NullString
+	NationalID           sql.NullString
+	JceNumber            sql.NullString
 	Status               sql.NullString
 	CreatedAt            sql.NullTime
 	UpdatedAt            sql.NullTime
@@ -2819,6 +3379,8 @@ func (q *Queries) GetStudentsBySchoolID(ctx context.Context, schoolID int32) ([]
 			&i.AcademicYearID,
 			&i.Disability,
 			&i.DisabilityDetails,
+			&i.NationalID,
+			&i.JceNumber,
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -2860,6 +3422,84 @@ func (q *Queries) GetSubjectByID(ctx context.Context, id int32) (Subject, error)
 		&i.Description,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getTermDates = `-- name: GetTermDates :one
+SELECT start_date, end_date FROM academic_year_terms
+WHERE academic_year_id = $1::int AND term = $2::int
+`
+
+type GetTermDatesParams struct {
+	AcademicYearID int32
+	Term           int32
+}
+
+type GetTermDatesRow struct {
+	StartDate time.Time
+	EndDate   time.Time
+}
+
+func (q *Queries) GetTermDates(ctx context.Context, arg GetTermDatesParams) (GetTermDatesRow, error) {
+	row := q.db.QueryRowContext(ctx, getTermDates, arg.AcademicYearID, arg.Term)
+	var i GetTermDatesRow
+	err := row.Scan(&i.StartDate, &i.EndDate)
+	return i, err
+}
+
+const getTermReport = `-- name: GetTermReport :one
+SELECT tr.id, tr.school_id, tr.academic_year_id, ay.year, tr.term, tr.learners_assessed, tr.average_mark,
+    tr.pass_rate, tr.jce_pass_rate, tr.msce_pass_rate, tr.details, tr.marks_fingerprint,
+    COALESCE(u.name, '')::text AS generated_by_name, tr.generated_at
+FROM term_reports tr
+    JOIN academic_years ay ON ay.id = tr.academic_year_id
+    LEFT JOIN users u ON u.id = tr.generated_by
+WHERE tr.school_id = $1::int AND tr.academic_year_id = $2::int
+    AND tr.term = $3::int
+`
+
+type GetTermReportParams struct {
+	SchoolID       int32
+	AcademicYearID int32
+	Term           int32
+}
+
+type GetTermReportRow struct {
+	ID               int32
+	SchoolID         int32
+	AcademicYearID   int32
+	Year             int32
+	Term             int32
+	LearnersAssessed int32
+	AverageMark      sql.NullFloat64
+	PassRate         sql.NullFloat64
+	JcePassRate      sql.NullFloat64
+	MscePassRate     sql.NullFloat64
+	Details          json.RawMessage
+	MarksFingerprint string
+	GeneratedByName  string
+	GeneratedAt      time.Time
+}
+
+func (q *Queries) GetTermReport(ctx context.Context, arg GetTermReportParams) (GetTermReportRow, error) {
+	row := q.db.QueryRowContext(ctx, getTermReport, arg.SchoolID, arg.AcademicYearID, arg.Term)
+	var i GetTermReportRow
+	err := row.Scan(
+		&i.ID,
+		&i.SchoolID,
+		&i.AcademicYearID,
+		&i.Year,
+		&i.Term,
+		&i.LearnersAssessed,
+		&i.AverageMark,
+		&i.PassRate,
+		&i.JcePassRate,
+		&i.MscePassRate,
+		&i.Details,
+		&i.MarksFingerprint,
+		&i.GeneratedByName,
+		&i.GeneratedAt,
 	)
 	return i, err
 }
@@ -3749,6 +4389,45 @@ func (q *Queries) ListDistrictsByRegionId(ctx context.Context, regionID int32) (
 	return items, nil
 }
 
+const listExamCompulsorySubjects = `-- name: ListExamCompulsorySubjects :many
+
+SELECT c.exam, c.subject_id, sb.name AS subject_name
+FROM exam_compulsory_subjects c JOIN subjects sb ON sb.id = c.subject_id
+ORDER BY c.exam, sb.name
+`
+
+type ListExamCompulsorySubjectsRow struct {
+	Exam        string
+	SubjectID   int32
+	SubjectName string
+}
+
+// ============================================================================
+// Exam pass rules and end-of-term reports (see migration 25).
+// ============================================================================
+func (q *Queries) ListExamCompulsorySubjects(ctx context.Context) ([]ListExamCompulsorySubjectsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listExamCompulsorySubjects)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListExamCompulsorySubjectsRow
+	for rows.Next() {
+		var i ListExamCompulsorySubjectsRow
+		if err := rows.Scan(&i.Exam, &i.SubjectID, &i.SubjectName); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listExamResultsBySchoolID = `-- name: ListExamResultsBySchoolID :many
 SELECT
     id,
@@ -3983,7 +4662,7 @@ SELECT
     COALESCE(CASE n.sender_party_type
         WHEN 'SUPER_ADMIN' THEN 'Ministry Headquarters'
         WHEN 'REGION' THEN rg.name || ' Regional Office'
-        WHEN 'SYSTEM' THEN 'NSMS (automatic)'
+        WHEN 'SYSTEM' THEN 'OSS (automatic)'
     END, 'Unknown')::text AS sender_label,
     n.created_at,
     n.withdrawn_at,
@@ -4111,6 +4790,224 @@ func (q *Queries) ListNoticeRecipients(ctx context.Context, noticeID int32) ([]L
 			&i.DoneAt,
 			&i.DoneByName,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPasswordRequests = `-- name: ListPasswordRequests :many
+SELECT r.id, r.user_id, u.name, u.email, u.role, u.phone, u.whatsapp,
+    COALESCE(sc.name, '')::text AS school_name, COALESCE(rg.name, '')::text AS region_name,
+    r.contact_phone, r.note, r.handler_region_id, r.created_at
+FROM password_reset_requests r
+    JOIN users u ON u.id = r.user_id
+    LEFT JOIN schools sc ON sc.id = u.school_id
+    LEFT JOIN regions rg ON rg.id = COALESCE(u.region_id, r.handler_region_id)
+WHERE r.status = 'Pending'
+    AND ($1::int IS NULL OR r.handler_region_id = $1::int)
+ORDER BY r.created_at
+`
+
+type ListPasswordRequestsRow struct {
+	ID              int32
+	UserID          int32
+	Name            string
+	Email           string
+	Role            string
+	Phone           sql.NullString
+	Whatsapp        sql.NullString
+	SchoolName      string
+	RegionName      string
+	ContactPhone    sql.NullString
+	Note            sql.NullString
+	HandlerRegionID sql.NullInt32
+	CreatedAt       time.Time
+}
+
+// Pending requests the actor handles: all for the super admin, their schools' for a
+// division officer (handler_region_id NULL means MCDE).
+func (q *Queries) ListPasswordRequests(ctx context.Context, handlerRegionID sql.NullInt32) ([]ListPasswordRequestsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPasswordRequests, handlerRegionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPasswordRequestsRow
+	for rows.Next() {
+		var i ListPasswordRequestsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Name,
+			&i.Email,
+			&i.Role,
+			&i.Phone,
+			&i.Whatsapp,
+			&i.SchoolName,
+			&i.RegionName,
+			&i.ContactPhone,
+			&i.Note,
+			&i.HandlerRegionID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPossibleDuplicateStudents = `-- name: ListPossibleDuplicateStudents :many
+SELECT s.id, s.first_name, s.last_name, s.student_number, s.date_of_birth, s.guardian_phone,
+    s.form_level, s.national_id, COALESCE(sc.name, '')::text AS school_name
+FROM students s LEFT JOIN schools sc ON sc.id = s.school_id
+WHERE LOWER(s.last_name) = LOWER($1::text)
+    AND LOWER(s.first_name) = LOWER($2::text)
+    AND s.id <> $3::int
+    AND (($4::date IS NOT NULL AND s.date_of_birth = $4::date)
+        -- Phones are stored as typed, so compare the last 9 digits (any Malawi format)
+        OR ($5::text IS NOT NULL
+            AND RIGHT(regexp_replace(s.guardian_phone, '\D', '', 'g'), 9) = RIGHT(regexp_replace($5::text, '\D', '', 'g'), 9)))
+ORDER BY s.last_name, s.first_name
+LIMIT 10
+`
+
+type ListPossibleDuplicateStudentsParams struct {
+	LastName      string
+	FirstName     string
+	ExcludeID     int32
+	DateOfBirth   sql.NullTime
+	GuardianPhone sql.NullString
+}
+
+type ListPossibleDuplicateStudentsRow struct {
+	ID            int32
+	FirstName     string
+	LastName      string
+	StudentNumber string
+	DateOfBirth   sql.NullTime
+	GuardianPhone sql.NullString
+	FormLevel     sql.NullInt32
+	NationalID    sql.NullString
+	SchoolName    string
+}
+
+// Learners who look like the same person: same first and last name (ignoring case) and
+// the same date of birth or guardian phone. Used to warn, not to block, since two
+// learners can genuinely share a name.
+func (q *Queries) ListPossibleDuplicateStudents(ctx context.Context, arg ListPossibleDuplicateStudentsParams) ([]ListPossibleDuplicateStudentsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPossibleDuplicateStudents,
+		arg.LastName,
+		arg.FirstName,
+		arg.ExcludeID,
+		arg.DateOfBirth,
+		arg.GuardianPhone,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPossibleDuplicateStudentsRow
+	for rows.Next() {
+		var i ListPossibleDuplicateStudentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.FirstName,
+			&i.LastName,
+			&i.StudentNumber,
+			&i.DateOfBirth,
+			&i.GuardianPhone,
+			&i.FormLevel,
+			&i.NationalID,
+			&i.SchoolName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPublicRegions = `-- name: ListPublicRegions :many
+
+SELECT id, name FROM regions ORDER BY name
+`
+
+type ListPublicRegionsRow struct {
+	ID   int32
+	Name string
+}
+
+// ============================================================================
+// Forgot-password requests (see migration 22) and the public lists the sign-in page
+// needs to ask for them.
+// ============================================================================
+func (q *Queries) ListPublicRegions(ctx context.Context) ([]ListPublicRegionsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPublicRegions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPublicRegionsRow
+	for rows.Next() {
+		var i ListPublicRegionsRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPublicSchools = `-- name: ListPublicSchools :many
+SELECT sc.id, sc.name, d.region_id
+FROM schools sc JOIN districts d ON d.id = sc.district_id
+WHERE sc.closed_at IS NULL
+ORDER BY sc.name
+`
+
+type ListPublicSchoolsRow struct {
+	ID       int32
+	Name     string
+	RegionID int32
+}
+
+func (q *Queries) ListPublicSchools(ctx context.Context) ([]ListPublicSchoolsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPublicSchools)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPublicSchoolsRow
+	for rows.Next() {
+		var i ListPublicSchoolsRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.RegionID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -4381,6 +5278,119 @@ func (q *Queries) ListSchoolRequests(ctx context.Context, arg ListSchoolRequests
 	return items, nil
 }
 
+const listSchoolStages = `-- name: ListSchoolStages :many
+SELECT sc.id AS school_id, sc.name AS school_name, sc.school_number, d.name AS district_name,
+    rg.name AS region_name, st.academic_year_id, st.term,
+    (SELECT COUNT(*) FROM students s WHERE s.school_id = sc.id AND COALESCE(s.status, 'Active') <> 'Completed')::int AS learners
+FROM schools sc
+    JOIN districts d ON d.id = sc.district_id
+    JOIN regions rg ON rg.id = d.region_id
+    LEFT JOIN school_stages st ON st.school_id = sc.id
+WHERE sc.closed_at IS NULL
+ORDER BY rg.name, d.name, sc.name
+`
+
+type ListSchoolStagesRow struct {
+	SchoolID       int32
+	SchoolName     string
+	SchoolNumber   string
+	DistrictName   string
+	RegionName     string
+	AcademicYearID sql.NullInt32
+	Term           sql.NullInt32
+	Learners       int32
+}
+
+// Every open school with its stage (NULL when it has none yet) and division.
+func (q *Queries) ListSchoolStages(ctx context.Context) ([]ListSchoolStagesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listSchoolStages)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSchoolStagesRow
+	for rows.Next() {
+		var i ListSchoolStagesRow
+		if err := rows.Scan(
+			&i.SchoolID,
+			&i.SchoolName,
+			&i.SchoolNumber,
+			&i.DistrictName,
+			&i.RegionName,
+			&i.AcademicYearID,
+			&i.Term,
+			&i.Learners,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSchoolTermReports = `-- name: ListSchoolTermReports :many
+SELECT tr.academic_year_id, ay.year, tr.term, tr.learners_assessed, tr.average_mark, tr.pass_rate,
+    tr.jce_pass_rate, tr.msce_pass_rate, tr.details, tr.marks_fingerprint, tr.generated_at
+FROM term_reports tr JOIN academic_years ay ON ay.id = tr.academic_year_id
+WHERE tr.school_id = $1::int
+ORDER BY ay.year DESC, tr.term DESC
+`
+
+type ListSchoolTermReportsRow struct {
+	AcademicYearID   int32
+	Year             int32
+	Term             int32
+	LearnersAssessed int32
+	AverageMark      sql.NullFloat64
+	PassRate         sql.NullFloat64
+	JcePassRate      sql.NullFloat64
+	MscePassRate     sql.NullFloat64
+	Details          json.RawMessage
+	MarksFingerprint string
+	GeneratedAt      time.Time
+}
+
+func (q *Queries) ListSchoolTermReports(ctx context.Context, schoolID int32) ([]ListSchoolTermReportsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listSchoolTermReports, schoolID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSchoolTermReportsRow
+	for rows.Next() {
+		var i ListSchoolTermReportsRow
+		if err := rows.Scan(
+			&i.AcademicYearID,
+			&i.Year,
+			&i.Term,
+			&i.LearnersAssessed,
+			&i.AverageMark,
+			&i.PassRate,
+			&i.JcePassRate,
+			&i.MscePassRate,
+			&i.Details,
+			&i.MarksFingerprint,
+			&i.GeneratedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSchools = `-- name: ListSchools :many
 SELECT
     id,
@@ -4621,6 +5631,66 @@ func (q *Queries) ListStudentSubjectIDsByStudentID(ctx context.Context, studentI
 	return items, nil
 }
 
+const listStudentTermSummaries = `-- name: ListStudentTermSummaries :many
+SELECT m.academic_year_id, ay.year, m.term, COUNT(*)::int AS subjects_marked,
+    AVG(m.mark)::float8 AS average_mark,
+    (COUNT(*) FILTER (WHERE m.mark >= $1::int))::int AS subjects_passed,
+    COALESCE(MAX(sc.name), '')::text AS school_name
+FROM student_marks m
+    JOIN academic_years ay ON ay.id = m.academic_year_id
+    LEFT JOIN schools sc ON sc.id = m.school_id
+WHERE m.student_id = $2::int
+GROUP BY m.academic_year_id, ay.year, m.term
+ORDER BY ay.year DESC, m.term DESC
+`
+
+type ListStudentTermSummariesParams struct {
+	PassMark  int32
+	StudentID int32
+}
+
+type ListStudentTermSummariesRow struct {
+	AcademicYearID int32
+	Year           int32
+	Term           int32
+	SubjectsMarked int32
+	AverageMark    float64
+	SubjectsPassed int32
+	SchoolName     string
+}
+
+// A learner's average and subjects passed in each term they have marks for.
+func (q *Queries) ListStudentTermSummaries(ctx context.Context, arg ListStudentTermSummariesParams) ([]ListStudentTermSummariesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listStudentTermSummaries, arg.PassMark, arg.StudentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListStudentTermSummariesRow
+	for rows.Next() {
+		var i ListStudentTermSummariesRow
+		if err := rows.Scan(
+			&i.AcademicYearID,
+			&i.Year,
+			&i.Term,
+			&i.SubjectsMarked,
+			&i.AverageMark,
+			&i.SubjectsPassed,
+			&i.SchoolName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listStudents = `-- name: ListStudents :many
 SELECT
     id,
@@ -4642,6 +5712,8 @@ SELECT
     academic_year_id,
     disability,
     disability_details,
+    national_id,
+    jce_number,
     status,
     created_at,
     updated_at
@@ -4678,6 +5750,8 @@ type ListStudentsRow struct {
 	AcademicYearID       sql.NullInt32
 	Disability           sql.NullBool
 	DisabilityDetails    sql.NullString
+	NationalID           sql.NullString
+	JceNumber            sql.NullString
 	Status               sql.NullString
 	CreatedAt            sql.NullTime
 	UpdatedAt            sql.NullTime
@@ -4712,6 +5786,8 @@ func (q *Queries) ListStudents(ctx context.Context, arg ListStudentsParams) ([]L
 			&i.AcademicYearID,
 			&i.Disability,
 			&i.DisabilityDetails,
+			&i.NationalID,
+			&i.JceNumber,
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -4880,6 +5956,215 @@ func (q *Queries) ListSubjects(ctx context.Context) ([]Subject, error) {
 			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTermDates = `-- name: ListTermDates :many
+
+SELECT t.academic_year_id, ay.year, t.term, t.start_date, t.end_date
+FROM academic_year_terms t JOIN academic_years ay ON ay.id = t.academic_year_id
+ORDER BY ay.year DESC, t.term
+`
+
+type ListTermDatesRow struct {
+	AcademicYearID int32
+	Year           int32
+	Term           int32
+	StartDate      time.Time
+	EndDate        time.Time
+}
+
+// ============================================================================
+// Term dates and reminders (see migration 26).
+// ============================================================================
+func (q *Queries) ListTermDates(ctx context.Context) ([]ListTermDatesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listTermDates)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTermDatesRow
+	for rows.Next() {
+		var i ListTermDatesRow
+		if err := rows.Scan(
+			&i.AcademicYearID,
+			&i.Year,
+			&i.Term,
+			&i.StartDate,
+			&i.EndDate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTermDatesForYear = `-- name: ListTermDatesForYear :many
+SELECT term, start_date, end_date FROM academic_year_terms
+WHERE academic_year_id = $1::int ORDER BY term
+`
+
+type ListTermDatesForYearRow struct {
+	Term      int32
+	StartDate time.Time
+	EndDate   time.Time
+}
+
+func (q *Queries) ListTermDatesForYear(ctx context.Context, academicYearID int32) ([]ListTermDatesForYearRow, error) {
+	rows, err := q.db.QueryContext(ctx, listTermDatesForYear, academicYearID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTermDatesForYearRow
+	for rows.Next() {
+		var i ListTermDatesForYearRow
+		if err := rows.Scan(&i.Term, &i.StartDate, &i.EndDate); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTermMarks = `-- name: ListTermMarks :many
+SELECT m.student_id, m.subject_id, sb.name AS subject_name, m.mark,
+    COALESCE((SELECT p.from_form FROM promotions p WHERE p.student_id = m.student_id AND p.academic_year_id = m.academic_year_id),
+        s.form_level, 1)::int AS form_level
+FROM student_marks m
+    JOIN students s ON s.id = m.student_id
+    JOIN subjects sb ON sb.id = m.subject_id
+WHERE m.school_id = $1::int AND m.academic_year_id = $2::int
+    AND m.term = $3::int
+ORDER BY m.student_id, m.subject_id
+`
+
+type ListTermMarksParams struct {
+	SchoolID       int32
+	AcademicYearID int32
+	Term           int32
+}
+
+type ListTermMarksRow struct {
+	StudentID   int32
+	SubjectID   int32
+	SubjectName string
+	Mark        int32
+	FormLevel   int32
+}
+
+// Every mark a school recorded in one term, with each learner's form during that year
+// (from their year-end result if the year is finished, otherwise their current form).
+func (q *Queries) ListTermMarks(ctx context.Context, arg ListTermMarksParams) ([]ListTermMarksRow, error) {
+	rows, err := q.db.QueryContext(ctx, listTermMarks, arg.SchoolID, arg.AcademicYearID, arg.Term)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTermMarksRow
+	for rows.Next() {
+		var i ListTermMarksRow
+		if err := rows.Scan(
+			&i.StudentID,
+			&i.SubjectID,
+			&i.SubjectName,
+			&i.Mark,
+			&i.FormLevel,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTermReportsForTerm = `-- name: ListTermReportsForTerm :many
+SELECT sc.id AS school_id, sc.name AS school_name, sc.school_number, d.name AS district_name,
+    rg.id AS region_id, rg.name AS region_name,
+    tr.learners_assessed, tr.average_mark, tr.pass_rate, tr.jce_pass_rate, tr.msce_pass_rate, tr.generated_at
+FROM term_reports tr
+    JOIN schools sc ON sc.id = tr.school_id
+    JOIN districts d ON d.id = sc.district_id
+    JOIN regions rg ON rg.id = d.region_id
+WHERE tr.academic_year_id = $1::int AND tr.term = $2::int
+    AND ($3::int IS NULL OR rg.id = $3::int)
+ORDER BY rg.name, d.name, sc.name
+`
+
+type ListTermReportsForTermParams struct {
+	AcademicYearID int32
+	Term           int32
+	RegionID       sql.NullInt32
+}
+
+type ListTermReportsForTermRow struct {
+	SchoolID         int32
+	SchoolName       string
+	SchoolNumber     string
+	DistrictName     string
+	RegionID         int32
+	RegionName       string
+	LearnersAssessed int32
+	AverageMark      sql.NullFloat64
+	PassRate         sql.NullFloat64
+	JcePassRate      sql.NullFloat64
+	MscePassRate     sql.NullFloat64
+	GeneratedAt      time.Time
+}
+
+// Every school's report for one term, for the national and division comparisons.
+func (q *Queries) ListTermReportsForTerm(ctx context.Context, arg ListTermReportsForTermParams) ([]ListTermReportsForTermRow, error) {
+	rows, err := q.db.QueryContext(ctx, listTermReportsForTerm, arg.AcademicYearID, arg.Term, arg.RegionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTermReportsForTermRow
+	for rows.Next() {
+		var i ListTermReportsForTermRow
+		if err := rows.Scan(
+			&i.SchoolID,
+			&i.SchoolName,
+			&i.SchoolNumber,
+			&i.DistrictName,
+			&i.RegionID,
+			&i.RegionName,
+			&i.LearnersAssessed,
+			&i.AverageMark,
+			&i.PassRate,
+			&i.JcePassRate,
+			&i.MscePassRate,
+			&i.GeneratedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -5219,6 +6504,160 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 	return items, nil
 }
 
+const listYearEndLearners = `-- name: ListYearEndLearners :many
+SELECT s.id, s.first_name, s.last_name, s.student_number, COALESCE(s.form_level, 1)::int AS form_level,
+    (COUNT(m.id) FILTER (WHERE m.mark >= $1::int))::int AS subjects_passed,
+    COUNT(m.id)::int AS subjects_marked,
+    (COUNT(m.id) FILTER (WHERE m.mark >= $1::int AND m.subject_id IN (
+        SELECT c.subject_id FROM exam_compulsory_subjects c
+        WHERE c.exam = CASE s.form_level WHEN 2 THEN 'JCE' WHEN 4 THEN 'MSCE' END)))::int AS compulsory_passed,
+    (SELECT COUNT(*) FROM exam_compulsory_subjects c
+        WHERE c.exam = CASE s.form_level WHEN 2 THEN 'JCE' WHEN 4 THEN 'MSCE' END)::int AS compulsory_required
+FROM students s
+    LEFT JOIN student_marks m ON m.student_id = s.id AND m.academic_year_id = $2::int AND m.term = 3
+WHERE s.school_id = $3::int
+    AND COALESCE(s.status, 'Active') <> 'Completed'
+    AND NOT EXISTS (SELECT 1 FROM promotions p WHERE p.student_id = s.id AND p.academic_year_id = $2::int)
+GROUP BY s.id
+ORDER BY s.form_level, s.last_name, s.first_name
+`
+
+type ListYearEndLearnersParams struct {
+	PassMark       int32
+	AcademicYearID int32
+	SchoolID       int32
+}
+
+type ListYearEndLearnersRow struct {
+	ID                 int32
+	FirstName          string
+	LastName           string
+	StudentNumber      string
+	FormLevel          int32
+	SubjectsPassed     int32
+	SubjectsMarked     int32
+	CompulsoryPassed   int32
+	CompulsoryRequired int32
+}
+
+// A school's current learners with how many subjects they passed in Term 3 of the year.
+// Learners who already have a result for the year are left out.
+// For Forms 2 and 4 (JCE, MSCE) it also counts the exam's compulsory subjects passed.
+func (q *Queries) ListYearEndLearners(ctx context.Context, arg ListYearEndLearnersParams) ([]ListYearEndLearnersRow, error) {
+	rows, err := q.db.QueryContext(ctx, listYearEndLearners, arg.PassMark, arg.AcademicYearID, arg.SchoolID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListYearEndLearnersRow
+	for rows.Next() {
+		var i ListYearEndLearnersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.FirstName,
+			&i.LastName,
+			&i.StudentNumber,
+			&i.FormLevel,
+			&i.SubjectsPassed,
+			&i.SubjectsMarked,
+			&i.CompulsoryPassed,
+			&i.CompulsoryRequired,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listYearResults = `-- name: ListYearResults :many
+SELECT p.student_id, s.first_name, s.last_name, s.student_number, p.from_form, p.to_form,
+    p.subjects_passed, p.outcome, p.automatic, COALESCE(u.name, '')::text AS decided_by_name, p.decided_at
+FROM promotions p
+    JOIN students s ON s.id = p.student_id
+    LEFT JOIN users u ON u.id = p.decided_by
+WHERE p.school_id = $1::int AND p.academic_year_id = $2::int
+ORDER BY p.from_form, s.last_name, s.first_name
+`
+
+type ListYearResultsParams struct {
+	SchoolID       int32
+	AcademicYearID int32
+}
+
+type ListYearResultsRow struct {
+	StudentID      int32
+	FirstName      string
+	LastName       string
+	StudentNumber  string
+	FromForm       int32
+	ToForm         int32
+	SubjectsPassed int32
+	Outcome        string
+	Automatic      bool
+	DecidedByName  string
+	DecidedAt      time.Time
+}
+
+// A school's year-end results for one academic year.
+func (q *Queries) ListYearResults(ctx context.Context, arg ListYearResultsParams) ([]ListYearResultsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listYearResults, arg.SchoolID, arg.AcademicYearID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListYearResultsRow
+	for rows.Next() {
+		var i ListYearResultsRow
+		if err := rows.Scan(
+			&i.StudentID,
+			&i.FirstName,
+			&i.LastName,
+			&i.StudentNumber,
+			&i.FromForm,
+			&i.ToForm,
+			&i.SubjectsPassed,
+			&i.Outcome,
+			&i.Automatic,
+			&i.DecidedByName,
+			&i.DecidedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const logTermDatesChange = `-- name: LogTermDatesChange :exec
+INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+SELECT 'academic_year', $1::int, 'TermDatesSet', u.id, u.name, u.role, u.school_id, $2::text
+FROM (SELECT 1) AS one LEFT JOIN users u ON u.id = $3::int
+`
+
+type LogTermDatesChangeParams struct {
+	AcademicYearID int32
+	Note           string
+	ActorUserID    int32
+}
+
+func (q *Queries) LogTermDatesChange(ctx context.Context, arg LogTermDatesChangeParams) error {
+	_, err := q.db.ExecContext(ctx, logTermDatesChange, arg.AcademicYearID, arg.Note, arg.ActorUserID)
+	return err
+}
+
 const markConversationRead = `-- name: MarkConversationRead :exec
 UPDATE conversation_participants
 SET last_read_at = CURRENT_TIMESTAMP
@@ -5368,6 +6807,61 @@ func (q *Queries) MoveRegionDistricts(ctx context.Context, arg MoveRegionDistric
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const moveStudentAfterYearEnd = `-- name: MoveStudentAfterYearEnd :exec
+UPDATE students
+SET form_level = $1::int, status = $2::text,
+    academic_year_id = $3::int, updated_at = CURRENT_TIMESTAMP
+WHERE id = $4::int
+`
+
+type MoveStudentAfterYearEndParams struct {
+	FormLevel      int32
+	Status         string
+	AcademicYearID int32
+	StudentID      int32
+}
+
+// Completed learners keep their form and become 'Completed'; everyone else is Active
+// in the new academic year at their new form.
+func (q *Queries) MoveStudentAfterYearEnd(ctx context.Context, arg MoveStudentAfterYearEndParams) error {
+	_, err := q.db.ExecContext(ctx, moveStudentAfterYearEnd,
+		arg.FormLevel,
+		arg.Status,
+		arg.AcademicYearID,
+		arg.StudentID,
+	)
+	return err
+}
+
+const proceedAfterRepeat = `-- name: ProceedAfterRepeat :exec
+WITH changed AS (
+    UPDATE promotions SET outcome = 'Proceeded', to_form = from_form + 1, decided_by = $1::int,
+        decided_at = CURRENT_TIMESTAMP
+    WHERE id = $2::int AND outcome = 'Repeat' AND from_form IN (1, 3)
+    RETURNING student_id, from_form
+),
+moved AS (
+    UPDATE students SET form_level = changed.from_form + 1, updated_at = CURRENT_TIMESTAMP
+    FROM changed WHERE students.id = changed.student_id
+    RETURNING students.id
+)
+INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+SELECT 'student', changed.student_id, 'AllowedToProceed', u.id, u.name, u.role, u.school_id,
+    'Failed Form ' || changed.from_form || ' but allowed to proceed to Form ' || (changed.from_form + 1)
+FROM changed LEFT JOIN users u ON u.id = $1::int
+`
+
+type ProceedAfterRepeatParams struct {
+	ActorUserID int32
+	PromotionID int32
+}
+
+// A Form 1 or Form 3 learner who failed is allowed to move up after all.
+func (q *Queries) ProceedAfterRepeat(ctx context.Context, arg ProceedAfterRepeatParams) error {
+	_, err := q.db.ExecContext(ctx, proceedAfterRepeat, arg.ActorUserID, arg.PromotionID)
+	return err
 }
 
 const recordLogin = `-- name: RecordLogin :exec
@@ -5543,6 +7037,60 @@ func (q *Queries) ResetAccountPassword(ctx context.Context, arg ResetAccountPass
 	return id, err
 }
 
+const saveTermReport = `-- name: SaveTermReport :exec
+WITH saved AS (
+    INSERT INTO term_reports (school_id, academic_year_id, term, learners_assessed, average_mark, pass_rate,
+        jce_pass_rate, msce_pass_rate, details, marks_fingerprint, generated_by, generated_at)
+    VALUES ($3::int, $4::int, $5::int,
+        $6::int, $7::float8, $8::float8,
+        $9::float8, $10::float8, $11::jsonb,
+        $12::text, $2::int, CURRENT_TIMESTAMP)
+    ON CONFLICT (school_id, academic_year_id, term) DO UPDATE
+    SET learners_assessed = EXCLUDED.learners_assessed, average_mark = EXCLUDED.average_mark,
+        pass_rate = EXCLUDED.pass_rate, jce_pass_rate = EXCLUDED.jce_pass_rate,
+        msce_pass_rate = EXCLUDED.msce_pass_rate, details = EXCLUDED.details,
+        marks_fingerprint = EXCLUDED.marks_fingerprint, generated_by = EXCLUDED.generated_by,
+        generated_at = EXCLUDED.generated_at
+    RETURNING school_id
+)
+INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+SELECT 'school', saved.school_id, 'TermReport', u.id, u.name, u.role, u.school_id, $1::text
+FROM saved LEFT JOIN users u ON u.id = $2::int
+`
+
+type SaveTermReportParams struct {
+	Note             string
+	ActorUserID      int32
+	SchoolID         int32
+	AcademicYearID   int32
+	Term             int32
+	LearnersAssessed int32
+	AverageMark      sql.NullFloat64
+	PassRate         sql.NullFloat64
+	JcePassRate      sql.NullFloat64
+	MscePassRate     sql.NullFloat64
+	Details          json.RawMessage
+	MarksFingerprint string
+}
+
+func (q *Queries) SaveTermReport(ctx context.Context, arg SaveTermReportParams) error {
+	_, err := q.db.ExecContext(ctx, saveTermReport,
+		arg.Note,
+		arg.ActorUserID,
+		arg.SchoolID,
+		arg.AcademicYearID,
+		arg.Term,
+		arg.LearnersAssessed,
+		arg.AverageMark,
+		arg.PassRate,
+		arg.JcePassRate,
+		arg.MscePassRate,
+		arg.Details,
+		arg.MarksFingerprint,
+	)
+	return err
+}
+
 const setAccountActive = `-- name: SetAccountActive :one
 WITH changed AS (
     UPDATE users
@@ -5576,6 +7124,40 @@ func (q *Queries) SetAccountActive(ctx context.Context, arg SetAccountActivePara
 	var id int32
 	err := row.Scan(&id)
 	return id, err
+}
+
+const setSchoolStage = `-- name: SetSchoolStage :exec
+WITH saved AS (
+    INSERT INTO school_stages (school_id, academic_year_id, term, updated_by, updated_at)
+    VALUES ($3::int, $4::int, $5::int,
+        $2::int, CURRENT_TIMESTAMP)
+    ON CONFLICT (school_id) DO UPDATE
+    SET academic_year_id = EXCLUDED.academic_year_id, term = EXCLUDED.term,
+        updated_by = EXCLUDED.updated_by, updated_at = EXCLUDED.updated_at
+    RETURNING school_id
+)
+INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+SELECT 'school', saved.school_id, 'StageChanged', u.id, u.name, u.role, u.school_id, $1::text
+FROM saved LEFT JOIN users u ON u.id = $2::int
+`
+
+type SetSchoolStageParams struct {
+	Note           string
+	ActorUserID    int32
+	SchoolID       int32
+	AcademicYearID int32
+	Term           int32
+}
+
+func (q *Queries) SetSchoolStage(ctx context.Context, arg SetSchoolStageParams) error {
+	_, err := q.db.ExecContext(ctx, setSchoolStage,
+		arg.Note,
+		arg.ActorUserID,
+		arg.SchoolID,
+		arg.AcademicYearID,
+		arg.Term,
+	)
+	return err
 }
 
 const submitSchoolRequest = `-- name: SubmitSchoolRequest :one
@@ -5860,6 +7442,42 @@ func (q *Queries) UpdateOwnContact(ctx context.Context, arg UpdateOwnContactPara
 	return id, err
 }
 
+const updatePromotionSettings = `-- name: UpdatePromotionSettings :exec
+WITH updated AS (
+    UPDATE promotion_settings
+    SET automatic = $1::bool, subjects_to_pass = $2::int,
+        jce_subjects_to_pass = $3::int, msce_subjects_to_pass = $4::int,
+        updated_by = $5::int, updated_at = CURRENT_TIMESTAMP
+    WHERE id = 1
+    RETURNING id
+)
+INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+SELECT 'promotion_settings', NULL, 'Updated', u.id, u.name, u.role, u.school_id,
+    CASE WHEN $1::bool THEN 'Automatic' ELSE 'Manual' END || ' promotion, '
+        || $2::int || ' subjects to pass; JCE ' || $3::int
+        || ', MSCE ' || $4::int || ' (plus compulsory subjects)'
+FROM updated LEFT JOIN users u ON u.id = $5::int
+`
+
+type UpdatePromotionSettingsParams struct {
+	Automatic          bool
+	SubjectsToPass     int32
+	JceSubjectsToPass  int32
+	MsceSubjectsToPass int32
+	ActorUserID        int32
+}
+
+func (q *Queries) UpdatePromotionSettings(ctx context.Context, arg UpdatePromotionSettingsParams) error {
+	_, err := q.db.ExecContext(ctx, updatePromotionSettings,
+		arg.Automatic,
+		arg.SubjectsToPass,
+		arg.JceSubjectsToPass,
+		arg.MsceSubjectsToPass,
+		arg.ActorUserID,
+	)
+	return err
+}
+
 const updateRegion = `-- name: UpdateRegion :one
 UPDATE
     regions
@@ -5927,6 +7545,39 @@ func (q *Queries) UpdateRegionOffice(ctx context.Context, arg UpdateRegionOffice
 	var id int32
 	err := row.Scan(&id)
 	return id, err
+}
+
+const updateReminderSettings = `-- name: UpdateReminderSettings :exec
+WITH updated AS (
+    UPDATE reminder_settings
+    SET days_before = $1::int, overdue_after = $2::int,
+        escalate_after = $3::int, updated_by = $4::int,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = 1
+    RETURNING id
+)
+INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
+SELECT 'reminder_settings', NULL, 'Updated', u.id, u.name, u.role, u.school_id,
+    'Remind ' || $1::int || ' days before; urgent ' || $2::int
+        || ' days after; division told ' || $3::int || ' days after'
+FROM updated LEFT JOIN users u ON u.id = $4::int
+`
+
+type UpdateReminderSettingsParams struct {
+	DaysBefore    int32
+	OverdueAfter  int32
+	EscalateAfter int32
+	ActorUserID   int32
+}
+
+func (q *Queries) UpdateReminderSettings(ctx context.Context, arg UpdateReminderSettingsParams) error {
+	_, err := q.db.ExecContext(ctx, updateReminderSettings,
+		arg.DaysBefore,
+		arg.OverdueAfter,
+		arg.EscalateAfter,
+		arg.ActorUserID,
+	)
+	return err
 }
 
 const updateSchool = `-- name: UpdateSchool :one
@@ -6084,6 +7735,8 @@ SET
     disability = $18,
     disability_details = $19,
     status = $20,
+    national_id = $21,
+    jce_number = $22,
     updated_at = NOW()
 WHERE
     id = $1 RETURNING id,
@@ -6105,6 +7758,8 @@ WHERE
     academic_year_id,
     disability,
     disability_details,
+    national_id,
+    jce_number,
     status,
     created_at,
     updated_at
@@ -6131,6 +7786,8 @@ type UpdateStudentParams struct {
 	Disability           sql.NullBool
 	DisabilityDetails    sql.NullString
 	Status               sql.NullString
+	NationalID           sql.NullString
+	JceNumber            sql.NullString
 }
 
 type UpdateStudentRow struct {
@@ -6153,6 +7810,8 @@ type UpdateStudentRow struct {
 	AcademicYearID       sql.NullInt32
 	Disability           sql.NullBool
 	DisabilityDetails    sql.NullString
+	NationalID           sql.NullString
+	JceNumber            sql.NullString
 	Status               sql.NullString
 	CreatedAt            sql.NullTime
 	UpdatedAt            sql.NullTime
@@ -6180,6 +7839,8 @@ func (q *Queries) UpdateStudent(ctx context.Context, arg UpdateStudentParams) (U
 		arg.Disability,
 		arg.DisabilityDetails,
 		arg.Status,
+		arg.NationalID,
+		arg.JceNumber,
 	)
 	var i UpdateStudentRow
 	err := row.Scan(
@@ -6202,6 +7863,8 @@ func (q *Queries) UpdateStudent(ctx context.Context, arg UpdateStudentParams) (U
 		&i.AcademicYearID,
 		&i.Disability,
 		&i.DisabilityDetails,
+		&i.NationalID,
+		&i.JceNumber,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -6232,6 +7895,8 @@ SET
     disability = $18,
     disability_details = $19,
     status = $20,
+    national_id = $22,
+    jce_number = $23,
     updated_at = NOW()
 WHERE
     id = $1
@@ -6255,6 +7920,8 @@ RETURNING id,
     academic_year_id,
     disability,
     disability_details,
+    national_id,
+    jce_number,
     status,
     created_at,
     updated_at
@@ -6282,6 +7949,8 @@ type UpdateStudentByIDAndSchoolIDParams struct {
 	DisabilityDetails    sql.NullString
 	Status               sql.NullString
 	SchoolID_2           int32
+	NationalID           sql.NullString
+	JceNumber            sql.NullString
 }
 
 type UpdateStudentByIDAndSchoolIDRow struct {
@@ -6304,6 +7973,8 @@ type UpdateStudentByIDAndSchoolIDRow struct {
 	AcademicYearID       sql.NullInt32
 	Disability           sql.NullBool
 	DisabilityDetails    sql.NullString
+	NationalID           sql.NullString
+	JceNumber            sql.NullString
 	Status               sql.NullString
 	CreatedAt            sql.NullTime
 	UpdatedAt            sql.NullTime
@@ -6332,6 +8003,8 @@ func (q *Queries) UpdateStudentByIDAndSchoolID(ctx context.Context, arg UpdateSt
 		arg.DisabilityDetails,
 		arg.Status,
 		arg.SchoolID_2,
+		arg.NationalID,
+		arg.JceNumber,
 	)
 	var i UpdateStudentByIDAndSchoolIDRow
 	err := row.Scan(
@@ -6354,6 +8027,8 @@ func (q *Queries) UpdateStudentByIDAndSchoolID(ctx context.Context, arg UpdateSt
 		&i.AcademicYearID,
 		&i.Disability,
 		&i.DisabilityDetails,
+		&i.NationalID,
+		&i.JceNumber,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,

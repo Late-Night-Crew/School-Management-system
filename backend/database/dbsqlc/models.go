@@ -20,6 +20,13 @@ type AcademicYear struct {
 	UpdatedAt sql.NullTime
 }
 
+type AcademicYearTerm struct {
+	AcademicYearID int32
+	Term           int32
+	StartDate      time.Time
+	EndDate        time.Time
+}
+
 type AuditLog struct {
 	ID            int32
 	EntityType    string
@@ -56,6 +63,11 @@ type District struct {
 	ID       int32
 	Name     string
 	RegionID int32
+}
+
+type ExamCompulsorySubject struct {
+	Exam      string
+	SubjectID int32
 }
 
 type ExamResult struct {
@@ -119,6 +131,43 @@ type NoticeRecipient struct {
 	DoneByUserID sql.NullInt32
 }
 
+type PasswordResetRequest struct {
+	ID              int32
+	UserID          int32
+	HandlerRegionID sql.NullInt32
+	ContactPhone    sql.NullString
+	Note            sql.NullString
+	Status          string
+	RequesterIp     sql.NullString
+	CreatedAt       time.Time
+	ResolvedBy      sql.NullInt32
+	ResolvedAt      sql.NullTime
+}
+
+type Promotion struct {
+	ID             int32
+	StudentID      int32
+	SchoolID       sql.NullInt32
+	AcademicYearID int32
+	FromForm       int32
+	ToForm         int32
+	SubjectsPassed int32
+	Outcome        string
+	Automatic      bool
+	DecidedBy      sql.NullInt32
+	DecidedAt      time.Time
+}
+
+type PromotionSetting struct {
+	ID                 int32
+	Automatic          bool
+	SubjectsToPass     int32
+	UpdatedBy          sql.NullInt32
+	UpdatedAt          time.Time
+	JceSubjectsToPass  int32
+	MsceSubjectsToPass int32
+}
+
 type Region struct {
 	ID              int32
 	Name            string
@@ -126,6 +175,15 @@ type Region struct {
 	OfficeEmail     sql.NullString
 	PostalAddress   sql.NullString
 	PhysicalAddress sql.NullString
+}
+
+type ReminderSetting struct {
+	ID            int32
+	DaysBefore    int32
+	OverdueAfter  int32
+	EscalateAfter int32
+	UpdatedBy     sql.NullInt32
+	UpdatedAt     time.Time
 }
 
 type School struct {
@@ -159,6 +217,14 @@ type SchoolRequest struct {
 	UpdatedAt          time.Time
 }
 
+type SchoolStage struct {
+	SchoolID       int32
+	AcademicYearID int32
+	Term           int32
+	UpdatedBy      sql.NullInt32
+	UpdatedAt      time.Time
+}
+
 type Student struct {
 	ID                   int32
 	StudentNumber        string
@@ -182,6 +248,8 @@ type Student struct {
 	PreviousSchoolID     sql.NullInt32
 	Disability           sql.NullBool
 	DisabilityDetails    sql.NullString
+	NationalID           sql.NullString
+	JceNumber            sql.NullString
 }
 
 type StudentMark struct {
@@ -212,6 +280,30 @@ type Subject struct {
 	Description sql.NullString
 	CreatedAt   sql.NullTime
 	UpdatedAt   sql.NullTime
+}
+
+type TermReminder struct {
+	SchoolID       int32
+	AcademicYearID int32
+	Term           int32
+	Kind           string
+	SentAt         time.Time
+}
+
+type TermReport struct {
+	ID               int32
+	SchoolID         int32
+	AcademicYearID   int32
+	Term             int32
+	LearnersAssessed int32
+	AverageMark      sql.NullFloat64
+	PassRate         sql.NullFloat64
+	JcePassRate      sql.NullFloat64
+	MscePassRate     sql.NullFloat64
+	Details          json.RawMessage
+	MarksFingerprint string
+	GeneratedBy      sql.NullInt32
+	GeneratedAt      time.Time
 }
 
 type Transfer struct {

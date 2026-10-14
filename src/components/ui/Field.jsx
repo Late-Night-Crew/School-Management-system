@@ -61,7 +61,7 @@ export function Switch({ checked, onChange, children }) {
 }
 
 // Small set of mutually exclusive buttons, e.g. Term 1 / 2 / 3.
-// options: [{ value, label }]
+// options: [{ value, label, disabled, title }]
 export function Segmented({ options, value, onChange }) {
   return (
     <div className="ui-segmented" role="group">
@@ -71,6 +71,8 @@ export function Segmented({ options, value, onChange }) {
           type="button"
           className={option.value === value ? "active" : ""}
           aria-pressed={option.value === value}
+          disabled={option.disabled}
+          title={option.title}
           onClick={() => onChange(option.value)}
         >
           {option.label}

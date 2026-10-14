@@ -13,8 +13,8 @@ import (
 )
 
 var (
-	cfgFile     string
-	nsmsConfig  = &config.Config{}
+	cfgFile    string
+	nsmsConfig = &config.Config{}
 )
 
 var rootCmd = &cobra.Command{
@@ -54,10 +54,11 @@ func initConfig() {
 		log.Error("Can't unmarshal config:", err)
 		os.Exit(1)
 	}
+	nsmsConfig.ApplyEnvironment()
 }
 
 func checkPostgresVersion() {
-	dbConf := nsmsConfig.Database 
+	dbConf := nsmsConfig.Database
 
 	dsn := fmt.Sprintf(
 		"postgres://%s:%s@%s:%d/%s?sslmode=%s",

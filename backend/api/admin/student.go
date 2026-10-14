@@ -6,6 +6,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"nsms/common"
 	"nsms/logging"
+	"nsms/logging/loggedmodule"
 	"nsms/pkg/problemdetail"
 	"nsms/schema"
 	"nsms/services"
@@ -29,7 +30,7 @@ func GetStudentByID(studentService services.StudentService, logger logging.Logge
 func GetStudentList(studentService services.StudentService, logger logging.Logger) fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
 		var req schema.GetStudentListRequest
-		if err:= common.ParseQueryParamsThenValidate(ctx, &req); err != nil {
+		if err := common.ParseQueryParamsThenValidate(ctx, &req); err != nil {
 			return problemdetail.BadRequest(ctx, "invalid request body")
 		}
 		student, err := studentService.GetStudentList(ctx.Context(), &req)
@@ -48,7 +49,10 @@ func CreateStudent(studentService services.StudentService, logger logging.Logger
 			return problemdetail.BadRequest(ctx, err.Error())
 		}
 		student, err := studentService.CreateStudent(ctx.Context(), &req)
-		if errors.Is(err, services.ErrSchoolClosed) {
+		if errors.Is(err, services.ErrInvalidLearnerID) || errors.Is(err, services.ErrYearNotOpen) || errors.Is(err, services.ErrAcademicYearNotFound) {
+			return problemdetail.BadRequest(ctx, err.Error())
+		}
+		if errors.Is(err, services.ErrSchoolClosed) || errors.Is(err, services.ErrDuplicateLearner) {
 			return problemdetail.Conflict(ctx, err.Error())
 		}
 		if errors.Is(err, services.ErrNotFound) {
@@ -62,7 +66,7 @@ func CreateStudent(studentService services.StudentService, logger logging.Logger
 	}
 }
 
-func UpdateStudent(studentService services.StudentService,logger logging.Logger) fiber.Handler {
+func UpdateStudent(studentService services.StudentService, logger logging.Logger) fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
 		studentID, err := common.ParseIDParam(ctx, "id")
 		if err != nil {
@@ -74,7 +78,10 @@ func UpdateStudent(studentService services.StudentService,logger logging.Logger)
 		}
 		req.ID = studentID
 		student, err := studentService.UpdateStudent(ctx.Context(), &req)
-		if errors.Is(err, services.ErrSchoolClosed) {
+		if errors.Is(err, services.ErrInvalidLearnerID) || errors.Is(err, services.ErrYearNotOpen) || errors.Is(err, services.ErrAcademicYearNotFound) {
+			return problemdetail.BadRequest(ctx, err.Error())
+		}
+		if errors.Is(err, services.ErrSchoolClosed) || errors.Is(err, services.ErrDuplicateLearner) {
 			return problemdetail.Conflict(ctx, err.Error())
 		}
 		if errors.Is(err, services.ErrNotFound) {
@@ -99,5 +106,21 @@ func DeleteStudent(studentService services.StudentService, logger logging.Logger
 			return problemdetail.ServerErrorProblem(ctx, "Failed to delete student")
 		}
 		return ctx.SendStatus(fiber.StatusNoContent)
+	}
+}
+
+// FindSimilarStudents warns about likely duplicates before a learner is saved.
+func FindSimilarStudents(studentService services.StudentService, logger logging.Logger) fiber.Handler {
+	return func(ctx *fiber.Ctx) error {
+		var check schema.DuplicateCheckRequest
+		if err := ctx.QueryParser(&check); err != nil {
+			return problemdetail.BadRequest(ctx, "Invalid duplicate check")
+		}
+		similar, err := studentService.FindSimilar(ctx.Context(), &check)
+		if err != nil {
+			logger.Error(loggedmodule.AdminRequests, "failed to look for similar learners", "error", err)
+			return problemdetail.ServerErrorProblem(ctx, "Failed to check for duplicates")
+		}
+		return ctx.JSON(similar)
 	}
 }

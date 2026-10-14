@@ -7,11 +7,13 @@ import { listSubjects } from "../../api/subjects";
 import {
     createSchoolStudent,
     deleteSchoolStudent,
+    findSimilarSchoolStudents,
     listSchoolStudents,
     updateSchoolStudent,
 } from "../../api/schoolPortal";
 import ToastNote from "../../components/ToastNote";
 import TypeToConfirm from "../../components/TypeToConfirm";
+import DuplicateLearnerDialog from "../../components/DuplicateLearnerDialog";
 import TablePagination from "../../components/TablePagination";
 import {
     Badge,
@@ -37,7 +39,7 @@ export default function StudentEnroll() {
     const [searchParams, setSearchParams] = useSearchParams();
     const BLANK = {
         firstname:"", middlename:"", lastname:"",
-        studentNumber:"", gender:"", dateOfBirth:"", class:"",
+        studentNumber:"", gender:"", dateOfBirth:"", class:"", nationalId:"", jceNumber:"",
         previousDistrict:"", previousSchool:"", currentSchool:"",
         disability:false, disabilityDetails:"",
         guardianFirstname:"", guardianMiddlename:"", guardianLastname:"",
@@ -52,6 +54,7 @@ export default function StudentEnroll() {
     const [activeTab,            setActiveTab]            = useState("form");
     const [toast,                setToast]                = useState({ show:false, message:"", variant:"success" });
     const [modal,                setModal]                = useState({ show:false, student:null });
+    const [duplicates,           setDuplicates]           = useState(null); // { matches, payload } awaiting confirmation
     const [isEditing,            setIsEditing]            = useState(false);
     const [editingId,            setEditingId]            = useState(null);
     const [form,                 setForm]                 = useState(BLANK);
@@ -98,6 +101,24 @@ export default function StudentEnroll() {
 
     const resetForm = () => { setIsEditing(false); setEditingId(null); setForm({...BLANK, currentSchool}); };
 
+    // Saves the learner; called directly, or after the possible-duplicate warning
+    const save = async (payload) => {
+        try {
+            if (isEditing) {
+                await updateSchoolStudent(schoolId, editingId, payload);
+                setToast({ show:true, message:"Student updated successfully!", variant:"success" });
+            } else {
+                await createSchoolStudent(schoolId, payload);
+                setToast({ show:true, message:"Student enrolled successfully!", variant:"success" });
+            }
+            setDuplicates(null);
+            resetForm(); fetchStudents();
+        } catch(err) {
+            setDuplicates(null);
+            setToast({ show:true, message: err.message, variant:"danger" });
+        }
+    };
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
@@ -116,16 +137,16 @@ export default function StudentEnroll() {
                 guardian_relationship: form.guardianRelationship, guardian_email: form.guardianEmail,
                 previous_school_id: form.previousSchool ? parseInt(form.previousSchool) : null,
                 disability: form.disability, disability_details: form.disabilityDetails,
-                subject_ids: form.selectedSubjects, status: "active", academic_year_id: parseInt(activeAcademicYear.id)
+                subject_ids: form.selectedSubjects, status: "active", academic_year_id: parseInt(activeAcademicYear.id),
+                national_id: form.nationalId, jce_number: form.jceNumber
             };
-            if (isEditing) {
-                await updateSchoolStudent(schoolId, editingId, payload);
-                setToast({ show:true, message:"Student updated successfully!", variant:"success" });
-            } else {
-                await createSchoolStudent(schoolId, payload);
-                setToast({ show:true, message:"Student enrolled successfully!", variant:"success" });
-            }
-            resetForm(); fetchStudents();
+            // Same name plus same date of birth or guardian phone: warn before saving
+            const matches = await findSimilarSchoolStudents(schoolId, {
+                first_name: form.firstname, last_name: form.lastname, date_of_birth: form.dateOfBirth,
+                guardian_phone: form.guardianPhone, exclude_id: isEditing ? editingId : null,
+            });
+            if (matches.length) { setDuplicates({ matches, payload }); return; }
+            await save(payload);
         } catch(err) {
             setToast({ show:true, message: err.message, variant:"danger" });
         }
@@ -137,6 +158,7 @@ export default function StudentEnroll() {
         setForm({
             firstname: s.first_name||"", middlename: s.middle_name||"", lastname: s.last_name||"",
             studentNumber: s.student_number||"", gender: s.gender||"",
+            nationalId: s.national_id||"", jceNumber: s.jce_number||"",
             dateOfBirth: s.date_of_birth ? s.date_of_birth.split('T')[0] : "",
             class: s.form_level ? String(s.form_level) : "", previousDistrict: s.previous_district||"", previousSchool: s.previous_school||"",
             currentSchool, disability: s.disability||false, disabilityDetails: s.disability_details||"",
@@ -188,6 +210,11 @@ export default function StudentEnroll() {
             onTabChange={setActiveTab}
         >
             <ToastNote show={toast.show} onClose={()=>setToast({...toast,show:false})} message={toast.message} variant={toast.variant}/>
+            <DuplicateLearnerDialog
+                matches={duplicates?.matches}
+                onCancel={()=>setDuplicates(null)}
+                onConfirm={()=>save(duplicates.payload)}
+            />
             <TypeToConfirm
                 show={modal.show}
                 onHide={()=>setModal({show:false,student:null})}
@@ -239,6 +266,14 @@ export default function StudentEnroll() {
                                         <option value="">Select class…</option>
                                         {CLASSES.map(c=><option key={c.value} value={c.value}>{c.label}</option>)}
                                     </Select>
+                                </Field>
+                            </div>
+                            <div className="ui-grid ui-cols-2">
+                                <Field label="National ID" hint="8 letters and numbers. Leave empty if the learner does not have one yet (common in Form 1)">
+                                    <Input type="text" placeholder="e.g. AB12CD34" maxLength={8} value={form.nationalId} onChange={e=>set('nationalId',e.target.value.toUpperCase())}/>
+                                </Field>
+                                <Field label="JCE Number" hint="Given when the learner registers for JCE in Form 2">
+                                    <Input type="text" placeholder="Optional" maxLength={30} value={form.jceNumber} onChange={e=>set('jceNumber',e.target.value.toUpperCase())}/>
                                 </Field>
                             </div>
                             <div className="ui-grid ui-cols-3">

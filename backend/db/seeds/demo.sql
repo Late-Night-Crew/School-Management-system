@@ -46,6 +46,14 @@ VALUES
     (2027, '2027-01-04', '2027-11-26', 'Upcoming')
 ON CONFLICT (year) DO NOTHING;
 
+-- Term dates for each demo year (needed to move schools between terms, and for reminders)
+INSERT INTO academic_year_terms (academic_year_id, term, start_date, end_date)
+SELECT ay.id, t.term, make_date(ay.year, t.sm, t.sd), make_date(ay.year, t.em, t.ed)
+FROM academic_years ay
+    CROSS JOIN (VALUES (1, 1, 6, 4, 3), (2, 4, 20, 7, 24), (3, 8, 17, 11, 26)) AS t(term, sm, sd, em, ed)
+WHERE ay.year IN (2025, 2026, 2027)
+ON CONFLICT DO NOTHING;
+
 -- Subjects are matched by name below, because codes differ between databases
 -- (e.g. MATH vs MAT). Add any that are missing.
 INSERT INTO subjects (code, name, description)
@@ -179,3 +187,10 @@ SET school_id = inserted.to_school, updated_at = now()
 FROM inserted
 WHERE students.id = inserted.student_id
     AND inserted.status IN ('Accepted', 'Completed');
+
+-- Demo schools are in Term 3 of 2026: Terms 1 and 2 have marks and Term 3 is under way
+INSERT INTO school_stages (school_id, academic_year_id, term)
+SELECT sc.id, ay.id, 3
+FROM schools sc CROSS JOIN academic_years ay
+WHERE sc.school_number LIKE 'DEMO-%' AND ay.year = 2026
+ON CONFLICT (school_id) DO NOTHING;

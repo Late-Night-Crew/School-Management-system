@@ -1,16 +1,22 @@
-# React + Vite
+# Open Secondary School (OSS)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The school management system for Malawi College of Distance Education's Open Secondary
+Schools: school registration, learners, marks, transfers, reports and communication
+between MCDE, division offices and schools.
 
-Currently, two official plugins are available:
+- `backend/`: Go API (Fiber, PostgreSQL, sqlc). Package and command name: `nsms`.
+- `src/`: React frontend (Vite). See [src/README.md](src/README.md).
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Development
 
-## React Compiler
+```sh
+cd backend && cp config.example.yaml config.yaml   # then set the database details
+go run . migrate && go run . seed                  # demo data and logins: docs/demo-logins.md
+go run . server                                    # API on :8080
+cd .. && npm install && npm run dev                # frontend; set VITE_NSMS_URL in .env
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Production
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+See [docs/operations.md](docs/operations.md): settings, first admin, backups and
+password recovery.

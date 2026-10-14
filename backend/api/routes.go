@@ -4,21 +4,47 @@ import (
 	"nsms/api/accounts"
 	"nsms/api/admin"
 	"nsms/api/comms"
+	"nsms/api/promotion"
 	"nsms/api/region"
 	"nsms/api/requests"
 	"nsms/api/school"
+	"nsms/pkg/problemdetail"
 	"nsms/schema"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/limiter"
 )
 
+// rateLimit allows max requests per client IP in each window, answering 429 beyond it.
+// With onlyFailures, successful requests are not counted, so many people signing in
+// from one office or mobile network (sharing an IP) do not lock each other out.
+func rateLimit(max int, window time.Duration, onlyFailures bool, message string) fiber.Handler {
+	return limiter.New(limiter.Config{
+		Max:                    max,
+		Expiration:             window,
+		SkipSuccessfulRequests: onlyFailures,
+		LimitReached: func(ctx *fiber.Ctx) error {
+			return ctx.Status(fiber.StatusTooManyRequests).JSON(problemdetail.ProblemDetail{
+				Type:   "problemdetail.example.com/http/types/TooManyRequests",
+				Title:  "Too many requests",
+				Detail: message,
+			})
+		},
+	})
+}
+
 func (api *API) routes() {
 	router := api.app
-	rateLimiterMiddleware := limiter.New()
 
-	router.Post("/login", rateLimiterMiddleware, admin.AuthLogin(api.AuthService))
+	router.Post("/login", rateLimit(10, time.Minute, true, "Too many failed sign-in attempts. Wait a minute and try again."), admin.AuthLogin(api.AuthService))
 
+	// The sign-in page's "forgot password" form: no account needed, so tightly limited
+	public := router.Group("/public")
+	public.Get("/places", accounts.GetPublicPlaces(api.PasswordRequests, api.logger))
+	public.Post("/password_requests",
+		rateLimit(5, 15*time.Minute, false, "Too many requests. Wait 15 minutes and try again, or contact your office."),
+		accounts.RequestPasswordReset(api.PasswordRequests, api.logger))
 }
 
 // authenticated checks the token and that the account is still active (see
@@ -62,6 +88,7 @@ func (api *API) adminRoutes() {
 	adminApi.Post("/schools/:id/transfer_students", superAdmin, admin.TransferAllStudents(api.SchoolService, api.logger))
 
 	adminApi.Get("/students", superAdmin, admin.GetStudentList(api.StudentService, api.logger))
+	adminApi.Get("/students/duplicates", superAdmin, admin.FindSimilarStudents(api.StudentService, api.logger))
 	adminApi.Get("/students/:id", superAdmin, admin.GetStudentByID(api.StudentService, api.logger))
 	adminApi.Post("/students", superAdmin, admin.CreateStudent(api.StudentService, api.logger))
 	adminApi.Put("/students/:id", superAdmin, admin.UpdateStudent(api.StudentService, api.logger))
@@ -69,8 +96,9 @@ func (api *API) adminRoutes() {
 
 	adminApi.Get("/academic_years", admin.GetAcademicYearList(api.AcademicYearService, api.logger))
 	adminApi.Get("/academic_years/:id", admin.GetAcademicYearByID(api.AcademicYearService, api.logger))
-	adminApi.Post("/academic_years", superAdmin, admin.CreateAcademicYear(api.AcademicYearService, api.logger))
-	adminApi.Put("/academic_years/:id", superAdmin, admin.UpdateAcademicYear(api.AcademicYearService, api.logger))
+	// A new year comes with its term dates; an edit may not leave a term outside the year
+	adminApi.Post("/academic_years", superAdmin, promotion.CreateAcademicYear(api.Reminders, api.logger))
+	adminApi.Put("/academic_years/:id", superAdmin, promotion.CheckYearDates(api.Reminders, api.logger), admin.UpdateAcademicYear(api.AcademicYearService, api.logger))
 	adminApi.Delete("/academic_years/:id", superAdmin, admin.DeleteAcademicYear(api.AcademicYearService, api.logger))
 
 	adminApi.Get("/subjects", admin.GetSubjectList(api.SubjectService, api.logger))
@@ -93,6 +121,39 @@ func (api *API) adminRoutes() {
 	adminApi.Patch("/transfers/:id/reject", superAdmin, admin.RejectTransfer(api.TransferService, api.logger))
 
 	adminApi.Get("/reports/schools", superAdmin, admin.GetSchoolReport(api.ReportService, api.logger))
+
+	// Terms and year-end promotion, for any school or every school at once
+	promotions := api.Promotions
+	adminApi.Get("/promotion_settings", superAdmin, promotion.GetSettings(promotions, api.logger))
+	adminApi.Put("/promotion_settings", superAdmin, promotion.UpdateSettings(promotions, api.logger))
+	adminApi.Get("/stages", superAdmin, promotion.ListStages(promotions, api.logger))
+	adminApi.Post("/stages/advance_all", superAdmin, promotion.AdvanceAll(promotions, api.logger))
+	adminApi.Post("/year_end/run_automatic", superAdmin, promotion.RunAutomatic(promotions, api.logger))
+	adminApi.Get("/schools/:id/stage", superAdmin, promotion.GetStage(promotions, api.logger, "id"))
+	// A school's marks, for MCDE's corrections (including years the school has finished)
+	adminApi.Get("/schools/:id/students", superAdmin, admin.ListSchoolStudents(api.SchoolAdminService, api.logger))
+	adminApi.Get("/schools/:id/marks", superAdmin, admin.ListSchoolMarks(api.MarksService, api.logger))
+	adminApi.Put("/schools/:id/marks", superAdmin, admin.SaveSchoolMarks(api.MarksService, api.logger))
+	adminApi.Post("/schools/:id/stage/advance", superAdmin, promotion.AdvanceTerm(promotions, api.logger, "id"))
+	adminApi.Get("/schools/:id/year_end", superAdmin, promotion.PreviewYearEnd(promotions, api.logger, "id"))
+	adminApi.Post("/schools/:id/year_end", superAdmin, promotion.ApplyYearEnd(promotions, api.logger, "id"))
+	adminApi.Get("/schools/:id/year_results", superAdmin, promotion.LastYearResults(promotions, api.logger, "id"))
+	adminApi.Post("/schools/:id/year_results/:student_id/proceed", superAdmin, promotion.AllowToProceed(promotions, api.logger, "id"))
+
+	// End-of-term reports: every school for a term, one school's terms, a learner's progress
+	termReports := api.TermReports
+	adminApi.Get("/term_reports", superAdmin, promotion.CompareTerm(termReports, api.logger, ""))
+
+	// Term dates (read by every role) and the reminders sent from them
+	adminApi.Get("/term_dates", promotion.ListTermDates(api.Reminders, api.logger))
+	adminApi.Put("/academic_years/:id/terms", superAdmin, promotion.SetTermDates(api.Reminders, api.logger))
+	adminApi.Post("/reminders/run", superAdmin, promotion.SendRemindersNow(api.Reminders, api.logger))
+	adminApi.Get("/reminder_settings", superAdmin, promotion.GetReminderSettings(api.Reminders, api.logger))
+	adminApi.Put("/reminder_settings", superAdmin, promotion.UpdateReminderSettings(api.Reminders, api.logger))
+	adminApi.Get("/schools/:id/term_reports", superAdmin, promotion.ListTermReports(termReports, api.logger, "id"))
+	adminApi.Get("/schools/:id/term_reports/:year_id/:term", superAdmin, promotion.GetTermReport(termReports, api.logger, "id"))
+	adminApi.Post("/schools/:id/term_reports/:year_id/:term/regenerate", superAdmin, promotion.RegenerateTermReport(termReports, api.logger, "id"))
+	adminApi.Get("/students/:student_id/progress", superAdmin, promotion.LearnerProgress(termReports, api.logger, ""))
 }
 
 func (api *API) SchoolRoutes() {
@@ -103,6 +164,7 @@ func (api *API) SchoolRoutes() {
 	// School admin student management
 	schoolAdminApi.Get("/dashboard", schoolAccess, school.GetSchoolDashboard(api.SchoolAdminService, api.logger))
 	schoolAdminApi.Get("/students", schoolAccess, school.GetStudentsForSchool(api.SchoolAdminService, api.logger))
+	schoolAdminApi.Get("/students/duplicates", schoolAccess, school.FindSimilarStudents(api.SchoolAdminService, api.logger))
 	schoolAdminApi.Get("/students/:id", schoolAccess, school.GetStudentByIDForSchool(api.SchoolAdminService, api.logger))
 	schoolAdminApi.Post("/students", schoolAccess, school.CreateStudentForSchool(api.SchoolAdminService, api.logger))
 	schoolAdminApi.Put("/students/:id", schoolAccess, school.UpdateStudentForSchool(api.SchoolAdminService, api.logger))
@@ -113,6 +175,18 @@ func (api *API) SchoolRoutes() {
 	schoolAdminApi.Get("/exam_results/:academic_year_id", schoolAccess, school.GetExamResultForSchoolByAcademicYear(api.SchoolAdminService, api.logger))
 	schoolAdminApi.Post("/exam_results", schoolAccess, school.CreateExamResultForSchool(api.SchoolAdminService, api.logger))
 	schoolAdminApi.Put("/exam_results/:id", schoolAccess, school.UpdateExamResultForSchool(api.SchoolAdminService, api.logger))
+
+	// Terms and year-end promotion for this school
+	schoolAdminApi.Get("/stage", schoolAccess, promotion.GetStage(api.Promotions, api.logger, "school_id"))
+	schoolAdminApi.Post("/stage/advance", schoolAccess, promotion.AdvanceTerm(api.Promotions, api.logger, "school_id"))
+	schoolAdminApi.Get("/year_end", schoolAccess, promotion.PreviewYearEnd(api.Promotions, api.logger, "school_id"))
+	schoolAdminApi.Post("/year_end", schoolAccess, promotion.ApplyYearEnd(api.Promotions, api.logger, "school_id"))
+	schoolAdminApi.Get("/year_results", schoolAccess, promotion.LastYearResults(api.Promotions, api.logger, "school_id"))
+	schoolAdminApi.Post("/year_results/:student_id/proceed", schoolAccess, promotion.AllowToProceed(api.Promotions, api.logger, "school_id"))
+	schoolAdminApi.Get("/term_reports", schoolAccess, promotion.ListTermReports(api.TermReports, api.logger, "school_id"))
+	schoolAdminApi.Get("/term_reports/:year_id/:term", schoolAccess, promotion.GetTermReport(api.TermReports, api.logger, "school_id"))
+	schoolAdminApi.Post("/term_reports/:year_id/:term/regenerate", schoolAccess, promotion.RegenerateTermReport(api.TermReports, api.logger, "school_id"))
+	schoolAdminApi.Get("/students/:student_id/progress", schoolAccess, promotion.LearnerProgress(api.TermReports, api.logger, "school_id"))
 
 	// Per-student, per-subject marks
 	schoolAdminApi.Get("/marks", schoolAccess, school.ListMarks(api.MarksService, api.logger))
@@ -138,6 +212,7 @@ func (api *API) regionRoutes() {
 	regionApi.Get("/schools", regionAccess, region.ListSchools(api.ReportService, api.logger))
 	regionApi.Get("/students", regionAccess, region.ListStudents(api.RegionAdminService, api.logger))
 	regionApi.Get("/transfers", regionAccess, region.ListTransfers(api.RegionAdminService, api.logger))
+	regionApi.Get("/term_reports", regionAccess, promotion.CompareTerm(api.TermReports, api.logger, "region_id"))
 }
 
 func (api *API) commsRoutes() {
@@ -182,6 +257,10 @@ func (api *API) accountRoutes() {
 	managers := RequireRole(schema.RoleSuperAdmin, schema.RoleRegionalAdmin)
 	accountsApi := api.app.Group("/accounts", api.authenticated(), managers)
 	accountsApi.Get("", accounts.ListAccounts(api.AccountService, api.logger))
+	// Forgot-password requests from people this manager looks after
+	accountsApi.Get("/password_requests", accounts.ListPasswordRequests(api.PasswordRequests, api.logger))
+	accountsApi.Post("/password_requests/:id/resolve", accounts.ResolvePasswordRequest(api.PasswordRequests, api.logger))
+	accountsApi.Post("/password_requests/:id/dismiss", accounts.DismissPasswordRequest(api.PasswordRequests, api.logger))
 	accountsApi.Post("", accounts.CreateAccount(api.AccountService, api.logger))
 	accountsApi.Put("/:id", accounts.UpdateAccount(api.AccountService, api.logger))
 	accountsApi.Post("/:id/deactivate", accounts.SetAccountActive(api.AccountService, api.logger, false))

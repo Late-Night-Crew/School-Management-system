@@ -37,20 +37,6 @@ func GetAcademicYearList(academicYearService services.AcademicYearService, logge
 		return ctx.Status(fiber.StatusOK).JSON(academicYears)
 	}
 }
-func CreateAcademicYear(academicYearService services.AcademicYearService, logger logging.Logger) fiber.Handler {
-	return func(ctx *fiber.Ctx) error {
-		var req schema.CreateAcademicYearRequest
-		if _, err := common.ParseBodyThenValidate(ctx, &req); err != nil {
-			return problemdetail.BadRequest(ctx, err.Error())
-		}
-		academicYear, err := academicYearService.CreateAcademicYear(ctx.Context(), &req)
-		if err != nil {
-			logger.Error("failed to create academic year: ", "error", err)
-			return problemdetail.ServerErrorProblem(ctx, "Failed to create academic year")
-		}
-		return ctx.Status(fiber.StatusCreated).JSON(academicYear)
-	}
-}
 func UpdateAcademicYear(academicYearService services.AcademicYearService,logger logging.Logger) fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
 		academicYearID, err := common.ParseIDParam(ctx, "id")

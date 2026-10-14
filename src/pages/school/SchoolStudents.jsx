@@ -11,6 +11,8 @@ import { average, formatMark } from "../../utils/grades";
 import DataState from "../../components/DataState";
 import GradeBadge from "../../components/GradeBadge";
 import DetailRow from "../../components/DetailRow";
+import LearnerProgress from "../../components/LearnerProgress";
+import { schoolPromotionBase } from "../../api/promotion";
 import TablePagination from "../../components/TablePagination";
 import { Badge, Button, Card, Dialog, IconButton, Page, Person, SearchInput, Table } from "../../components/ui";
 
@@ -46,6 +48,8 @@ function StudentDetails({ schoolId, student, subjects, years }) {
         <DetailRow label="Disability" value={student.disability ? student.disability_details || "Yes" : "No"} />
         <DetailRow label="Subjects" value={studentSubjects.join(", ")} />
       </div>
+
+      <LearnerProgress base={schoolPromotionBase(false, schoolId)} studentId={student.id} />
 
       <Card accent="amber" icon="bi-journal-check" title="Marks" subtitle="By academic year and term" flush>
         <DataState

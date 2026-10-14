@@ -4,6 +4,7 @@ import "./shell.css";
 import { logout } from "../api/auth";
 import { COMMS_CHANGED, getCommsSummary } from "../api/comms";
 import { SCHOOL_REQUESTS_CHANGED, listSchoolRequests } from "../api/schoolRequests";
+import { PASSWORD_REQUESTS_CHANGED, listPasswordRequests } from "../api/accounts";
 import { ROLES, ROLE_LABELS, getSession } from "../auth/session";
 
 // Sidebar links for each role. Paths must match the routes in router.jsx.
@@ -28,6 +29,7 @@ function menuFor(session) {
             { name: "Accounts", path: "/admin/accounts", icon: "bi-people" },
           ],
         },
+        { name: "Promotion", path: "/admin/promotion", icon: "bi-mortarboard" },
         { name: "Transfers", path: "/admin/transfers", icon: "bi-arrow-left-right" },
         { name: "Reports", path: "/admin/reports", icon: "bi-file-earmark-text" },
         { name: "Contacts", path: "/admin/contacts", icon: "bi-person-lines-fill" },
@@ -58,6 +60,7 @@ function menuFor(session) {
         { name: "Register Students", path: `${base}/register`, icon: "bi-person-plus" },
         { name: "Students", path: `${base}/students`, icon: "bi-journal-bookmark" },
         { name: "Enter Marks", path: `${base}/marks`, icon: "bi-pen" },
+        { name: "Terms & Promotion", path: `${base}/promotion`, icon: "bi-mortarboard" },
         { name: "Transfers", path: `${base}/transfers`, icon: "bi-arrow-left-right" },
         { name: "Reports", path: `${base}/reports`, icon: "bi-file-earmark-text" },
         { name: "Contacts", path: `${base}/contacts`, icon: "bi-person-lines-fill" },
@@ -97,28 +100,31 @@ function useUnreadCount(enabled) {
   return count;
 }
 
-// Requests waiting for the super admin's decision, for the School Requests badge
-function useAwaitingRequests(enabled) {
+// How many items a list call returns, refreshed every minute and on `changedEvent`.
+// Used for sidebar badges; failures are ignored since the pages report their own errors.
+function usePendingCount(enabled, load, changedEvent) {
   const [count, setCount] = useState(0);
   useEffect(() => {
     if (!enabled) return undefined;
     let current = true;
     const refresh = () =>
-      listSchoolRequests({ status: "Submitted" }).then(
-        (requests) => current && setCount(requests.length),
-        () => {} // the badge is optional; the page reports its own errors
+      load().then(
+        (items) => current && setCount(items.length),
+        () => {}
       );
     refresh();
     const timer = setInterval(refresh, SUMMARY_POLL_MS);
-    window.addEventListener(SCHOOL_REQUESTS_CHANGED, refresh);
+    window.addEventListener(changedEvent, refresh);
     return () => {
       current = false;
       clearInterval(timer);
-      window.removeEventListener(SCHOOL_REQUESTS_CHANGED, refresh);
+      window.removeEventListener(changedEvent, refresh);
     };
-  }, [enabled]);
+  }, [enabled, load, changedEvent]);
   return count;
 }
+
+const loadAwaitingRequests = () => listSchoolRequests({ status: "Submitted" });
 
 const badgeText = (count) => (count > 99 ? "99+" : count);
 
@@ -126,12 +132,14 @@ export default function UnifiedSidebar({ isMobileOpen = false, setIsMobileOpen =
   const navigate = useNavigate();
   const session = getSession();
   const unread = useUnreadCount(Boolean(session?.role));
-  const awaiting = useAwaitingRequests(session?.role === ROLES.SUPER_ADMIN);
-  const menuItems = menuFor(session).map((item) => {
-    if (item.name === "Notifications" && unread > 0) return { ...item, badge: badgeText(unread) };
-    if (item.name === "School Requests" && awaiting > 0) return { ...item, badge: badgeText(awaiting) };
-    return item;
-  });
+  const isManager = session?.role === ROLES.SUPER_ADMIN || session?.role === ROLES.REGIONAL_ADMIN;
+  const awaiting = usePendingCount(session?.role === ROLES.SUPER_ADMIN, loadAwaitingRequests, SCHOOL_REQUESTS_CHANGED);
+  const passwordRequests = usePendingCount(isManager, listPasswordRequests, PASSWORD_REQUESTS_CHANGED);
+  const counts = { Notifications: unread, "School Requests": awaiting, Accounts: passwordRequests, "School Accounts": passwordRequests };
+  const withBadge = (item) => (counts[item.name] > 0 ? { ...item, badge: badgeText(counts[item.name]) } : item);
+  const menuItems = menuFor(session).map((item) =>
+    item.children ? { ...item, children: item.children.map(withBadge) } : withBadge(item)
+  );
 
   const handleLogout = () => {
     logout();
@@ -231,7 +239,14 @@ function SidebarGroup({ group, onNavigate }) {
           </span>
           <span>{group.name}</span>
         </div>
-        <i className={`bi bi-chevron-down unified-sidebar-chevron ${open ? "open" : ""}`} aria-hidden="true" />
+        <span className="d-flex align-items-center gap-2">
+          {!open && group.children.some((child) => child.badge) && (
+            <span className="badge unified-sidebar-badge" aria-label="Items waiting">
+              {group.children.filter((child) => child.badge).length > 1 ? "•" : group.children.find((child) => child.badge).badge}
+            </span>
+          )}
+          <i className={`bi bi-chevron-down unified-sidebar-chevron ${open ? "open" : ""}`} aria-hidden="true" />
+        </span>
       </button>
       <div className={`unified-sidebar-sub ${open ? "open" : ""}`}>
         <ul id={listId} className="unified-sidebar-sublist" inert={!open}>
@@ -244,6 +259,7 @@ function SidebarGroup({ group, onNavigate }) {
               >
                 <i className={`bi ${child.icon}`} aria-hidden="true" />
                 <span>{child.name}</span>
+                {child.badge && <span className="badge unified-sidebar-badge ms-auto">{child.badge}</span>}
               </NavLink>
             </li>
           ))}

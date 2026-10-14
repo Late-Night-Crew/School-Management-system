@@ -4,6 +4,16 @@ import { useParams } from "react-router-dom";
 import { listAcademicYears } from "../../api/academicYears";
 import { listSchoolMarks, listSchoolStudents, saveSchoolMarks } from "../../api/schoolPortal";
 import { listSubjects } from "../../api/subjects";
+import {
+  getStage,
+  listSchoolMarksAsAdmin,
+  listSchoolStudentsAsAdmin,
+  saveSchoolMarksAsAdmin,
+  schoolPromotionBase,
+} from "../../api/promotion";
+import { getSchool } from "../../api/schools";
+import { ROLES, getSession } from "../../auth/session";
+import { startedYears } from "../../utils/years";
 import useAsync from "../../hooks/useAsync";
 import usePagination from "../../hooks/usePagination";
 import { fullName } from "../../utils/format";
@@ -23,19 +33,39 @@ const cellKey = (studentId, subjectId) => `${studentId}-${subjectId}`;
 
 export default function EnterMarks() {
   const { schoolId } = useParams();
+  // MCDE opens a school's marks to correct them, including years the school has finished
+  const isSuper = getSession().role === ROLES.SUPER_ADMIN;
+  const marksApi = isSuper
+    ? { students: listSchoolStudentsAsAdmin, list: listSchoolMarksAsAdmin, save: saveSchoolMarksAsAdmin }
+    : { students: listSchoolStudents, list: listSchoolMarks, save: saveSchoolMarks };
+  const school = useAsync(useCallback(() => (isSuper ? getSchool(schoolId) : Promise.resolve(null)), [isSuper, schoolId]));
   const scale = useGradingScale();
 
   // Students, subjects and years load once; marks reload when the year or term changes
   const lookups = useAsync(
-    useCallback(() => Promise.all([listSchoolStudents(schoolId), listSubjects(), listAcademicYears()]), [schoolId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- marksApi only changes with the role
+    useCallback(() => Promise.all([marksApi.students(schoolId), listSubjects(), listAcademicYears()]), [schoolId, isSuper])
   );
-  const [students = [], subjects = [], years = []] = lookups.data || [];
-  const sortedYears = [...years].sort((a, b) => b.year - a.year);
-  const defaultYear = sortedYears.find((y) => y.status === "Active") || sortedYears[0];
+  // The school's current year and term (see Terms & Promotion) is where marks usually go
+  const stage = useAsync(useCallback(() => getStage(schoolPromotionBase(isSuper, schoolId)).catch(() => null), [isSuper, schoolId]));
+  const [allStudents = [], subjects = [], years = []] = lookups.data || [];
+  // Learners who completed Form 4 take no more marks
+  const students = allStudents.filter((s) => s.status !== "Completed");
+  // Marks go into the active year or a past one, never an upcoming year
+  const sortedYears = startedYears(years).sort((a, b) => b.year - a.year);
+  const defaultYear =
+    sortedYears.find((y) => y.id === stage.data?.academic_year_id) ||
+    sortedYears.find((y) => y.status === "Active") ||
+    sortedYears[0];
 
   const [yearChoice, setYearChoice] = useState("");
   const academicYearId = yearChoice || (defaultYear ? String(defaultYear.id) : "");
-  const [term, setTerm] = useState(1);
+  const [termChoice, setTerm] = useState(null);
+  const term = termChoice ?? stage.data?.term ?? 1;
+  // A year the school has finished is locked for coordinators; only MCDE corrects it
+  const selectedYear = sortedYears.find((y) => String(y.id) === academicYearId);
+  const pastYear = Boolean(stage.data && selectedYear && selectedYear.year < stage.data.year);
+  const locked = pastYear && !isSuper;
   const [formLevel, setFormLevel] = useState("");
   const [subjectFilter, setSubjectFilter] = useState("");
 
@@ -43,9 +73,10 @@ export default function EnterMarks() {
     useCallback(
       () =>
         academicYearId
-          ? listSchoolMarks(schoolId, { academic_year_id: academicYearId, term })
+          ? marksApi.list(schoolId, { academic_year_id: academicYearId, term })
           : Promise.resolve([]),
-      [schoolId, academicYearId, term]
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- marksApi only changes with the role
+      [schoolId, academicYearId, term, isSuper]
     )
   );
   const savedMarks = Object.fromEntries((saved.data || []).map((m) => [cellKey(m.student_id, m.subject_id), m.mark]));
@@ -102,7 +133,7 @@ export default function EnterMarks() {
     if (!entries.length) return;
     setSaving(true);
     try {
-      await saveSchoolMarks(schoolId, {
+      await marksApi.save(schoolId, {
         academic_year_id: Number(academicYearId),
         term,
         marks: entries.map(([key, mark]) => {
@@ -153,12 +184,23 @@ export default function EnterMarks() {
   return (
     <Page
       icon="bi-pencil-square"
-      title="Enter Marks"
-      subtitle="Record each student's mark (0-100) per subject for an academic year and term."
+      title={isSuper ? `Marks: ${school.data?.name || "school"}` : "Enter Marks"}
+      subtitle={
+        isSuper
+          ? "Correct a school's marks, including years it has finished. Corrections to a finished year are recorded in the audit log."
+          : "Record each student's mark (0-100) per subject for an academic year and term."
+      }
       actions={
-        <Button variant="ghost" icon="bi-save" onClick={saveAll} disabled={!dirtyCount || saving}>
-          {saving ? "Saving…" : `Save all${dirtyCount ? ` (${dirtyCount})` : ""}`}
-        </Button>
+        <>
+          {isSuper && (
+            <Button variant="ghost" icon="bi-arrow-left" to={`/admin/promotion/${schoolId}`}>
+              Back to the school
+            </Button>
+          )}
+          <Button variant="ghost" icon="bi-save" onClick={saveAll} disabled={!dirtyCount || saving || locked}>
+            {saving ? "Saving…" : `Save all${dirtyCount ? ` (${dirtyCount})` : ""}`}
+          </Button>
+        </>
       }
     >
       <ToastNote {...toast} onClose={() => setToast((t) => ({ ...t, show: false }))} />
@@ -168,6 +210,18 @@ export default function EnterMarks() {
           <Notice tone="amber">No academic years have been set up yet, so marks cannot be recorded.</Notice>
         ) : (
           <>
+            {locked && (
+              <Notice tone="blue">
+                The school has finished {selectedYear.year}, so its marks are view-only. If a mark is wrong, ask MCDE (the
+                Learner Support Manager) to correct it.
+              </Notice>
+            )}
+            {isSuper && pastYear && (
+              <Notice tone="amber">
+                You are correcting {selectedYear.year}, a year this school has finished. Saving is recorded in the audit log, and
+                the term&apos;s saved report will show that marks changed.
+              </Notice>
+            )}
             <Card accent="blue" icon="bi-funnel" title="Class and Term" subtitle="Choose what to record marks for">
               <div className="ui-grid ui-cols-4">
                 <Field label="Academic Year">
@@ -181,7 +235,15 @@ export default function EnterMarks() {
                   </Select>
                 </Field>
                 <Field label="Term">
-                  <Segmented options={TERM_OPTIONS} value={term} onChange={(t) => term !== t && changeFilter(() => setTerm(t))} />
+                  <Segmented
+                    options={TERM_OPTIONS.map((o) => {
+                      // Not a term the school has not reached yet
+                      const ahead = stage.data && String(stage.data.academic_year_id) === academicYearId && o.value > stage.data.term;
+                      return ahead ? { ...o, disabled: true, title: `The school is in Term ${stage.data.term}` } : o;
+                    })}
+                    value={term}
+                    onChange={(t) => term !== t && changeFilter(() => setTerm(t))}
+                  />
                 </Field>
                 <Field label="Form">
                   <Select value={formLevel} onChange={(e) => changeFilter(() => setFormLevel(e.target.value))}>
@@ -264,6 +326,7 @@ export default function EnterMarks() {
                                       aria-label={`${sub.name} mark for ${fullName(student)}`}
                                       className={`${styles.markInput} ${key in edits ? styles.dirty : ""}`}
                                       value={mark ?? ""}
+                                      disabled={locked}
                                       onChange={(e) => handleMarkChange(student.id, sub.id, e.target.value)}
                                     />
                                     <div className={styles.grade}>
@@ -281,7 +344,7 @@ export default function EnterMarks() {
                                   kind="save"
                                   title={`Save marks for ${fullName(student)}`}
                                   onClick={() => saveRow(student)}
-                                  disabled={!rowDirty || saving}
+                                  disabled={!rowDirty || saving || locked}
                                 />
                               </td>
                             </tr>

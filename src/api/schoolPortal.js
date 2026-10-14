@@ -44,3 +44,9 @@ export const listSchoolMarks = (schoolId, filters) =>
   client.get(`${base(schoolId)}/marks`, { params: params(filters) }).then(list);
 // batch: { academic_year_id, term, marks: [{ student_id, subject_id, mark }] }; mark null clears it
 export const saveSchoolMarks = (schoolId, batch) => client.put(`${base(schoolId)}/marks`, batch).then(data);
+
+// Learners (at any school) who may be the one being registered or edited:
+// check: { first_name, last_name, date_of_birth, guardian_phone, exclude_id }
+// Resolves to [{ id, name, student_number, school_name, form_level, has_national_id, reason }]
+export const findSimilarSchoolStudents = (schoolId, check) =>
+  client.get(`${base(schoolId)}/students/duplicates`, { params: params(check) }).then(list);
