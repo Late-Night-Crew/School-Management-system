@@ -573,8 +573,9 @@ const ManageStudents = () => {
         title="Delete Student"
         confirmLabel="Delete student"
       >
-        Deleting <strong>{deleting?.first_name} {deleting?.last_name}</strong> permanently erases their marks, subject
-        choices and transfer history. If the student has moved to another school, transfer them instead.
+        Delete <strong>{deleting?.first_name} {deleting?.last_name}</strong> only if they were registered by mistake. A
+        learner with marks, results or transfers cannot be deleted: mark them as having left, or transfer them if they
+        moved school. The delete is recorded in the activity log.
       </TypeToConfirm>
     </Page>
   );

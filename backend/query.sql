@@ -516,13 +516,6 @@ RETURNING id,
     created_at,
     updated_at;
 
--- name: DeleteStudentByIDAndSchoolID :exec
-DELETE FROM
-    students
-WHERE
-    id = $1
-    AND school_id = $2;
-
 -- name: CreateStudentSubjectAssignment :exec
 INSERT INTO
     student_subjects (student_id, subject_id)
@@ -799,6 +792,11 @@ WITH approved AS (
     WHERE
         transfers.id = sqlc.arg(transfer_id)
         AND transfers.status = 'Pending'
+        -- Still true at approval: the learner is current at the sending school, and the
+        -- receiving school is open (both can change while the request waits)
+        AND EXISTS (SELECT 1 FROM students s WHERE s.id = transfers.student_id
+            AND s.school_id = transfers.from_school AND s.status = 'Active')
+        AND EXISTS (SELECT 1 FROM schools sc WHERE sc.id = transfers.to_school AND sc.closed_at IS NULL)
     RETURNING transfers.id, transfers.student_id, transfers.to_school
 ),
 moved AS (
@@ -825,6 +823,11 @@ WITH approved AS (
         transfers.id = sqlc.arg(transfer_id)
         AND transfers.to_school = sqlc.arg(school_id)
         AND transfers.status = 'Pending'
+        -- Still true at approval: the learner is current at the sending school, and the
+        -- receiving school is open (both can change while the request waits)
+        AND EXISTS (SELECT 1 FROM students s WHERE s.id = transfers.student_id
+            AND s.school_id = transfers.from_school AND s.status = 'Active')
+        AND EXISTS (SELECT 1 FROM schools sc WHERE sc.id = transfers.to_school AND sc.closed_at IS NULL)
     RETURNING transfers.id, transfers.student_id, transfers.to_school
 ),
 moved AS (
@@ -1241,7 +1244,9 @@ SET
     mark = EXCLUDED.mark,
     school_id = EXCLUDED.school_id,
     recorded_by = EXCLUDED.recorded_by,
-    updated_at = CURRENT_TIMESTAMP;
+    updated_at = CURRENT_TIMESTAMP
+-- Never takes over a mark another school recorded (a learner may have moved mid-term)
+WHERE student_marks.school_id = EXCLUDED.school_id;
 
 -- name: DeleteMarks :exec
 -- Removes the marks for the given (student, subject) pairs in one academic year and term.
@@ -1252,7 +1257,9 @@ USING (
 WHERE m.student_id = cleared.student_id
     AND m.subject_id = cleared.subject_id
     AND m.academic_year_id = sqlc.arg(academic_year_id)::int
-    AND m.term = sqlc.arg(term)::int;
+    AND m.term = sqlc.arg(term)::int
+    -- A school clears only marks it recorded (a learner may have moved mid-term)
+    AND m.school_id = sqlc.arg(school_id)::int;
 
 -- ============================================================================
 -- Communications: notices (one-way, many recipients) and conversations (two-party).
@@ -2331,9 +2338,8 @@ WHERE lower(u.email) = lower(sqlc.arg(email)::text)
 
 -- name: CreatePasswordRequest :exec
 WITH created AS (
-    INSERT INTO password_reset_requests (user_id, handler_region_id, contact_phone, note, requester_ip)
-    VALUES (sqlc.arg(user_id)::int, sqlc.narg(handler_region_id)::int, sqlc.narg(contact_phone)::text,
-        sqlc.narg(note)::text, sqlc.narg(requester_ip)::text)
+    INSERT INTO password_reset_requests (user_id, handler_region_id, note, requester_ip)
+    VALUES (sqlc.arg(user_id)::int, sqlc.narg(handler_region_id)::int, sqlc.narg(note)::text, sqlc.narg(requester_ip)::text)
     ON CONFLICT (user_id) WHERE status = 'Pending' DO NOTHING
     RETURNING id, user_id
 )
@@ -2345,7 +2351,7 @@ SELECT 'user', created.user_id, 'PasswordResetRequested', 'Forgot-password reque
 -- division officer (handler_region_id NULL means MCDE).
 SELECT r.id, r.user_id, u.name, u.email, u.role, u.phone, u.whatsapp,
     COALESCE(sc.name, '')::text AS school_name, COALESCE(rg.name, '')::text AS region_name,
-    r.contact_phone, r.note, r.handler_region_id, r.created_at
+    r.note, r.handler_region_id, r.created_at
 FROM password_reset_requests r
     JOIN users u ON u.id = r.user_id
     LEFT JOIN schools sc ON sc.id = u.school_id
@@ -2636,11 +2642,6 @@ DELETE FROM academic_year_terms WHERE academic_year_id = sqlc.arg(academic_year_
 INSERT INTO academic_year_terms (academic_year_id, term, start_date, end_date)
 VALUES (sqlc.arg(academic_year_id)::int, sqlc.arg(term)::int, sqlc.arg(start_date)::date, sqlc.arg(end_date)::date);
 
--- name: LogTermDatesChange :exec
-INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
-SELECT 'academic_year', sqlc.arg(academic_year_id)::int, 'TermDatesSet', u.id, u.name, u.role, u.school_id, sqlc.arg(note)::text
-FROM (SELECT 1) AS one LEFT JOIN users u ON u.id = sqlc.arg(actor_user_id)::int;
-
 -- name: ClaimTermReminder :one
 -- Records that a reminder is being sent; returns no row if it already was.
 INSERT INTO term_reminders (school_id, academic_year_id, term, kind)
@@ -2764,6 +2765,7 @@ SELECT a.id, a.entity_type, COALESCE(a.entity_id, 0)::int AS entity_id, a.action
         WHEN 'transfer' THEN (SELECT st.first_name || ' ' || st.last_name || ' (transfer)' FROM transfers t JOIN students st ON st.id = t.student_id WHERE t.id = a.entity_id)
         WHEN 'school_request' THEN (SELECT school_name || ' (request)' FROM school_requests WHERE id = a.entity_id)
         WHEN 'notice' THEN (SELECT title FROM notices WHERE id = a.entity_id)
+        WHEN 'subject' THEN (SELECT name FROM subjects WHERE id = a.entity_id)
     END, '')::text AS entity_label
 FROM audit_logs a
 WHERE (sqlc.narg(actor_user_id)::int IS NULL OR a.actor_user_id = sqlc.narg(actor_user_id)::int)
@@ -2774,6 +2776,7 @@ WHERE (sqlc.narg(actor_user_id)::int IS NULL OR a.actor_user_id = sqlc.narg(acto
     AND (sqlc.narg(search)::text IS NULL OR a.note ILIKE '%' || sqlc.narg(search)::text || '%'
         OR a.action ILIKE '%' || sqlc.narg(search)::text || '%'
         OR a.actor_name ILIKE '%' || sqlc.narg(search)::text || '%')
+    AND NOT (sqlc.arg(hide_sign_ins)::bool AND a.action IN ('SignedIn', 'SignInFailed'))
 ORDER BY a.created_at DESC, a.id DESC
 LIMIT sqlc.arg(page_size)::int OFFSET sqlc.arg(page_offset)::int;
 
@@ -2787,7 +2790,8 @@ WHERE (sqlc.narg(actor_user_id)::int IS NULL OR a.actor_user_id = sqlc.narg(acto
     AND (sqlc.narg(to_date)::date IS NULL OR a.created_at < sqlc.narg(to_date)::date + 1)
     AND (sqlc.narg(search)::text IS NULL OR a.note ILIKE '%' || sqlc.narg(search)::text || '%'
         OR a.action ILIKE '%' || sqlc.narg(search)::text || '%'
-        OR a.actor_name ILIKE '%' || sqlc.narg(search)::text || '%');
+        OR a.actor_name ILIKE '%' || sqlc.narg(search)::text || '%')
+    AND NOT (sqlc.arg(hide_sign_ins)::bool AND a.action IN ('SignedIn', 'SignInFailed'));
 
 -- name: ListAuditActors :many
 -- Everyone who appears in the log, for the "who" filter.
@@ -2986,3 +2990,60 @@ FROM student_marks m
 WHERE m.school_id = sqlc.arg(school_id)::int AND m.academic_year_id = sqlc.arg(academic_year_id)::int
     AND m.term = sqlc.arg(term)::int AND m.student_id = ANY(sqlc.arg(student_ids)::int[])
 ORDER BY m.student_id, m.subject_id;
+
+-- name: GetLearnerForDelete :one
+-- A learner with what would be lost by deleting them (school_id NULL: any school).
+SELECT s.first_name, s.last_name, s.student_number, sc.name AS school_name,
+    (SELECT COUNT(*) FROM student_marks m WHERE m.student_id = s.id)::int AS marks,
+    (SELECT COUNT(*) FROM promotions p WHERE p.student_id = s.id)::int AS results,
+    (SELECT COUNT(*) FROM transfers t WHERE t.student_id = s.id)::int AS transfers
+FROM students s
+    JOIN schools sc ON sc.id = s.school_id
+WHERE s.id = sqlc.arg(student_id)::int
+    AND (sqlc.narg(school_id)::int IS NULL OR s.school_id = sqlc.narg(school_id)::int);
+
+-- name: GetSchoolNameForAudit :one
+SELECT name FROM schools WHERE id = sqlc.arg(school_id)::int;
+
+-- name: GetAcademicYearUse :one
+-- What refers to an academic year, so it is only deleted when nothing does.
+SELECT ay.year,
+    (SELECT COUNT(*) FROM student_marks m WHERE m.academic_year_id = ay.id)::int AS marks,
+    (SELECT COUNT(*) FROM term_reports tr WHERE tr.academic_year_id = ay.id)::int AS reports,
+    (SELECT COUNT(*) FROM exam_results e WHERE e.academic_year_id = ay.id)::int AS exam_results,
+    (SELECT COUNT(*) FROM promotions p WHERE p.academic_year_id = ay.id)::int AS results,
+    (SELECT COUNT(*) FROM school_stages st WHERE st.academic_year_id = ay.id)::int AS schools
+FROM academic_years ay
+WHERE ay.id = sqlc.arg(academic_year_id)::int;
+
+-- name: GetSubjectUse :one
+-- What refers to a subject, so it is only deleted when nothing does.
+SELECT sb.name,
+    (SELECT COUNT(*) FROM student_marks m WHERE m.subject_id = sb.id)::int AS marks,
+    (SELECT COUNT(*) FROM student_subjects ss WHERE ss.subject_id = sb.id)::int AS learners
+FROM subjects sb
+WHERE sb.id = sqlc.arg(subject_id)::int;
+
+-- name: ListMarkPairs :many
+-- For (learner, subject) pairs about to be saved: their names and any mark already
+-- recorded in the year and term, with the school that recorded it.
+SELECT p.student_id::int AS student_id, p.subject_id::int AS subject_id,
+    (st.first_name || ' ' || st.last_name)::text AS learner, sb.name::text AS subject,
+    m.mark, m.school_id
+FROM (
+    SELECT unnest(sqlc.arg(student_ids)::int[]) AS student_id, unnest(sqlc.arg(subject_ids)::int[]) AS subject_id
+) p
+    JOIN students st ON st.id = p.student_id
+    JOIN subjects sb ON sb.id = p.subject_id
+    LEFT JOIN student_marks m ON m.student_id = p.student_id AND m.subject_id = p.subject_id
+        AND m.academic_year_id = sqlc.arg(academic_year_id)::int AND m.term = sqlc.arg(term)::int;
+
+-- name: GetTransferApprovalState :one
+-- Why a pending transfer cannot be approved now: the learner must still be a current
+-- learner at the sending school, and the receiving school must be open.
+SELECT (s.school_id = t.from_school AND s.status = 'Active')::bool AS learner_ok,
+    (sc.closed_at IS NULL)::bool AS school_open
+FROM transfers t
+    JOIN students s ON s.id = t.student_id
+    JOIN schools sc ON sc.id = t.to_school
+WHERE t.id = sqlc.arg(transfer_id)::int;

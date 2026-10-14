@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"nsms/database/dbsqlc"
 	"nsms/logging"
@@ -24,15 +25,13 @@ type MarksService interface {
 }
 
 type marksService struct {
+	db      *sql.DB
 	queries *dbsqlc.Queries
 	logger  logging.Logger
 }
 
-func NewMarksService(queries *dbsqlc.Queries, logger logging.Logger) MarksService {
-	return &marksService{
-		queries: queries,
-		logger:  logger,
-	}
+func NewMarksService(db *sql.DB, queries *dbsqlc.Queries, logger logging.Logger) MarksService {
+	return &marksService{db: db, queries: queries, logger: logger}
 }
 
 func (s *marksService) ListMarks(ctx context.Context, schoolID int64, filter schema.MarksFilter) ([]*schema.StudentMark, error) {
@@ -66,77 +65,135 @@ type enrolment struct{ studentID, subjectID int32 }
 
 func (s *marksService) SaveMarks(ctx context.Context, schoolID int64, recordedBy int64, req *schema.SaveMarksRequest, canCorrectPast bool) (*schema.SaveMarksResult, error) {
 	// Not an upcoming year, nor a term the school has not reached, nor (for coordinators)
-	// a year the school has finished
-	past, err := checkMarksTerm(ctx, s.queries, schoolID, req.AcademicYearID, req.Term, canCorrectPast)
+	// a term the school has closed
+	target, err := checkMarksTerm(ctx, s.queries, schoolID, req.AcademicYearID, req.Term, canCorrectPast)
 	if err != nil {
 		return nil, err
 	}
 
 	studentIDs := make([]int32, 0, len(req.Marks))
+	subjectIDs := make([]int32, 0, len(req.Marks))
+	seen := make(map[enrolment]bool, len(req.Marks))
 	for _, entry := range req.Marks {
-		studentIDs = append(studentIDs, int32(entry.StudentID))
+		key := enrolment{int32(entry.StudentID), int32(entry.SubjectID)}
+		if seen[key] {
+			return nil, fmt.Errorf("%w (student %d, subject %d is listed twice)", ErrMarkNotAllowed, entry.StudentID, entry.SubjectID)
+		}
+		seen[key] = true
+		studentIDs = append(studentIDs, key.studentID)
+		subjectIDs = append(subjectIDs, key.subjectID)
 	}
 
 	// Every entry must be a learner of this school in a subject they take: a current
 	// learner, or, in a finished year, someone who was at the school that year
-	enrolled, err := s.enrolments(ctx, schoolID, req.AcademicYearID, studentIDs, past && canCorrectPast)
+	enrolled, err := s.enrolments(ctx, schoolID, req.AcademicYearID, studentIDs, target.pastYear && canCorrectPast)
 	if err != nil {
 		return nil, err
 	}
+	// What is there now: a mark another school recorded (before a learner moved) is
+	// that school's, and closed-term corrections are audited mark by mark
+	pairs, err := s.queries.ListMarkPairs(ctx, dbsqlc.ListMarkPairsParams{
+		StudentIds: studentIDs, SubjectIds: subjectIDs, AcademicYearID: int32(req.AcademicYearID), Term: int32(req.Term),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to read current marks: %w", err)
+	}
+	existing := make(map[enrolment]dbsqlc.ListMarkPairsRow, len(pairs))
+	for _, p := range pairs {
+		existing[enrolment{p.StudentID, p.SubjectID}] = p
+	}
 
 	var upsert, clear dbsqlc.UpsertMarksParams
+	var changes []string
 	for _, entry := range req.Marks {
 		key := enrolment{int32(entry.StudentID), int32(entry.SubjectID)}
 		if !enrolled[key] {
 			return nil, fmt.Errorf("%w (student %d, subject %d)", ErrMarkNotAllowed, entry.StudentID, entry.SubjectID)
 		}
-		target := &upsert
+		now := existing[key]
+		if now.SchoolID.Valid && int64(now.SchoolID.Int32) != schoolID {
+			return nil, fmt.Errorf("%w (%s's %s mark for this term was recorded by their previous school)", ErrMarkNotAllowed, now.Learner, now.Subject)
+		}
+		list := &upsert
 		if entry.Mark == nil {
-			target = &clear
+			list = &clear
 		} else {
 			upsert.Marks = append(upsert.Marks, int32(*entry.Mark))
 		}
-		target.StudentIds = append(target.StudentIds, key.studentID)
-		target.SubjectIds = append(target.SubjectIds, key.subjectID)
+		list.StudentIds = append(list.StudentIds, key.studentID)
+		list.SubjectIds = append(list.SubjectIds, key.subjectID)
+		if target.closed {
+			changes = append(changes, describeMarkChange(now, entry.Mark))
+		}
 	}
 
+	// Cleared and saved marks (and the audit entry) are written together or not at all
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+	queries := s.queries.WithTx(tx)
 	if len(clear.StudentIds) > 0 {
-		err := s.queries.DeleteMarks(ctx, dbsqlc.DeleteMarksParams{
+		err := queries.DeleteMarks(ctx, dbsqlc.DeleteMarksParams{
 			StudentIds:     clear.StudentIds,
 			SubjectIds:     clear.SubjectIds,
 			AcademicYearID: int32(req.AcademicYearID),
 			Term:           int32(req.Term),
+			SchoolID:       int32(schoolID),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to clear marks: %w", err)
 		}
 	}
-
 	if len(upsert.StudentIds) > 0 {
 		upsert.AcademicYearID = int32(req.AcademicYearID)
 		upsert.Term = int32(req.Term)
 		upsert.SchoolID = int32(schoolID)
 		upsert.RecordedBy = sql.NullInt32{Int32: int32(recordedBy), Valid: recordedBy > 0}
-		if err := s.queries.UpsertMarks(ctx, upsert); err != nil {
+		if err := queries.UpsertMarks(ctx, upsert); err != nil {
 			return nil, fmt.Errorf("failed to save marks: %w", err)
 		}
 	}
-
-	// Corrections to a finished year are recorded against the school
-	if past {
-		err := s.queries.CreateAuditLog(ctx, dbsqlc.CreateAuditLogParams{
-			EntityType:  "school",
-			EntityID:    sql.NullInt32{Int32: int32(schoolID), Valid: true},
-			Action:      "PastMarksCorrected",
-			ActorUserID: int32(recordedBy),
-			Note:        sql.NullString{String: fmt.Sprintf("%d saved, %d cleared for academic year %d, Term %d", len(upsert.StudentIds), len(clear.StudentIds), req.AcademicYearID, req.Term), Valid: true},
-		})
+	// Corrections to a closed term are recorded against the school, mark by mark
+	if target.closed && len(changes) > 0 {
+		action := "ClosedTermMarksCorrected"
+		if target.pastYear {
+			action = "PastMarksCorrected"
+		}
+		year, err := queries.GetAcademicYearByID(ctx, int32(req.AcademicYearID))
 		if err != nil {
-			return nil, fmt.Errorf("failed to record the correction: %w", err)
+			return nil, fmt.Errorf("failed to look up academic year %d: %w", req.AcademicYearID, err)
+		}
+		note := fmt.Sprintf("%d Term %d: %s", year.Year, req.Term, summariseChanges(changes, 25))
+		if err := recordAudit(ctx, queries, "school", schoolID, action, note); err != nil {
+			return nil, err
 		}
 	}
-
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to save marks: %w", err)
+	}
 	return &schema.SaveMarksResult{Saved: len(upsert.StudentIds), Cleared: len(clear.StudentIds)}, nil
+}
+
+// describeMarkChange is "Chikondi Banda, English: 45 → 60" (or "none" for no mark).
+func describeMarkChange(now dbsqlc.ListMarkPairsRow, mark *int) string {
+	before, after := "none", "none"
+	if now.Mark.Valid {
+		before = fmt.Sprint(now.Mark.Int32)
+	}
+	if mark != nil {
+		after = fmt.Sprint(*mark)
+	}
+	return fmt.Sprintf("%s, %s: %s → %s", now.Learner, now.Subject, before, after)
+}
+
+// summariseChanges lists up to max changes and counts the rest.
+func summariseChanges(changes []string, max int) string {
+	if len(changes) <= max {
+		return strings.Join(changes, "; ")
+	}
+	return strings.Join(changes[:max], "; ") + fmt.Sprintf("; and %d more", len(changes)-max)
 }
 
 // enrolments returns which (learner, subject) pairs may take a mark at the school.

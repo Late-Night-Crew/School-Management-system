@@ -47,11 +47,12 @@ export default function useServerPage(fetchPage, filters, search = "", pageSize 
   };
 }
 
-// Every row matching the filters, fetched in pages of 5,000 (for downloads).
+// Every row matching the filters, fetched in pages of 5,000, for a download (which the
+// server records in the activity log).
 export async function fetchAllPages(fetchPage, filters) {
   const rows = [];
   for (let page = 1; ; page++) {
-    const result = await fetchPage({ ...filters, page, page_size: 5000 });
+    const result = await fetchPage({ ...filters, page, page_size: 5000, export: true });
     rows.push(...result.students);
     if (rows.length >= result.total || !result.students.length) return rows;
   }

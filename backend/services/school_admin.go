@@ -187,6 +187,10 @@ func (s *schoolAdminService) CreateStudentForSchool(ctx context.Context, schoolI
 	if err := s.createStudentSubjectAssignments(ctx, dbStudent.ID, req.SubjectIDs); err != nil {
 		return nil, fmt.Errorf("failed to assign student subjects: %w", err)
 	}
+	if err := recordAudit(ctx, s.queries, "student", int64(dbStudent.ID), "Created",
+		fmt.Sprintf("%s %s (%s) registered in Form %d", dbStudent.FirstName, dbStudent.LastName, dbStudent.StudentNumber, req.FormLevel)); err != nil {
+		return nil, err
+	}
 
 	return &schema.Student{
 		ID:            int64(dbStudent.ID),
@@ -235,11 +239,10 @@ func (s *schoolAdminService) UpdateStudentForSchool(ctx context.Context, schoolI
 	if err != nil {
 		return nil, fmt.Errorf("failed to look up student %d: %w", req.ID, err)
 	}
-	if req.AcademicYearID > 0 {
-		if err := checkYearStarted(ctx, s.queries, req.AcademicYearID); err != nil {
-			return nil, err
-		}
-	}
+	// The form and year change only at the year end (or by MCDE), so a coordinator's
+	// edit keeps them: moving a learner up a form here would skip the promotion rules
+	req.FormLevel = int(current.FormLevel.Int32)
+	req.AcademicYearID = int64(current.AcademicYearID.Int32)
 	if err := prepareLearnerIdentity(ctx, s.queries, &req.NationalID, &req.JCENumber, req.ID); err != nil {
 		return nil, err
 	}
@@ -283,6 +286,9 @@ func (s *schoolAdminService) UpdateStudentForSchool(ctx context.Context, schoolI
 	if err := s.createStudentSubjectAssignments(ctx, int32(req.ID), req.SubjectIDs); err != nil {
 		return nil, fmt.Errorf("failed to assign student subjects: %w", err)
 	}
+	if err := recordAudit(ctx, s.queries, "student", req.ID, "Updated", "Details edited"); err != nil {
+		return nil, err
+	}
 
 	return &schema.Student{
 		ID:            int64(dbStudent.ID),
@@ -324,7 +330,7 @@ func (s *schoolAdminService) UpdateStudentForSchool(ctx context.Context, schoolI
 }
 
 func (s *schoolAdminService) DeleteStudentByIDAndSchoolID(ctx context.Context, schoolID int64, studentID int64) error {
-	return s.queries.DeleteStudentByIDAndSchoolID(ctx, dbsqlc.DeleteStudentByIDAndSchoolIDParams{ID: int32(studentID), SchoolID: int32(schoolID)})
+	return deleteLearner(ctx, s.queries, schoolID, studentID)
 }
 
 func (s *schoolAdminService) ListExamResultsBySchoolID(ctx context.Context, schoolID int64) ([]*schema.ExamResult, error) {
@@ -363,6 +369,11 @@ func (s *schoolAdminService) CreateExamResult(ctx context.Context, schoolID int6
 	if err != nil {
 		return nil, fmt.Errorf("failed to create exam result for school %d: %w", schoolID, err)
 	}
+	year, _ := s.queries.GetAcademicYearByID(ctx, int32(req.AcademicYearID))
+	if err := recordAudit(ctx, s.queries, "school", schoolID, "ExamResultRecorded",
+		fmt.Sprintf("Recorded %d pass rates: JCE %s, MSCE %s", year.Year, orNone(req.JcePassRate), orNone(req.MscePassRate))); err != nil {
+		return nil, err
+	}
 	return mapDBExamResult(dbExam), nil
 }
 
@@ -389,6 +400,10 @@ func (s *schoolAdminService) UpdateExamResult(ctx context.Context, schoolID int6
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to update exam result %d for school %d: %w", examResultID, schoolID, err)
+	}
+	if err := recordAudit(ctx, s.queries, "school", schoolID, "ExamResultRecorded",
+		fmt.Sprintf("Changed recorded pass rates (result %d): JCE %s, MSCE %s", examResultID, orNone(req.JcePassRate), orNone(req.MscePassRate))); err != nil {
+		return nil, err
 	}
 	return mapDBExamResult(dbExam), nil
 }

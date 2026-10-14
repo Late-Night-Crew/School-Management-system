@@ -14,6 +14,8 @@
 # Restore into an empty database (see docs/operations.md):
 #   createdb nsms_restored && pg_restore --no-owner -d nsms_restored <dump file>
 set -euo pipefail
+# The dumps hold learners' personal details: readable by this user only
+umask 077
 
 backup_dir="${NSMS_BACKUP_DIR:-/var/backups/nsms}"
 keep_days="${NSMS_BACKUP_KEEP_DAYS:-30}"

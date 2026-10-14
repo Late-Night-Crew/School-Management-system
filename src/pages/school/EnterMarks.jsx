@@ -62,10 +62,13 @@ export default function EnterMarks() {
   const academicYearId = yearChoice || (defaultYear ? String(defaultYear.id) : "");
   const [termChoice, setTerm] = useState(null);
   const term = termChoice ?? stage.data?.term ?? 1;
-  // A year the school has finished is locked for coordinators; only MCDE corrects it
+  // A term the school has closed (a finished year, or an earlier term this year) has a
+  // saved report, so it is locked for coordinators; only MCDE corrects it
   const selectedYear = sortedYears.find((y) => String(y.id) === academicYearId);
   const pastYear = Boolean(stage.data && selectedYear && selectedYear.year < stage.data.year);
-  const locked = pastYear && !isSuper;
+  const closedTerm = Boolean(stage.data && selectedYear && selectedYear.id === stage.data.academic_year_id && term < stage.data.term);
+  const closed = pastYear || closedTerm;
+  const locked = closed && !isSuper;
   const [formLevel, setFormLevel] = useState("");
   const [subjectFilter, setSubjectFilter] = useState("");
 
@@ -219,14 +222,14 @@ export default function EnterMarks() {
           <>
             {locked && (
               <Notice tone="blue">
-                The school has finished {selectedYear.year}, so its marks are view-only. If a mark is wrong, ask MCDE (the
-                Learner Support Manager) to correct it.
+                {pastYear ? `The school has finished ${selectedYear.year}` : `Term ${term} of ${selectedYear.year} has closed`}, so
+                its marks are view-only. If a mark is wrong, ask MCDE (the Learner Support Manager) to correct it.
               </Notice>
             )}
-            {isSuper && pastYear && (
+            {isSuper && closed && (
               <Notice tone="amber">
-                You are correcting {selectedYear.year}, a year this school has finished. Saving is recorded in the audit log, and
-                the term&apos;s saved report will show that marks changed.
+                You are correcting {pastYear ? `${selectedYear.year}, a year this school has finished` : `Term ${term} of ${selectedYear.year}, which this school has closed`}.
+                Each change is recorded in the activity log, and the term&apos;s saved report will show that marks changed.
               </Notice>
             )}
             <Card accent="blue" icon="bi-funnel" title="Class and Term" subtitle="Choose what to record marks for">

@@ -223,8 +223,9 @@ export default function StudentEnroll() {
                 title="Delete Student"
                 confirmLabel="Delete student"
             >
-                Deleting <strong>{modal.student?.first_name} {modal.student?.last_name}</strong> permanently erases their marks,
-                subject choices and transfer history. If the student is moving to another school, start a transfer instead.
+                Delete <strong>{modal.student?.first_name} {modal.student?.last_name}</strong> only if they were registered by
+                mistake. A learner with marks, results or transfers cannot be deleted: mark them as having left (on the
+                Students page), or start a transfer if they are moving school. The delete is recorded in the activity log.
             </TypeToConfirm>
 
             {/* ══ ENROLLMENT FORM ══ */}
@@ -261,8 +262,8 @@ export default function StudentEnroll() {
                                     </div>
                                 </Field>
                                 <Field label="Date of Birth" required><Input type="date" value={form.dateOfBirth} onChange={e=>set('dateOfBirth',e.target.value)} required/></Field>
-                                <Field label="Class" required>
-                                    <Select value={form.class} onChange={e=>set('class',e.target.value)} required>
+                                <Field label="Class" required hint={isEditing ? "Changes at the year end. If it is wrong, ask MCDE to correct it." : undefined}>
+                                    <Select value={form.class} onChange={e=>set('class',e.target.value)} required disabled={isEditing}>
                                         <option value="">Select class…</option>
                                         {CLASSES.map(c=><option key={c.value} value={c.value}>{c.label}</option>)}
                                     </Select>

@@ -61,6 +61,7 @@ func (a authServiceImpl) SignIn(request *schema.LoginRequest) (*schema.LoginResp
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			a.logger.Debug("auth-service", "failed to find user from login request", "email", email)
+			common.SpendPasswordCheck(request.Password)
 			return nil, ErrInvalidCredentials
 		}
 		a.logger.Error("auth-service", "failed to process the login request", "error", err)
@@ -69,6 +70,10 @@ func (a authServiceImpl) SignIn(request *schema.LoginRequest) (*schema.LoginResp
 
 	if !common.CheckPasswordHash(request.Password, user.Password) {
 		a.logger.Debug("auth-service", "invalid password provided", "email", email)
+		// Recorded against the account (by no one: whoever tried is unknown)
+		if err := recordAudit(context.Background(), a.queries, "user", int64(user.ID), "SignInFailed", "Wrong password"); err != nil {
+			a.logger.Error("auth-service", "failed to record a failed sign-in", "error", err)
+		}
 		return nil, ErrInvalidCredentials
 	}
 
@@ -101,6 +106,10 @@ func (a authServiceImpl) SignIn(request *schema.LoginRequest) (*schema.LoginResp
 	}
 	if err := a.queries.RecordLogin(context.Background(), user.ID); err != nil {
 		a.logger.Error("auth-service", "failed to record login", "user_id", user.ID, "error", err)
+	}
+	signedIn := context.WithValue(context.Background(), ActorKey, int64(user.ID))
+	if err := recordAudit(signedIn, a.queries, "user", int64(user.ID), "SignedIn", ""); err != nil {
+		a.logger.Error("auth-service", "failed to record a sign-in", "error", err)
 	}
 
 	token := generateJWTToken(res, time.Now().Add(time.Hour*6).Unix())

@@ -66,6 +66,9 @@ func (s *regionService) CreateRegion(ctx context.Context, req *schema.CreateRegi
 	if err != nil {
 		return nil, fmt.Errorf("failed to create region: %w", err)
 	}
+	if err := recordAudit(ctx, s.queries, "region", int64(dbRegion.ID), "Created", dbRegion.Name+" division"); err != nil {
+		return nil, err
+	}
 	return &schema.Region{
 		ID:   int64(dbRegion.ID),
 		Name: dbRegion.Name,
@@ -78,6 +81,9 @@ func (s *regionService) UpdateRegion(ctx context.Context, req *schema.UpdateRegi
 		Name: req.Name,
 	})
 	if err != nil {
+		return nil, err
+	}
+	if err := recordAudit(ctx, s.queries, "region", int64(region.ID), "Updated", "Renamed "+region.Name+" division"); err != nil {
 		return nil, err
 	}
 	return &schema.Region{
@@ -107,6 +113,7 @@ func (s *regionService) DeleteRegion(ctx context.Context, regionID int64) error 
 	if err != nil {
 		return err
 	}
+	name, _ := s.queries.GetRegionName(ctx, int32(regionID))
 	if usage.Districts > 0 {
 		return newUserError(ErrInUse, "This division has %s. Move them to another division before deleting it.", countOf(usage.Districts, "district"))
 	}
@@ -120,7 +127,7 @@ func (s *regionService) DeleteRegion(ctx context.Context, regionID int64) error 
 		}
 		return fmt.Errorf("failed to delete region %d: %w", regionID, err)
 	}
-	return nil
+	return recordAudit(ctx, s.queries, "region", regionID, "Deleted", name+" division")
 }
 
 func (s *regionService) MoveDistricts(ctx context.Context, fromRegionID, toRegionID, actorID int64) (*schema.MoveResult, error) {

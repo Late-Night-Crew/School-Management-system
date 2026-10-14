@@ -26,7 +26,7 @@ export default function ForgotPasswordPage() {
   const schools = places.data?.schools || [];
 
   const [role, setRole] = useState("SCHOOL_MANAGER");
-  const [form, setForm] = useState({ email: "", region_id: "", school_id: "", contact_phone: "", note: "" });
+  const [form, setForm] = useState({ email: "", region_id: "", school_id: "", note: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [sent, setSent] = useState("");
@@ -47,7 +47,6 @@ export default function ForgotPasswordPage() {
         email: form.email.trim(),
         region_id: role === "REGIONAL_ADMIN" ? Number(form.region_id) : 0,
         school_id: role === "SCHOOL_MANAGER" ? Number(form.school_id) : 0,
-        contact_phone: form.contact_phone.trim(),
         note: form.note.trim(),
       });
       setSent(message);
@@ -119,13 +118,12 @@ export default function ForgotPasswordPage() {
                     </Select>
                   </Field>
                 )}
-                <Field label="Phone number to reach you" hint="Optional, if different from the one on your account">
-                  <Input type="tel" value={form.contact_phone} onChange={set("contact_phone")} placeholder="e.g. 0991 234 567" />
-                </Field>
                 <Field label="Message">
                   <Textarea rows={2} maxLength={500} value={form.note} onChange={set("note")} placeholder="Optional" />
                 </Field>
-                <div className="ui-hint">{HANDLED_BY[role]}</div>
+                <div className="ui-hint">
+                  {HANDLED_BY[role]} They will call you on the phone number on your account; if it has changed, ask them in person.
+                </div>
                 {(error || places.error) && <Notice tone="red">{error || places.error}</Notice>}
                 <Button type="submit" icon="bi-send" className={styles.submit} disabled={!ready || busy}>
                   {busy ? "Sending…" : "Send request"}

@@ -112,6 +112,11 @@ WITH approved AS (
     WHERE
         transfers.id = $1
         AND transfers.status = 'Pending'
+        -- Still true at approval: the learner is current at the sending school, and the
+        -- receiving school is open (both can change while the request waits)
+        AND EXISTS (SELECT 1 FROM students s WHERE s.id = transfers.student_id
+            AND s.school_id = transfers.from_school AND s.status = 'Active')
+        AND EXISTS (SELECT 1 FROM schools sc WHERE sc.id = transfers.to_school AND sc.closed_at IS NULL)
     RETURNING transfers.id, transfers.student_id, transfers.to_school
 ),
 moved AS (
@@ -155,6 +160,11 @@ WITH approved AS (
         transfers.id = $1
         AND transfers.to_school = $2
         AND transfers.status = 'Pending'
+        -- Still true at approval: the learner is current at the sending school, and the
+        -- receiving school is open (both can change while the request waits)
+        AND EXISTS (SELECT 1 FROM students s WHERE s.id = transfers.student_id
+            AND s.school_id = transfers.from_school AND s.status = 'Active')
+        AND EXISTS (SELECT 1 FROM schools sc WHERE sc.id = transfers.to_school AND sc.closed_at IS NULL)
     RETURNING transfers.id, transfers.student_id, transfers.to_school
 ),
 moved AS (
@@ -356,6 +366,7 @@ WHERE ($1::int IS NULL OR a.actor_user_id = $1::int)
     AND ($6::text IS NULL OR a.note ILIKE '%' || $6::text || '%'
         OR a.action ILIKE '%' || $6::text || '%'
         OR a.actor_name ILIKE '%' || $6::text || '%')
+    AND NOT ($7::bool AND a.action IN ('SignedIn', 'SignInFailed'))
 `
 
 type CountAuditLogsParams struct {
@@ -365,6 +376,7 @@ type CountAuditLogsParams struct {
 	FromDate    sql.NullTime
 	ToDate      sql.NullTime
 	Search      sql.NullString
+	HideSignIns bool
 }
 
 // How many entries match ListAuditLogs' filters.
@@ -376,6 +388,7 @@ func (q *Queries) CountAuditLogs(ctx context.Context, arg CountAuditLogsParams) 
 		arg.FromDate,
 		arg.ToDate,
 		arg.Search,
+		arg.HideSignIns,
 	)
 	var column_1 int32
 	err := row.Scan(&column_1)
@@ -1032,9 +1045,8 @@ func (q *Queries) CreateNotice(ctx context.Context, arg CreateNoticeParams) (Cre
 
 const createPasswordRequest = `-- name: CreatePasswordRequest :exec
 WITH created AS (
-    INSERT INTO password_reset_requests (user_id, handler_region_id, contact_phone, note, requester_ip)
-    VALUES ($1::int, $2::int, $3::text,
-        $4::text, $5::text)
+    INSERT INTO password_reset_requests (user_id, handler_region_id, note, requester_ip)
+    VALUES ($1::int, $2::int, $3::text, $4::text)
     ON CONFLICT (user_id) WHERE status = 'Pending' DO NOTHING
     RETURNING id, user_id
 )
@@ -1045,7 +1057,6 @@ SELECT 'user', created.user_id, 'PasswordResetRequested', 'Forgot-password reque
 type CreatePasswordRequestParams struct {
 	UserID          int32
 	HandlerRegionID sql.NullInt32
-	ContactPhone    sql.NullString
 	Note            sql.NullString
 	RequesterIp     sql.NullString
 }
@@ -1054,7 +1065,6 @@ func (q *Queries) CreatePasswordRequest(ctx context.Context, arg CreatePasswordR
 	_, err := q.db.ExecContext(ctx, createPasswordRequest,
 		arg.UserID,
 		arg.HandlerRegionID,
-		arg.ContactPhone,
 		arg.Note,
 		arg.RequesterIp,
 	)
@@ -1694,6 +1704,8 @@ WHERE m.student_id = cleared.student_id
     AND m.subject_id = cleared.subject_id
     AND m.academic_year_id = $3::int
     AND m.term = $4::int
+    -- A school clears only marks it recorded (a learner may have moved mid-term)
+    AND m.school_id = $5::int
 `
 
 type DeleteMarksParams struct {
@@ -1701,6 +1713,7 @@ type DeleteMarksParams struct {
 	SubjectIds     []int32
 	AcademicYearID int32
 	Term           int32
+	SchoolID       int32
 }
 
 // Removes the marks for the given (student, subject) pairs in one academic year and term.
@@ -1710,6 +1723,7 @@ func (q *Queries) DeleteMarks(ctx context.Context, arg DeleteMarksParams) error 
 		pq.Array(arg.SubjectIds),
 		arg.AcademicYearID,
 		arg.Term,
+		arg.SchoolID,
 	)
 	return err
 }
@@ -1774,24 +1788,6 @@ WHERE
 
 func (q *Queries) DeleteStudent(ctx context.Context, id int32) error {
 	_, err := q.db.ExecContext(ctx, deleteStudent, id)
-	return err
-}
-
-const deleteStudentByIDAndSchoolID = `-- name: DeleteStudentByIDAndSchoolID :exec
-DELETE FROM
-    students
-WHERE
-    id = $1
-    AND school_id = $2
-`
-
-type DeleteStudentByIDAndSchoolIDParams struct {
-	ID       int32
-	SchoolID int32
-}
-
-func (q *Queries) DeleteStudentByIDAndSchoolID(ctx context.Context, arg DeleteStudentByIDAndSchoolIDParams) error {
-	_, err := q.db.ExecContext(ctx, deleteStudentByIDAndSchoolID, arg.ID, arg.SchoolID)
 	return err
 }
 
@@ -2225,6 +2221,41 @@ func (q *Queries) GetAcademicYearByIDForStage(ctx context.Context, academicYearI
 	return i, err
 }
 
+const getAcademicYearUse = `-- name: GetAcademicYearUse :one
+SELECT ay.year,
+    (SELECT COUNT(*) FROM student_marks m WHERE m.academic_year_id = ay.id)::int AS marks,
+    (SELECT COUNT(*) FROM term_reports tr WHERE tr.academic_year_id = ay.id)::int AS reports,
+    (SELECT COUNT(*) FROM exam_results e WHERE e.academic_year_id = ay.id)::int AS exam_results,
+    (SELECT COUNT(*) FROM promotions p WHERE p.academic_year_id = ay.id)::int AS results,
+    (SELECT COUNT(*) FROM school_stages st WHERE st.academic_year_id = ay.id)::int AS schools
+FROM academic_years ay
+WHERE ay.id = $1::int
+`
+
+type GetAcademicYearUseRow struct {
+	Year        int32
+	Marks       int32
+	Reports     int32
+	ExamResults int32
+	Results     int32
+	Schools     int32
+}
+
+// What refers to an academic year, so it is only deleted when nothing does.
+func (q *Queries) GetAcademicYearUse(ctx context.Context, academicYearID int32) (GetAcademicYearUseRow, error) {
+	row := q.db.QueryRowContext(ctx, getAcademicYearUse, academicYearID)
+	var i GetAcademicYearUseRow
+	err := row.Scan(
+		&i.Year,
+		&i.Marks,
+		&i.Reports,
+		&i.ExamResults,
+		&i.Results,
+		&i.Schools,
+	)
+	return i, err
+}
+
 const getAccount = `-- name: GetAccount :one
 SELECT
     u.id,
@@ -2482,6 +2513,48 @@ func (q *Queries) GetIncomingTransferCountBySchoolID(ctx context.Context, toScho
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const getLearnerForDelete = `-- name: GetLearnerForDelete :one
+SELECT s.first_name, s.last_name, s.student_number, sc.name AS school_name,
+    (SELECT COUNT(*) FROM student_marks m WHERE m.student_id = s.id)::int AS marks,
+    (SELECT COUNT(*) FROM promotions p WHERE p.student_id = s.id)::int AS results,
+    (SELECT COUNT(*) FROM transfers t WHERE t.student_id = s.id)::int AS transfers
+FROM students s
+    JOIN schools sc ON sc.id = s.school_id
+WHERE s.id = $1::int
+    AND ($2::int IS NULL OR s.school_id = $2::int)
+`
+
+type GetLearnerForDeleteParams struct {
+	StudentID int32
+	SchoolID  sql.NullInt32
+}
+
+type GetLearnerForDeleteRow struct {
+	FirstName     string
+	LastName      string
+	StudentNumber string
+	SchoolName    string
+	Marks         int32
+	Results       int32
+	Transfers     int32
+}
+
+// A learner with what would be lost by deleting them (school_id NULL: any school).
+func (q *Queries) GetLearnerForDelete(ctx context.Context, arg GetLearnerForDeleteParams) (GetLearnerForDeleteRow, error) {
+	row := q.db.QueryRowContext(ctx, getLearnerForDelete, arg.StudentID, arg.SchoolID)
+	var i GetLearnerForDeleteRow
+	err := row.Scan(
+		&i.FirstName,
+		&i.LastName,
+		&i.StudentNumber,
+		&i.SchoolName,
+		&i.Marks,
+		&i.Results,
+		&i.Transfers,
+	)
+	return i, err
 }
 
 const getLearnerState = `-- name: GetLearnerState :one
@@ -2953,6 +3026,17 @@ func (q *Queries) GetSchoolDashboardStats(ctx context.Context, schoolID int32) (
 		&i.ExamResultCount,
 	)
 	return i, err
+}
+
+const getSchoolNameForAudit = `-- name: GetSchoolNameForAudit :one
+SELECT name FROM schools WHERE id = $1::int
+`
+
+func (q *Queries) GetSchoolNameForAudit(ctx context.Context, schoolID int32) (string, error) {
+	row := q.db.QueryRowContext(ctx, getSchoolNameForAudit, schoolID)
+	var name string
+	err := row.Scan(&name)
+	return name, err
 }
 
 const getSchoolRegionForReminder = `-- name: GetSchoolRegionForReminder :one
@@ -3486,6 +3570,28 @@ func (q *Queries) GetSubjectByID(ctx context.Context, id int32) (Subject, error)
 	return i, err
 }
 
+const getSubjectUse = `-- name: GetSubjectUse :one
+SELECT sb.name,
+    (SELECT COUNT(*) FROM student_marks m WHERE m.subject_id = sb.id)::int AS marks,
+    (SELECT COUNT(*) FROM student_subjects ss WHERE ss.subject_id = sb.id)::int AS learners
+FROM subjects sb
+WHERE sb.id = $1::int
+`
+
+type GetSubjectUseRow struct {
+	Name     string
+	Marks    int32
+	Learners int32
+}
+
+// What refers to a subject, so it is only deleted when nothing does.
+func (q *Queries) GetSubjectUse(ctx context.Context, subjectID int32) (GetSubjectUseRow, error) {
+	row := q.db.QueryRowContext(ctx, getSubjectUse, subjectID)
+	var i GetSubjectUseRow
+	err := row.Scan(&i.Name, &i.Marks, &i.Learners)
+	return i, err
+}
+
 const getTermDates = `-- name: GetTermDates :one
 SELECT start_date, end_date FROM academic_year_terms
 WHERE academic_year_id = $1::int AND term = $2::int
@@ -3561,6 +3667,29 @@ func (q *Queries) GetTermReport(ctx context.Context, arg GetTermReportParams) (G
 		&i.GeneratedByName,
 		&i.GeneratedAt,
 	)
+	return i, err
+}
+
+const getTransferApprovalState = `-- name: GetTransferApprovalState :one
+SELECT (s.school_id = t.from_school AND s.status = 'Active')::bool AS learner_ok,
+    (sc.closed_at IS NULL)::bool AS school_open
+FROM transfers t
+    JOIN students s ON s.id = t.student_id
+    JOIN schools sc ON sc.id = t.to_school
+WHERE t.id = $1::int
+`
+
+type GetTransferApprovalStateRow struct {
+	LearnerOk  bool
+	SchoolOpen bool
+}
+
+// Why a pending transfer cannot be approved now: the learner must still be a current
+// learner at the sending school, and the receiving school must be open.
+func (q *Queries) GetTransferApprovalState(ctx context.Context, transferID int32) (GetTransferApprovalStateRow, error) {
+	row := q.db.QueryRowContext(ctx, getTransferApprovalState, transferID)
+	var i GetTransferApprovalStateRow
+	err := row.Scan(&i.LearnerOk, &i.SchoolOpen)
 	return i, err
 }
 
@@ -4184,6 +4313,7 @@ SELECT a.id, a.entity_type, COALESCE(a.entity_id, 0)::int AS entity_id, a.action
         WHEN 'transfer' THEN (SELECT st.first_name || ' ' || st.last_name || ' (transfer)' FROM transfers t JOIN students st ON st.id = t.student_id WHERE t.id = a.entity_id)
         WHEN 'school_request' THEN (SELECT school_name || ' (request)' FROM school_requests WHERE id = a.entity_id)
         WHEN 'notice' THEN (SELECT title FROM notices WHERE id = a.entity_id)
+        WHEN 'subject' THEN (SELECT name FROM subjects WHERE id = a.entity_id)
     END, '')::text AS entity_label
 FROM audit_logs a
 WHERE ($1::int IS NULL OR a.actor_user_id = $1::int)
@@ -4194,8 +4324,9 @@ WHERE ($1::int IS NULL OR a.actor_user_id = $1::int)
     AND ($6::text IS NULL OR a.note ILIKE '%' || $6::text || '%'
         OR a.action ILIKE '%' || $6::text || '%'
         OR a.actor_name ILIKE '%' || $6::text || '%')
+    AND NOT ($7::bool AND a.action IN ('SignedIn', 'SignInFailed'))
 ORDER BY a.created_at DESC, a.id DESC
-LIMIT $8::int OFFSET $7::int
+LIMIT $9::int OFFSET $8::int
 `
 
 type ListAuditLogsParams struct {
@@ -4205,6 +4336,7 @@ type ListAuditLogsParams struct {
 	FromDate    sql.NullTime
 	ToDate      sql.NullTime
 	Search      sql.NullString
+	HideSignIns bool
 	PageOffset  int32
 	PageSize    int32
 }
@@ -4235,6 +4367,7 @@ func (q *Queries) ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([
 		arg.FromDate,
 		arg.ToDate,
 		arg.Search,
+		arg.HideSignIns,
 		arg.PageOffset,
 		arg.PageSize,
 	)
@@ -4992,6 +5125,72 @@ func (q *Queries) ListGradeBands(ctx context.Context) ([]ListGradeBandsRow, erro
 	return items, nil
 }
 
+const listMarkPairs = `-- name: ListMarkPairs :many
+SELECT p.student_id::int AS student_id, p.subject_id::int AS subject_id,
+    (st.first_name || ' ' || st.last_name)::text AS learner, sb.name::text AS subject,
+    m.mark, m.school_id
+FROM (
+    SELECT unnest($1::int[]) AS student_id, unnest($2::int[]) AS subject_id
+) p
+    JOIN students st ON st.id = p.student_id
+    JOIN subjects sb ON sb.id = p.subject_id
+    LEFT JOIN student_marks m ON m.student_id = p.student_id AND m.subject_id = p.subject_id
+        AND m.academic_year_id = $3::int AND m.term = $4::int
+`
+
+type ListMarkPairsParams struct {
+	StudentIds     []int32
+	SubjectIds     []int32
+	AcademicYearID int32
+	Term           int32
+}
+
+type ListMarkPairsRow struct {
+	StudentID int32
+	SubjectID int32
+	Learner   string
+	Subject   string
+	Mark      sql.NullInt32
+	SchoolID  sql.NullInt32
+}
+
+// For (learner, subject) pairs about to be saved: their names and any mark already
+// recorded in the year and term, with the school that recorded it.
+func (q *Queries) ListMarkPairs(ctx context.Context, arg ListMarkPairsParams) ([]ListMarkPairsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listMarkPairs,
+		pq.Array(arg.StudentIds),
+		pq.Array(arg.SubjectIds),
+		arg.AcademicYearID,
+		arg.Term,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMarkPairsRow
+	for rows.Next() {
+		var i ListMarkPairsRow
+		if err := rows.Scan(
+			&i.StudentID,
+			&i.SubjectID,
+			&i.Learner,
+			&i.Subject,
+			&i.Mark,
+			&i.SchoolID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMarksForSchool = `-- name: ListMarksForSchool :many
 SELECT
     m.id,
@@ -5276,7 +5475,7 @@ func (q *Queries) ListNoticeRecipients(ctx context.Context, noticeID int32) ([]L
 const listPasswordRequests = `-- name: ListPasswordRequests :many
 SELECT r.id, r.user_id, u.name, u.email, u.role, u.phone, u.whatsapp,
     COALESCE(sc.name, '')::text AS school_name, COALESCE(rg.name, '')::text AS region_name,
-    r.contact_phone, r.note, r.handler_region_id, r.created_at
+    r.note, r.handler_region_id, r.created_at
 FROM password_reset_requests r
     JOIN users u ON u.id = r.user_id
     LEFT JOIN schools sc ON sc.id = u.school_id
@@ -5296,7 +5495,6 @@ type ListPasswordRequestsRow struct {
 	Whatsapp        sql.NullString
 	SchoolName      string
 	RegionName      string
-	ContactPhone    sql.NullString
 	Note            sql.NullString
 	HandlerRegionID sql.NullInt32
 	CreatedAt       time.Time
@@ -5323,7 +5521,6 @@ func (q *Queries) ListPasswordRequests(ctx context.Context, handlerRegionID sql.
 			&i.Whatsapp,
 			&i.SchoolName,
 			&i.RegionName,
-			&i.ContactPhone,
 			&i.Note,
 			&i.HandlerRegionID,
 			&i.CreatedAt,
@@ -7114,23 +7311,6 @@ func (q *Queries) LockSchoolStage(ctx context.Context, schoolID int32) (LockScho
 	return i, err
 }
 
-const logTermDatesChange = `-- name: LogTermDatesChange :exec
-INSERT INTO audit_logs (entity_type, entity_id, action, actor_user_id, actor_name, actor_role, actor_school_id, note)
-SELECT 'academic_year', $1::int, 'TermDatesSet', u.id, u.name, u.role, u.school_id, $2::text
-FROM (SELECT 1) AS one LEFT JOIN users u ON u.id = $3::int
-`
-
-type LogTermDatesChangeParams struct {
-	AcademicYearID int32
-	Note           string
-	ActorUserID    int32
-}
-
-func (q *Queries) LogTermDatesChange(ctx context.Context, arg LogTermDatesChangeParams) error {
-	_, err := q.db.ExecContext(ctx, logTermDatesChange, arg.AcademicYearID, arg.Note, arg.ActorUserID)
-	return err
-}
-
 const markConversationRead = `-- name: MarkConversationRead :exec
 UPDATE conversation_participants
 SET last_read_at = CURRENT_TIMESTAMP
@@ -8905,6 +9085,7 @@ SET
     school_id = EXCLUDED.school_id,
     recorded_by = EXCLUDED.recorded_by,
     updated_at = CURRENT_TIMESTAMP
+WHERE student_marks.school_id = EXCLUDED.school_id
 `
 
 type UpsertMarksParams struct {
@@ -8918,6 +9099,7 @@ type UpsertMarksParams struct {
 }
 
 // Saves a batch of marks for one academic year and term; the arrays are parallel.
+// Never takes over a mark another school recorded (a learner may have moved mid-term)
 func (q *Queries) UpsertMarks(ctx context.Context, arg UpsertMarksParams) error {
 	_, err := q.db.ExecContext(ctx, upsertMarks,
 		pq.Array(arg.StudentIds),

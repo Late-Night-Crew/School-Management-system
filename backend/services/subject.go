@@ -3,7 +3,9 @@ package services
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"strings"
 
 	"nsms/database/dbsqlc"
 	"nsms/logging"
@@ -91,6 +93,9 @@ func (s *subjectService) CreateSubject(ctx context.Context, req *schema.CreateSu
 	if err != nil {
 		return nil, fmt.Errorf("failed to create subject: %w", err)
 	}
+	if err := recordAudit(ctx, s.queries, "subject", int64(dbSubject.ID), "Created", fmt.Sprintf("%s (%s)", dbSubject.Name, dbSubject.Code)); err != nil {
+		return nil, err
+	}
 
 	var descriptionPtr *string
 	if dbSubject.Description.Valid {
@@ -122,6 +127,9 @@ func (s *subjectService) UpdateSubject(ctx context.Context, req *schema.UpdateSu
 	if err != nil {
 		return nil, fmt.Errorf("failed to update subject: %w", err)
 	}
+	if err := recordAudit(ctx, s.queries, "subject", int64(dbSubject.ID), "Updated", fmt.Sprintf("%s (%s)", dbSubject.Name, dbSubject.Code)); err != nil {
+		return nil, err
+	}
 
 	var descriptionPtr *string
 	if dbSubject.Description.Valid {
@@ -138,10 +146,25 @@ func (s *subjectService) UpdateSubject(ctx context.Context, req *schema.UpdateSu
 	}, nil
 }
 
+// DeleteSubject removes a subject only while no learner takes it and no marks use it:
+// deleting one with marks would erase them in every school.
 func (s *subjectService) DeleteSubject(ctx context.Context, subjectID int32) error {
-	err := s.queries.DeleteSubject(ctx, subjectID)
+	use, err := s.queries.GetSubjectUse(ctx, subjectID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
 	if err != nil {
+		return fmt.Errorf("failed to check subject %d: %w", subjectID, err)
+	}
+	if use.Marks > 0 || use.Learners > 0 {
+		return newUserError(ErrInUse, "%s cannot be deleted: %s take it and it has %s.", use.Name,
+			countOf(int(use.Learners), "learner"), countOf(int(use.Marks), "mark"))
+	}
+	if err := s.queries.DeleteSubject(ctx, subjectID); err != nil {
+		if strings.Contains(err.Error(), "foreign key constraint") {
+			return newUserError(ErrInUse, "%s cannot be deleted while other records refer to it.", use.Name)
+		}
 		return fmt.Errorf("failed to delete subject: %w", err)
 	}
-	return nil
+	return recordAudit(ctx, s.queries, "subject", int64(subjectID), "Deleted", "Subject "+use.Name)
 }

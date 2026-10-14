@@ -207,24 +207,6 @@ func ListTermDates(service services.ReminderService, logger logging.Logger) fibe
 	}
 }
 
-func SetTermDates(service services.ReminderService, logger logging.Logger) fiber.Handler {
-	return func(ctx *fiber.Ctx) error {
-		yearID, err := common.ParseIDParam(ctx, "id")
-		if err != nil || yearID < 1 {
-			return problemdetail.BadRequest(ctx, "Invalid academic year")
-		}
-		var req schema.SetTermDatesRequest
-		if _, err := common.ParseBodyThenValidate(ctx, &req); err != nil {
-			return problemdetail.BadRequest(ctx, err.Error())
-		}
-		dates, err := service.SetTermDates(ctx.Context(), actorID(ctx), yearID, &req)
-		if err != nil {
-			return errorResponse(ctx, logger, err, "Failed to save term dates")
-		}
-		return ctx.JSON(dates)
-	}
-}
-
 // SendRemindersNow runs the daily reminder check straight away (it never sends the
 // same reminder twice).
 func SendRemindersNow(service services.ReminderService, logger logging.Logger) fiber.Handler {
@@ -276,25 +258,24 @@ func CreateAcademicYear(service services.ReminderService, logger logging.Logger)
 	}
 }
 
-// CheckYearDates stops an academic year edit that would leave a term outside the year,
-// then hands over to the existing update handler.
-func CheckYearDates(service services.ReminderService, logger logging.Logger) fiber.Handler {
+// UpdateAcademicYear saves a year's dates, and its term dates when they are sent, as one
+// change.
+func UpdateAcademicYear(service services.ReminderService, logger logging.Logger) fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
 		yearID, err := common.ParseIDParam(ctx, "id")
 		if err != nil || yearID < 1 {
 			return problemdetail.BadRequest(ctx, "Invalid academic year")
 		}
-		var body struct {
-			StartDate string `json:"start_date"`
-			EndDate   string `json:"end_date"`
+		var req schema.UpdateAcademicYearRequest
+		if _, err := common.ParseBodyThenValidate(ctx, &req); err != nil {
+			return problemdetail.BadRequest(ctx, err.Error())
 		}
-		if err := ctx.BodyParser(&body); err != nil {
-			return problemdetail.BadRequest(ctx, "Invalid academic year")
+		req.ID = yearID
+		year, err := service.UpdateYearWithTerms(ctx.Context(), actorID(ctx), &req)
+		if err != nil {
+			return errorResponse(ctx, logger, err, "Failed to update the academic year")
 		}
-		if err := service.CheckYearDates(ctx.Context(), yearID, body.StartDate, body.EndDate); err != nil {
-			return errorResponse(ctx, logger, err, "Failed to check the term dates")
-		}
-		return ctx.Next()
+		return ctx.JSON(year)
 	}
 }
 

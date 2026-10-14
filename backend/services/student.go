@@ -191,6 +191,10 @@ func (s *studentService) CreateStudent(ctx context.Context, req *schema.CreateSt
 	if err := s.createStudentSubjectAssignments(ctx, dbStudent.ID, req.SubjectIDs); err != nil {
 		return nil, fmt.Errorf("failed to assign student subjects: %w", err)
 	}
+	if err := recordAudit(ctx, s.queries, "student", int64(dbStudent.ID), "Created",
+		fmt.Sprintf("%s %s (%s) registered in Form %d", dbStudent.FirstName, dbStudent.LastName, dbStudent.StudentNumber, req.FormLevel)); err != nil {
+		return nil, err
+	}
 
 	dateOfBirth := ""
 	if dbStudent.DateOfBirth.Valid {
@@ -277,6 +281,19 @@ func (s *studentService) UpdateStudent(ctx context.Context, req *schema.UpdateSt
 	if err != nil {
 		return nil, fmt.Errorf("failed to update student: %w", err)
 	}
+	changes := learnerChanges(int(current.FormLevel.Int32), int(dbStudent.FormLevel.Int32), "", "")
+	if current.SchoolID != dbStudent.SchoolID {
+		from, _ := s.queries.GetSchoolNameForAudit(ctx, current.SchoolID)
+		to, _ := s.queries.GetSchoolNameForAudit(ctx, dbStudent.SchoolID)
+		changes = learnerChanges(int(current.FormLevel.Int32), int(dbStudent.FormLevel.Int32), from, to)
+	}
+	note := "Details edited"
+	if changes != "" {
+		note = "Details edited: " + changes
+	}
+	if err := recordAudit(ctx, s.queries, "student", req.ID, "Updated", note); err != nil {
+		return nil, err
+	}
 
 	if err := s.queries.DeleteStudentSubjectsByStudentID(ctx, int32(req.ID)); err != nil {
 		return nil, fmt.Errorf("failed to delete existing student subjects: %w", err)
@@ -320,11 +337,7 @@ func (s *studentService) UpdateStudent(ctx context.Context, req *schema.UpdateSt
 }
 
 func (s *studentService) DeleteStudent(ctx context.Context, studentID int64) error {
-	err := s.queries.DeleteStudent(ctx, int32(studentID))
-	if err != nil {
-		return fmt.Errorf("failed to delete student: %w", err)
-	}
-	return nil
+	return deleteLearner(ctx, s.queries, 0, studentID)
 }
 
 func (s *studentService) FindSimilar(ctx context.Context, check *schema.DuplicateCheckRequest) ([]schema.SimilarLearner, error) {

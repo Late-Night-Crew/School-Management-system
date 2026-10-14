@@ -12,7 +12,7 @@ const DATE_TIME = { day: "numeric", month: "short", hour: "2-digit", minute: "2-
 
 // "Forgot password" requests from the sign-in page that this office handles. Shown
 // only while some are waiting. Resetting gives a temporary password to pass on.
-// onIssued receives { account, temporary_password, contact_phone }.
+// onIssued receives { account, temporary_password }.
 export default function PasswordRequests({ onIssued }) {
   const requests = useAsync(useCallback(() => listPasswordRequests(), []));
   const [busyId, setBusyId] = useState(null);
@@ -40,7 +40,7 @@ export default function PasswordRequests({ onIssued }) {
 
   const reset = async (request) => {
     const issued = await handle(request.id, () => resolvePasswordRequest(request.id));
-    if (issued) onIssued({ ...issued, contact_phone: request.contact_phone });
+    if (issued) onIssued(issued);
   };
   const dismiss = async () => {
     const request = dismissing;
@@ -56,6 +56,12 @@ export default function PasswordRequests({ onIssued }) {
       subtitle={`${pending.length} waiting · people who forgot their password asked you for a new one`}
       flush
     >
+      <div style={{ padding: "0 20px 12px" }}>
+        <Notice tone="amber">
+          Anyone who knows an email address can send a request. Call the number on the account first and check it is
+          really them, then reset and read the password out on that call. Resetting replaces their current password.
+        </Notice>
+      </div>
       {error && (
         <div style={{ padding: "0 20px" }}>
           <Notice tone="red">{error}</Notice>
@@ -83,13 +89,12 @@ export default function PasswordRequests({ onIssued }) {
                 <div className="ui-hint">{r.school_name || r.region_name}</div>
               </td>
               <td>
-                {r.contact_phone && (
-                  <div>
-                    <PhoneLinks phone={r.contact_phone} label="Asked to be called on" />
-                  </div>
+                {r.phone ? (
+                  <PhoneLinks phone={r.phone} whatsapp={r.whatsapp} label="Call only this number" />
+                ) : (
+                  <div className="ui-hint">No phone on the account: confirm who they are in person.</div>
                 )}
-                <PhoneLinks phone={r.phone} whatsapp={r.whatsapp} />
-                {r.note && <div className="ui-hint">“{r.note}”</div>}
+                {r.note && <div className="ui-hint">Their message (not checked): “{r.note}”</div>}
               </td>
               <td>{formatDate(r.created_at, DATE_TIME)}</td>
               <td className="end">

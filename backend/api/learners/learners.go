@@ -31,6 +31,8 @@ func Search(service services.LearnerSearchService, logger logging.Logger, region
 			}
 			*target = int64(id)
 		}
+		// A division sees who and where its learners are, not their personal details
+		filter.Overview = regionParam != ""
 		page, err := service.Search(ctx.Context(), &filter)
 		if err != nil {
 			logger.Error(loggedmodule.AdminRequests, "failed to search learners", "error", err)

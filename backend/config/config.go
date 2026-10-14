@@ -79,8 +79,18 @@ type LocalStorageConfig struct {
 func (c *Config) GetDatabaseURL() string {
 	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s", c.Database.Username, c.Database.Password, c.Database.Host, c.Database.Port, c.Database.Database, c.Database.Sslmode)
 }
+// ListenAddress is where the API listens: server.host and server.port, by default
+// 127.0.0.1:8080, so only the reverse proxy on the same machine can reach it. Set
+// host to 0.0.0.0 to accept connections from other machines.
 func (c *Config) ListenAddress() string {
-	return net.JoinHostPort(c.Server.Host, fmt.Sprint(c.Server.Port))
+	host, port := c.Server.Host, c.Server.Port
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if port == 0 {
+		port = 8080
+	}
+	return net.JoinHostPort(host, fmt.Sprint(port))
 }
 
 func (c *Config) OpenDB() *sqlx.DB {

@@ -75,8 +75,8 @@ type ReminderService interface {
 	// CheckYearDates refuses new year dates that would leave a term outside the year.
 	CheckYearDates(ctx context.Context, yearID int64, startDate, endDate string) error
 	ListTermDates(ctx context.Context) ([]schema.TermDates, error)
-	// SetTermDates replaces an academic year's term dates.
-	SetTermDates(ctx context.Context, actorID, yearID int64, req *schema.SetTermDatesRequest) ([]schema.TermDates, error)
+	// UpdateYearWithTerms changes a year's dates and, if given, its term dates together.
+	UpdateYearWithTerms(ctx context.Context, actorID int64, req *schema.UpdateAcademicYearRequest) (*schema.AcademicYear, error)
 	// SendDue sends the reminders due on the given day; safe to run as often as wanted.
 	SendDue(ctx context.Context, today time.Time) (*schema.ReminderRun, error)
 }
@@ -171,6 +171,10 @@ func (s *reminderService) CreateYearWithTerms(ctx context.Context, req *schema.C
 			return nil, fmt.Errorf("failed to save term %d dates: %w", t.Term, err)
 		}
 	}
+	if err := recordAudit(ctx, queries, "academic_year", int64(year.ID), "Created",
+		fmt.Sprintf("Academic year %d: %s to %s, with term dates", year.Year, req.StartDate, req.EndDate)); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("failed to create academic year: %w", err)
 	}
@@ -192,7 +196,7 @@ func (s *reminderService) CheckYearDates(ctx context.Context, yearID int64, star
 	}
 	for _, t := range terms {
 		if t.StartDate.Before(start) || t.EndDate.After(end) {
-			return newUserError(ErrInvalidMove, "Term %d (%s to %s) would fall outside the year. Change the term dates first.",
+			return newUserError(ErrInvalidMove, "Term %d (%s to %s) would fall outside the year. Change the term dates as well.",
 				t.Term, t.StartDate.Format("2 Jan"), t.EndDate.Format("2 Jan 2006"))
 		}
 	}
@@ -238,44 +242,6 @@ func checkTermDates(yearStart, yearEnd time.Time, terms []schema.TermDatesInput)
 		previousEnd = end
 	}
 	return nil
-}
-
-func (s *reminderService) SetTermDates(ctx context.Context, actorID, yearID int64, req *schema.SetTermDatesRequest) ([]schema.TermDates, error) {
-	year, err := s.queries.GetAcademicYearByID(ctx, int32(yearID))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to get academic year %d: %w", yearID, err)
-	}
-	if err := checkTermDates(year.StartDate, year.EndDate, req.Terms); err != nil {
-		return nil, err
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to start transaction: %w", err)
-	}
-	defer tx.Rollback()
-	queries := s.queries.WithTx(tx)
-	if err := queries.ClearTermDates(ctx, int32(yearID)); err != nil {
-		return nil, fmt.Errorf("failed to clear term dates: %w", err)
-	}
-	notes := []string{}
-	for _, t := range req.Terms {
-		start, _ := time.Parse(time.DateOnly, t.StartDate)
-		end, _ := time.Parse(time.DateOnly, t.EndDate)
-		if err := queries.AddTermDates(ctx, dbsqlc.AddTermDatesParams{AcademicYearID: int32(yearID), Term: int32(t.Term), StartDate: start, EndDate: end}); err != nil {
-			return nil, fmt.Errorf("failed to save term %d dates: %w", t.Term, err)
-		}
-		notes = append(notes, fmt.Sprintf("Term %d %s to %s", t.Term, t.StartDate, t.EndDate))
-	}
-	if err := queries.LogTermDatesChange(ctx, dbsqlc.LogTermDatesChangeParams{AcademicYearID: int32(yearID), ActorUserID: int32(actorID), Note: strings.Join(notes, "; ")}); err != nil {
-		return nil, fmt.Errorf("failed to record term dates: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("failed to save term dates: %w", err)
-	}
-	return s.ListTermDates(ctx)
 }
 
 // reminderText is a school's reminder notice: title, body and priority.
@@ -450,4 +416,80 @@ func (s *reminderService) send(ctx context.Context, stage *schema.SchoolStage, k
 		return false, err
 	}
 	return true, tx.Commit()
+}
+
+// UpdateYearWithTerms saves a year's dates and its three terms' dates as one change: the
+// terms are checked against the new year dates, so moving a whole year (say, a week
+// later) is a single save. Without terms, the year's existing terms must still fit.
+func (s *reminderService) UpdateYearWithTerms(ctx context.Context, actorID int64, req *schema.UpdateAcademicYearRequest) (*schema.AcademicYear, error) {
+	current, err := s.queries.GetAcademicYearByID(ctx, int32(req.ID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get academic year %d: %w", req.ID, err)
+	}
+	start, _ := time.Parse(time.DateOnly, req.StartDate)
+	end, _ := time.Parse(time.DateOnly, req.EndDate)
+	if !end.After(start) {
+		return nil, newUserError(ErrInvalidMove, "The academic year must end after it starts.")
+	}
+	if err := checkYearsDontOverlap(ctx, s.queries, req.ID, start, end); err != nil {
+		return nil, err
+	}
+	if len(req.Terms) > 0 {
+		if err := checkTermDates(start, end, req.Terms); err != nil {
+			return nil, err
+		}
+	} else if err := s.CheckYearDates(ctx, req.ID, req.StartDate, req.EndDate); err != nil {
+		return nil, err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+	queries := s.queries.WithTx(tx)
+	// The status follows the dates, whatever was sent
+	status := academicYearStatus(start, end, TodayInMalawi())
+	year, err := queries.UpdateAcademicYear(ctx, dbsqlc.UpdateAcademicYearParams{
+		ID: int32(req.ID), Year: int32(req.Year), StartDate: start, EndDate: end,
+		Status: sql.NullString{String: status, Valid: true},
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate key") {
+			return nil, newUserError(ErrInUse, "The %d academic year already exists.", req.Year)
+		}
+		return nil, fmt.Errorf("failed to update academic year %d: %w", req.ID, err)
+	}
+	note := fmt.Sprintf("Academic year %d: %s to %s", year.Year, req.StartDate, req.EndDate)
+	if current.Year != year.Year {
+		note = fmt.Sprintf("Academic year %d renamed %d: %s to %s", current.Year, year.Year, req.StartDate, req.EndDate)
+	}
+	if len(req.Terms) > 0 {
+		if err := queries.ClearTermDates(ctx, int32(req.ID)); err != nil {
+			return nil, fmt.Errorf("failed to clear term dates: %w", err)
+		}
+		terms := make([]string, 0, len(req.Terms))
+		for _, t := range req.Terms {
+			termStart, _ := time.Parse(time.DateOnly, t.StartDate)
+			termEnd, _ := time.Parse(time.DateOnly, t.EndDate)
+			if err := queries.AddTermDates(ctx, dbsqlc.AddTermDatesParams{AcademicYearID: int32(req.ID), Term: int32(t.Term), StartDate: termStart, EndDate: termEnd}); err != nil {
+				return nil, fmt.Errorf("failed to save term %d dates: %w", t.Term, err)
+			}
+			terms = append(terms, fmt.Sprintf("Term %d %s to %s", t.Term, t.StartDate, t.EndDate))
+		}
+		sort.Strings(terms)
+		note += "; " + strings.Join(terms, "; ")
+	}
+	if err := recordAudit(ctx, queries, "academic_year", req.ID, "Updated", note); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to update academic year %d: %w", req.ID, err)
+	}
+	return &schema.AcademicYear{
+		ID: int64(year.ID), Year: int(year.Year), StartDate: req.StartDate, EndDate: req.EndDate, Status: status,
+	}, nil
 }

@@ -12,6 +12,7 @@ var ErrNotFound = errors.New("entity or resource not found")
 var (
 	ErrStudentNotInSchool     = errors.New("student is not enrolled at the sending school")
 	ErrTransferSameSchool     = errors.New("a student cannot be transferred to the school they are already in")
+	ErrTransferFutureDate     = errors.New("the transfer date cannot be in the future")
 	ErrTransferAlreadyPending = errors.New("student already has a pending transfer request")
 	ErrTransferWrongSchool    = errors.New("this school is not allowed to perform this action on the transfer")
 	ErrTransferInvalidState   = errors.New("transfer is not in a state that allows this action")

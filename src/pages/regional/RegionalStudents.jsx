@@ -42,7 +42,7 @@ export default function RegionalStudents() {
     setExporting(true);
     setExportError("");
     try {
-      const rows = learnerSheetRows(await fetchAllPages(fetchPage, list.query));
+      const rows = learnerSheetRows(await fetchAllPages(fetchPage, list.query), false);
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), "Students");
       XLSX.writeFile(workbook, "division_students.xlsx");

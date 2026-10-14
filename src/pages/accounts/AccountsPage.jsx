@@ -506,7 +506,6 @@ function TemporaryPasswordDialog({ issued, onHide }) {
         <div>
           Sign-in email: <strong>{account.email}</strong>
         </div>
-        {issued.contact_phone && <PhoneLinks phone={issued.contact_phone} label="They asked to be called on" />}
         <PhoneLinks phone={account.phone} whatsapp={account.whatsapp} label="Call them" />
         <EmailLink email={account.email} />
       </div>

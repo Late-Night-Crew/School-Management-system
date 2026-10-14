@@ -99,3 +99,37 @@ func describeStatus(status string) string {
 	}
 	return strings.ToLower(status)
 }
+
+// deleteLearner removes a learner registered by mistake (schoolID 0: any school). A
+// learner with marks, year-end results or transfers has a history that counts in
+// reports, so they are marked as having left instead. Every delete is audited.
+func deleteLearner(ctx context.Context, queries *dbsqlc.Queries, schoolID, studentID int64) error {
+	learner, err := queries.GetLearnerForDelete(ctx, dbsqlc.GetLearnerForDeleteParams{StudentID: int32(studentID), SchoolID: optionalID(schoolID)})
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("failed to look up learner %d: %w", studentID, err)
+	}
+	if learner.Marks > 0 || learner.Results > 0 || learner.Transfers > 0 {
+		return newUserError(ErrInUse, "%s %s has marks, results or transfers, so deleting them would change the school's records. Mark them as having left instead.",
+			learner.FirstName, learner.LastName)
+	}
+	if err := queries.DeleteStudent(ctx, int32(studentID)); err != nil {
+		return fmt.Errorf("failed to delete learner %d: %w", studentID, err)
+	}
+	return recordAudit(ctx, queries, "student", studentID, "Deleted",
+		fmt.Sprintf("%s %s (%s) at %s, registered by mistake", learner.FirstName, learner.LastName, learner.StudentNumber, learner.SchoolName))
+}
+
+// learnerChanges describes what an edit changed in the fields that count in reports.
+func learnerChanges(beforeForm, afterForm int, beforeSchool, afterSchool string) string {
+	var changes []string
+	if beforeForm != afterForm {
+		changes = append(changes, fmt.Sprintf("Form %d to Form %d", beforeForm, afterForm))
+	}
+	if beforeSchool != afterSchool {
+		changes = append(changes, fmt.Sprintf("school %s to %s", beforeSchool, afterSchool))
+	}
+	return strings.Join(changes, "; ")
+}

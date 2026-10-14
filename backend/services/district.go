@@ -72,6 +72,9 @@ func (s *districtService) CreateDistrict(ctx context.Context, req *schema.Create
 	if err != nil {
 		return nil, fmt.Errorf("failed to create district: %w", err)
 	}
+	if err := recordAudit(ctx, s.queries, "district", int64(dbDistrict.ID), "Created", dbDistrict.Name+" district"); err != nil {
+		return nil, err
+	}
 	return &schema.District{
 		ID:       int64(dbDistrict.ID),
 		Name:     dbDistrict.Name,
@@ -90,6 +93,9 @@ func (s *districtService) UpdateDistrict(ctx context.Context, req *schema.Update
 	// The district may have changed division; school managers' accounts copy it
 	if err := s.queries.SyncSchoolAccountScopes(ctx); err != nil {
 		return nil, fmt.Errorf("failed to update school accounts: %w", err)
+	}
+	if err := recordAudit(ctx, s.queries, "district", int64(district.ID), "Updated", district.Name+" district"); err != nil {
+		return nil, err
 	}
 	return &schema.District{
 		ID:       int64(district.ID),
@@ -118,6 +124,7 @@ func (s *districtService) DeleteDistrict(ctx context.Context, districtID int64) 
 	if err != nil {
 		return err
 	}
+	district, _ := s.queries.FindDistrictById(ctx, int32(districtID))
 	if usage.Schools > 0 {
 		return newUserError(ErrInUse, "This district has %s. Move them to another district before deleting it.", countOf(usage.Schools, "school"))
 	}
@@ -131,7 +138,7 @@ func (s *districtService) DeleteDistrict(ctx context.Context, districtID int64) 
 		}
 		return fmt.Errorf("failed to delete district %d: %w", districtID, err)
 	}
-	return nil
+	return recordAudit(ctx, s.queries, "district", districtID, "Deleted", district.Name+" district")
 }
 
 func (s *districtService) MoveSchools(ctx context.Context, fromDistrictID, toDistrictID, actorID int64) (*schema.MoveResult, error) {

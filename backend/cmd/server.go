@@ -21,7 +21,7 @@ var serverCmd = &cobra.Command{
 			log.Warn("No JWT secret set (NSMS_JWT_SECRET); using a random one for this run. Everyone is signed out when the server restarts.")
 		}
 		apiServer := api.NewAPI(nsmsConfig)
-		return apiServer.Start(":8080") // fixed port 8080
+		return apiServer.Start(nsmsConfig.ListenAddress())
 	},
 }
 

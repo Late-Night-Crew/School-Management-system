@@ -87,11 +87,11 @@ func CreateLogger(lc *config.LoggingConfiguration) *slog.Logger {
     }
 
     dir := filepath.Dir(absFile)
-    if err := os.MkdirAll(dir, 0o766); err != nil {
+    if err := os.MkdirAll(dir, 0o750); err != nil {
         panic(fmt.Errorf("failed to create log directory: %w", err))
     }
 
-    logFile, err := os.OpenFile(absFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o666)
+    logFile, err := os.OpenFile(absFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o640)
     if err != nil {
         panic(fmt.Errorf("failed to setup logfile: %w", err))
     }

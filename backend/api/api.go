@@ -67,7 +67,7 @@ func NewAPI(config *config.Config) *API {
 		SubjectService:      services.NewSubjectService(dbConn, logger),
 		ReportService:       services.NewReportService(dbConn, logger),
 		RegionAdminService:  services.NewRegionAdminService(dbConn, logger),
-		MarksService:        services.NewMarksService(dbConn, logger),
+		MarksService:        services.NewMarksService(sqlDB.DB, dbConn, logger),
 		CommsService:        services.NewCommsService(dbConn, logger),
 		AccountService:      accountService,
 		ContactService:      services.NewContactService(dbConn, logger),

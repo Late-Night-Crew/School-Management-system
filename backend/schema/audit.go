@@ -8,8 +8,10 @@ type AuditFilter struct {
 	From        string `query:"from" validate:"omitempty,datetime=2006-01-02"`
 	To          string `query:"to" validate:"omitempty,datetime=2006-01-02"`
 	Search      string `query:"q" validate:"max=100"`
-	Page        int    `query:"page" validate:"omitempty,min=1"`
-	PageSize    int    `query:"page_size" validate:"omitempty,min=1,max=5000"`
+	// ShowSignIns includes sign-ins and failed sign-ins, which are hidden by default
+	ShowSignIns bool `query:"show_sign_ins"`
+	Page        int  `query:"page" validate:"omitempty,min=1,max=100000"`
+	PageSize    int  `query:"page_size" validate:"omitempty,min=1,max=5000"`
 }
 
 // AuditEntry is one thing someone did.

@@ -15,11 +15,6 @@ type TermDatesInput struct {
 	EndDate   string `json:"end_date" validate:"required,datetime=2006-01-02"`
 }
 
-// SetTermDatesRequest replaces an academic year's term dates.
-type SetTermDatesRequest struct {
-	Terms []TermDatesInput `json:"terms" validate:"max=3,dive"`
-}
-
 // ReminderRun says what one run of the reminder check sent.
 type ReminderRun struct {
 	Date     string         `json:"date"`

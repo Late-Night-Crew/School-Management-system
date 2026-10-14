@@ -40,7 +40,7 @@ export const updateSchoolOffice = (id, office) => client.put(`/contacts/schools/
 // school users (the super admin sees every request).
 // { regions: [{ id, name }], schools: [{ id, name, region_id }] } for the public form
 export const getPublicPlaces = () => client.get("/public/places").then(data);
-// request: { role, email, region_id | school_id, contact_phone, note }. Resolves to
+// request: { role, email, region_id | school_id, note }. Resolves to
 // { message }, the same whether or not the details matched an account.
 export const requestPasswordReset = (request) => client.post("/public/password_requests", request).then(data);
 export const listPasswordRequests = () => client.get("/accounts/password_requests").then(list);

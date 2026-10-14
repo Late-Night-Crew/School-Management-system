@@ -84,6 +84,9 @@ func (s *schoolService) CreateSchool(ctx context.Context, req *schema.CreateScho
 	if err != nil {
 		return nil, fmt.Errorf("failed to create school: %w", err)
 	}
+	if err := recordAudit(ctx, s.queries, "school", int64(dbSchool.ID), "Created", fmt.Sprintf("%s (%s)", dbSchool.Name, dbSchool.SchoolNumber)); err != nil {
+		return nil, err
+	}
 	return toSchool(dbSchool.ID, dbSchool.Name, dbSchool.SchoolNumber, dbSchool.DistrictID, dbSchool.ClosedAt), nil
 }
 
@@ -100,6 +103,9 @@ func (s *schoolService) UpdateSchool(ctx context.Context, req *schema.UpdateScho
 	// The school may have changed district; its managers' accounts copy it
 	if err := s.queries.SyncSchoolAccountScopes(ctx); err != nil {
 		return nil, fmt.Errorf("failed to update school accounts: %w", err)
+	}
+	if err := recordAudit(ctx, s.queries, "school", int64(dbSchool.ID), "Updated", fmt.Sprintf("%s (%s)", dbSchool.Name, dbSchool.SchoolNumber)); err != nil {
+		return nil, err
 	}
 	return toSchool(dbSchool.ID, dbSchool.Name, dbSchool.SchoolNumber, dbSchool.DistrictID, dbSchool.ClosedAt), nil
 }
@@ -136,6 +142,7 @@ func (s *schoolService) DeleteSchool(ctx context.Context, schoolID int64) error 
 	if err != nil {
 		return err
 	}
+	name, _ := s.queries.GetSchoolNameForAudit(ctx, int32(schoolID))
 	if !usage.CanDelete {
 		var records []string
 		for _, count := range []struct {
@@ -163,7 +170,7 @@ func (s *schoolService) DeleteSchool(ctx context.Context, schoolID int64) error 
 		}
 		return fmt.Errorf("failed to delete school %d: %w", schoolID, err)
 	}
-	return nil
+	return recordAudit(ctx, s.queries, "school", schoolID, "Deleted", name)
 }
 
 func (s *schoolService) CloseSchool(ctx context.Context, schoolID, actorID int64, note string) (*schema.CloseSchoolResult, error) {

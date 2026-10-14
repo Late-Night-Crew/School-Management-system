@@ -17,6 +17,11 @@ database:
   sslmode: disable      # require when the database is on another machine
 
 server:
+  # Where the API listens. The default 127.0.0.1:8080 accepts connections only from this
+  # machine (the reverse proxy); use 0.0.0.0 only if the proxy runs on another machine,
+  # and then firewall the port so it is reachable from the proxy alone.
+  host: 127.0.0.1
+  port: 8080
   # Reverse proxies in front of the API (IPs or CIDR ranges). Leave empty when the API
   # is reached directly; set it when it sits behind the main website's proxy, so login
   # rate limits apply per user.

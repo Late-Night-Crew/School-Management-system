@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"errors"
+
 	"nsms/common"
 	"nsms/logging"
 	"nsms/pkg/problemdetail"
@@ -80,6 +82,12 @@ func DeleteSubject(subjectService services.SubjectService, logger logging.Logger
 			return problemdetail.BadRequest(ctx, "Invalid subject ID")
 		}
 		err = subjectService.DeleteSubject(ctx.Context(), int32(subjectID))
+		if errors.Is(err, services.ErrNotFound) {
+			return problemdetail.NotFound(ctx, "Not found")
+		}
+		if errors.Is(err, services.ErrInUse) {
+			return problemdetail.Conflict(ctx, err.Error())
+		}
 		if err != nil {
 			logger.Error("failed to delete subject: ", "error", err)
 			return problemdetail.ServerErrorProblem(ctx, "Failed to delete subject")

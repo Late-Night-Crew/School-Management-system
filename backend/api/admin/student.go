@@ -86,6 +86,12 @@ func DeleteStudent(studentService services.StudentService, logger logging.Logger
 			return problemdetail.BadRequest(ctx, "invalid student ID parameter")
 		}
 		err = studentService.DeleteStudent(ctx.Context(), studentID)
+		if errors.Is(err, services.ErrNotFound) {
+			return problemdetail.NotFound(ctx, "Learner not found")
+		}
+		if errors.Is(err, services.ErrInUse) {
+			return problemdetail.Conflict(ctx, err.Error())
+		}
 		if err != nil {
 			logger.Error("failed to delete student: ", "error", err)
 			return problemdetail.ServerErrorProblem(ctx, "Failed to delete student")

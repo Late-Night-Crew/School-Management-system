@@ -14,9 +14,32 @@ out of the file and set them as environment variables:
 | `NSMS_JWT_SECRET` | Signs login tokens. At least 32 characters; generate with `openssl rand -hex 32`. The server refuses to start in production without it. Changing it signs everyone out. |
 | `NSMS_DATABASE_PASSWORD` | The database password. |
 
-If the API sits behind the main website's reverse proxy, list the proxy's address under
-`server.trusted_proxies`. Without it every user appears to come from the proxy, and a
-few failed sign-ins would block sign-in for everyone.
+Set `NSMS_ENVIRONMENT=PRODUCTION` on the live server. Without it the server accepts a
+weak or missing JWT secret, allows `nsms seed` to load demo logins, and serves debugging
+pages at `/debug/pprof`.
+
+## Network and proxy
+
+The API listens on `server.host` and `server.port`, by default `127.0.0.1:8080`: only
+the same machine can reach it, which suits a reverse proxy (nginx, Apache) on that
+machine. If the proxy runs on another machine, set `host: 0.0.0.0` and firewall the port
+so only the proxy can reach it. Users should only ever reach the API through the proxy,
+over HTTPS.
+
+The proxy should:
+
+- serve the site over HTTPS only, redirecting plain HTTP, with an HSTS header;
+- add the usual security headers: `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: same-origin`, and `X-Frame-Options: DENY` (or a CSP with
+  `frame-ancestors 'none'`);
+- **replace** `X-Forwarded-For` with the client's address rather than append to it
+  (nginx: `proxy_set_header X-Forwarded-For $remote_addr;`). Otherwise anyone can claim
+  any address and get round the sign-in attempt limits.
+
+List the proxy's address under `server.trusted_proxies`. Without it every user appears
+to come from the proxy, and a few failed sign-ins would block sign-in for everyone.
+
+If the database is on another machine, set `database.sslmode: require`.
 
 The frontend is built with the API address baked in:
 
@@ -49,9 +72,21 @@ Accounts page (role "MCDE: Learner Support Manager"), or on the server with
 their own account from the Accounts page, and the last active one cannot be
 deactivated.
 
-Every change is recorded with the name of the person who made it. MCDE sees the record
-under Activity Log, filtered by person, role, type of record, dates or a search, and
-can download it as CSV (up to 5,000 entries at a time).
+Every change is recorded with the name of the person who made it: accounts, learners
+(created, edited, deleted, left, transferred, downloaded), marks corrected in closed
+terms (each old and new mark), year ends, schools, districts, divisions, years,
+subjects, settings and sign-ins. MCDE sees the record under Activity Log, filtered by
+person, role, type of record, dates or a search ("Show sign-ins" adds sign-ins), and can
+download it as CSV (up to 5,000 entries at a time).
+
+The app never edits or deletes entries. To make that a guarantee, run the server with a
+database user that cannot either:
+
+```sql
+REVOKE UPDATE, DELETE, TRUNCATE ON audit_logs FROM nsms;   -- the app's database user
+```
+
+Run migrations (`./nsms migrate`) with the database owner, not that user.
 
 ## Upgrades
 
@@ -69,7 +104,9 @@ daily from cron:
 ```
 
 Copy the backup folder to another machine or cloud storage as well; a backup on the same
-disk is lost with the disk.
+disk is lost with the disk. The dumps hold learners' personal details: the script makes
+them readable by its own user only, and copies kept elsewhere should be encrypted (for
+example `gpg --symmetric`, or encrypted storage).
 
 To restore, into a new empty database:
 
@@ -84,7 +121,7 @@ Try a restore once before going live, and now and then after, so you know it wor
 ## Term reminders
 
 A new academic year is created with the dates of its three terms (Manage → Academic
-Years); a year's term dates can be changed with the calendar icon. Schools cannot move
+Years); editing a year changes its dates and its terms' dates together. Schools cannot move
 to the next term, or finish the year, before the current term's end date.
 
 The server checks every hour and sends automatic notices to each school still in a
@@ -106,8 +143,10 @@ server, for example from cron instead of the built-in hourly check, or to try a 
 
 - **School users and division officers** use "Forgot your password?" on the sign-in
   page. The request goes to the office above them (a school's division, or MCDE for
-  division officers), which sees it at the top of the Accounts page, resets the password
-  and passes on the temporary password by phone.
+  division officers), which sees it at the top of the Accounts page. Anyone who knows an
+  email address can send a request, so the office calls the phone number on the account
+  (never one given in the request's message), checks it is really them, then resets the
+  password and reads it out on that call.
 - **MCDE staff** reset each other's passwords on the Accounts page.
 - **The last MCDE account**, or anyone who cannot be reached that way, is reset on the server:
 

@@ -9,6 +9,9 @@ import { formatRate } from "../utils/format";
 import DataState from "./DataState";
 import { Button, Card, Field, Select, StatTile, Table } from "./ui";
 
+const escapeHtml = (text) =>
+  text.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
 const average = (values) => (values.length ? values.reduce((sum, v) => sum + v, 0) / values.length : null);
 
 // Columns shared by the table and the XLS/PDF exports
@@ -137,7 +140,9 @@ export default function SchoolReport({ loadReport, regions, districts, academicY
       `<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"><style>table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #ddd;padding:6px}</style>`
     );
     newWin.document.write("</head><body>");
-    newWin.document.write(`<h3 class='text-center my-3'>${reportTitle}</h3>`);
+    // Division and district names are typed by users, so the title is escaped (the table
+    // is React's own escaped markup)
+    newWin.document.write(`<h3 class='text-center my-3'>${escapeHtml(reportTitle)}</h3>`);
     newWin.document.write(printContent);
     newWin.document.write("</body></html>");
     newWin.document.close();

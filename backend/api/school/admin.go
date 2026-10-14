@@ -168,7 +168,14 @@ func DeleteStudentForSchool(schoolAdminService services.SchoolAdminService, logg
 			return problemdetail.BadRequest(ctx, "Invalid student ID")
 		}
 
-		if err := schoolAdminService.DeleteStudentByIDAndSchoolID(ctx.Context(), pathSchoolID, studentID); err != nil {
+		err = schoolAdminService.DeleteStudentByIDAndSchoolID(ctx.Context(), pathSchoolID, studentID)
+		if errors.Is(err, services.ErrNotFound) {
+			return problemdetail.NotFound(ctx, "Learner not found")
+		}
+		if errors.Is(err, services.ErrInUse) {
+			return problemdetail.Conflict(ctx, err.Error())
+		}
+		if err != nil {
 			logger.Error("failed to delete student for school", "error", err)
 			return problemdetail.ServerErrorProblem(ctx, "Failed to delete student")
 		}

@@ -7,8 +7,9 @@ export const LEARNER_SHOWS = [
 ];
 export const FORMS = [1, 2, 3, 4];
 
-// Rows for a spreadsheet download of learners
-export const learnerSheetRows = (students) =>
+// Rows for a spreadsheet download of learners. withIds adds the National ID (MCDE; a
+// division's list does not include it)
+export const learnerSheetRows = (students, withIds = true) =>
   students.map((s) => ({
     "Student Number": s.student_number,
     "First Name": s.first_name,
@@ -20,5 +21,5 @@ export const learnerSheetRows = (students) =>
     Division: s.region_name,
     Status: s.status,
     "Left On": s.left_on || "",
-    "National ID": s.national_id,
+    ...(withIds ? { "National ID": s.national_id } : {}),
   }));

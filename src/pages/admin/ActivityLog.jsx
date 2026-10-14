@@ -5,12 +5,13 @@ import { ROLE_LABELS, ROLES } from "../../auth/session";
 import DataState from "../../components/DataState";
 import TablePagination from "../../components/TablePagination";
 import useAsync from "../../hooks/useAsync";
-import { Badge, Button, Card, Field, Input, Notice, Page, SearchInput, Select, Table } from "../../components/ui";
+import { Badge, Button, Card, Field, Input, Notice, Page, SearchInput, Select, Switch, Table } from "../../components/ui";
 import { formatDate } from "../../utils/format";
 
 const PAGE_SIZE = 50;
 const EXPORT_LIMIT = 5000;
-const NO_FILTERS = { actor_user_id: "", actor_role: "", entity_type: "", from: "", to: "", q: "" };
+// Sign-ins are frequent, so they are hidden unless asked for
+const NO_FILTERS = { actor_user_id: "", actor_role: "", entity_type: "", from: "", to: "", q: "", show_sign_ins: "" };
 const DATE_TIME = { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" };
 
 // What an entry is about, in words people use
@@ -29,6 +30,7 @@ const ENTITY_LABELS = {
   reminder_settings: "Reminder settings",
   reminders: "Term reminders",
   conversation: "Message",
+  subject: "Subject",
 };
 const ROLE_TONES = { [ROLES.SUPER_ADMIN]: "purple", [ROLES.REGIONAL_ADMIN]: "blue", [ROLES.SCHOOL_MANAGER]: "green" };
 
@@ -41,9 +43,12 @@ const entityText = (type) => ENTITY_LABELS[type] || actionText(type.replace(/_/g
 // Stored in UTC
 const when = (at) => formatDate(at, DATE_TIME);
 
+// Names, notes and reasons are typed by users: a cell starting with = + - @ would run
+// as a formula in Excel, so it is prefixed with ' to stay text
 const csvCell = (value) => {
-  const text = String(value ?? "");
-  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  let text = String(value ?? "");
+  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 };
 
 function downloadCsv(entries) {
@@ -169,13 +174,22 @@ export default function ActivityLog() {
               <SearchInput value={search} onChange={setSearch} placeholder="Name, action or note…" />
             </Field>
           </div>
-          {filtered && (
-            <div style={{ marginTop: 12 }}>
+          <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+            <Switch
+              checked={Boolean(filters.show_sign_ins)}
+              onChange={(on) => {
+                setFilters((f) => ({ ...f, show_sign_ins: on ? "true" : "" }));
+                setPage(1);
+              }}
+            >
+              Show sign-ins
+            </Switch>
+            {filtered && (
               <Button size="sm" variant="ghost" icon="bi-x-circle" onClick={clear}>
                 Clear filters
               </Button>
-            </div>
-          )}
+            )}
+          </div>
         </Card>
 
         {exportError && <Notice tone="red">{exportError}</Notice>}

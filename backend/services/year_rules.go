@@ -66,25 +66,37 @@ func checkYearStarted(ctx context.Context, queries *dbsqlc.Queries, yearID int64
 // checkMarksTerm refuses marks for a term the school has not reached (a later year than
 // the school is in, or a later term of its current year) and, unless canCorrectPast
 // (MCDE), for a year the school has finished. It reports whether yearID is a past year.
-func checkMarksTerm(ctx context.Context, queries *dbsqlc.Queries, schoolID, yearID int64, term int, canCorrectPast bool) (past bool, err error) {
+// marksTerm says whether marks go into a term the school has closed: a finished year,
+// or an earlier term of its current year. Closed terms have saved reports, so only MCDE
+// corrects them, and every correction is audited.
+type marksTerm struct {
+	pastYear bool // a year the school has finished
+	closed   bool // pastYear, or an earlier term of the current year
+}
+
+func checkMarksTerm(ctx context.Context, queries *dbsqlc.Queries, schoolID, yearID int64, term int, canCorrectPast bool) (marksTerm, error) {
 	if err := checkYearStarted(ctx, queries, yearID); err != nil {
-		return false, err
+		return marksTerm{}, err
 	}
 	stage, err := getSchoolStage(ctx, queries, schoolID)
 	if err != nil {
-		return false, err
+		return marksTerm{}, err
 	}
 	year, err := queries.GetAcademicYearByID(ctx, int32(yearID))
 	if err != nil {
-		return false, fmt.Errorf("failed to look up academic year %d: %w", yearID, err)
+		return marksTerm{}, fmt.Errorf("failed to look up academic year %d: %w", yearID, err)
 	}
+	thisYear := int64(year.ID) == stage.AcademicYearID
 	switch {
 	case int(year.Year) > stage.Year:
-		return false, newUserError(ErrYearNotOpen, "The school is still in %d, so it cannot record %d marks yet.", stage.Year, year.Year)
-	case int64(year.ID) == stage.AcademicYearID && term > stage.Term:
-		return false, newUserError(ErrYearNotOpen, "The school is in Term %d of %d. Term %d marks can be entered once it moves to Term %d.", stage.Term, stage.Year, term, term)
+		return marksTerm{}, newUserError(ErrYearNotOpen, "The school is still in %d, so it cannot record %d marks yet.", stage.Year, year.Year)
+	case thisYear && term > stage.Term:
+		return marksTerm{}, newUserError(ErrYearNotOpen, "The school is in Term %d of %d. Term %d marks can be entered once it moves to Term %d.", stage.Term, stage.Year, term, term)
 	case int(year.Year) < stage.Year && !canCorrectPast:
-		return false, newUserError(ErrYearNotOpen, "The school has finished %d, so its marks are locked. Only MCDE (the Learner Support Manager) can correct them.", year.Year)
+		return marksTerm{}, newUserError(ErrYearNotOpen, "The school has finished %d, so its marks are locked. Only MCDE (the Learner Support Manager) can correct them.", year.Year)
+	case thisYear && term < stage.Term && !canCorrectPast:
+		return marksTerm{}, newUserError(ErrYearNotOpen, "Term %d of %d has closed and its report is saved, so its marks are locked. Only MCDE (the Learner Support Manager) can correct them.", term, stage.Year)
 	}
-	return int(year.Year) < stage.Year, nil
+	past := int(year.Year) < stage.Year
+	return marksTerm{pastYear: past, closed: past || (thisYear && term < stage.Term)}, nil
 }

@@ -32,22 +32,22 @@ type CreateTransferRequest struct {
 	FromSchoolID  int64     `json:"from_school" validate:"required"`
 	ToSchoolID    int64     `json:"to_school" validate:"required"`
 	DateInitiated time.Time `json:"date_initiated"`
-	Reason        string    `json:"reason,omitempty"`
+	Reason        string    `json:"reason,omitempty" validate:"max=500"`
 }
 
 type RejectRequest struct {
-	Reason string `json:"reason" validate:"required"`
+	Reason string `json:"reason" validate:"required,max=500"`
 }
 
 // ApproveRequest is the super admin's approval. The note is required because the
 // super admin is approving on the receiving school's behalf.
 type ApproveRequest struct {
-	Note string `json:"note" validate:"required"`
+	Note string `json:"note" validate:"required,max=500"`
 }
 
 // FinalizeRequest is the super admin's finalization, with an optional note.
 type FinalizeRequest struct {
-	Note string `json:"note,omitempty"`
+	Note string `json:"note,omitempty" validate:"max=500"`
 }
 
 // Transfer audit actions, in the order they normally happen.
@@ -68,8 +68,8 @@ type TransferHistoryFilter struct {
 	SchoolID   int64  `query:"school_id" validate:"omitempty,min=1"`
 	DateFrom   string `query:"date_from" validate:"omitempty,datetime=2006-01-02"`
 	DateTo     string `query:"date_to" validate:"omitempty,datetime=2006-01-02"`
-	Search     string `query:"search"`
-	Page       int    `query:"page" validate:"omitempty,min=1"`
+	Search     string `query:"search" validate:"max=100"`
+	Page       int    `query:"page" validate:"omitempty,min=1,max=100000"`
 	PageSize   int    `query:"page_size" validate:"omitempty,min=1,max=200"`
 }
 

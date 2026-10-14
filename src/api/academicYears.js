@@ -14,8 +14,6 @@ export const getActiveAcademicYear = async () =>
 // When each term runs: [{ academic_year_id, year, term, start_date, end_date }]. Schools
 // are reminded as their term ends (see docs/operations.md).
 export const listTermDates = () => client.get("/admin/term_dates").then(list);
-// terms: [{ term, start_date, end_date }]; replaces the year's term dates
-export const setTermDates = (yearId, terms) => client.put(`/admin/academic_years/${yearId}/terms`, { terms }).then(list);
 // Runs the reminder check now. Resolves to { date, sent: { ending, ended, ... }, schools_checked }
 export const sendRemindersNow = () => client.post("/admin/reminders/run").then(data);
 // When reminders go out, in days: { days_before, overdue_after, escalate_after }

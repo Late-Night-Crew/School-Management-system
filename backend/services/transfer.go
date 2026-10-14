@@ -121,6 +121,9 @@ func (s *transferService) CreateTransferRequest(ctx context.Context, req *schema
 	if dateInitiated.IsZero() {
 		dateInitiated = time.Now()
 	}
+	if dateInitiated.After(TodayInMalawi().AddDate(0, 0, 1)) {
+		return nil, ErrTransferFutureDate
+	}
 
 	transferID, err := s.queries.CreateTransferRequest(ctx, dbsqlc.CreateTransferRequestParams{
 		StudentID:     int32(req.StudentID),
@@ -192,6 +195,7 @@ func (s *transferService) ApproveTransfer(ctx context.Context, transferID int64,
 		Note:        common.NullString(note),
 	})
 	transfer, err := s.afterAction(ctx, err, transferID, 0, false)
+	err = s.whyNotApproved(ctx, transferID, err)
 	return s.notifySchools(ctx, transfer, err, schema.TransferActionApproved, true)
 }
 
@@ -202,6 +206,7 @@ func (s *transferService) ApproveTransferForSchool(ctx context.Context, transfer
 		ActorUserID: int32(actorID),
 	})
 	transfer, err := s.afterAction(ctx, err, transferID, schoolID, false)
+	err = s.whyNotApproved(ctx, transferID, err)
 	return s.notifySchools(ctx, transfer, err, schema.TransferActionApproved, false)
 }
 
@@ -542,4 +547,23 @@ func (s *transferService) notifySchools(ctx context.Context, transfer *schema.Tr
 		}
 	}
 	return transfer, nil
+}
+
+// whyNotApproved replaces the generic "invalid state" error of a pending transfer that
+// could not be approved with the reason: the learner left, moved or finished, or the
+// receiving school closed, while the request was waiting.
+func (s *transferService) whyNotApproved(ctx context.Context, transferID int64, err error) error {
+	if !errors.Is(err, ErrTransferInvalidState) {
+		return err
+	}
+	state, stateErr := s.queries.GetTransferApprovalState(ctx, int32(transferID))
+	switch {
+	case stateErr != nil:
+		return err
+	case !state.LearnerOk:
+		return fmt.Errorf("%w (they are no longer a current learner at the sending school; reject the request)", ErrStudentNotActive)
+	case !state.SchoolOpen:
+		return ErrSchoolClosed
+	}
+	return err
 }

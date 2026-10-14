@@ -406,13 +406,17 @@ func (s *termReportService) Get(ctx context.Context, schoolID, yearID int64, ter
 }
 
 func (s *termReportService) Regenerate(ctx context.Context, actorID, schoolID, yearID int64, term int) (*schema.TermReport, error) {
-	if _, err := s.queries.GetTermReport(ctx, dbsqlc.GetTermReportParams{SchoolID: int32(schoolID), AcademicYearID: int32(yearID), Term: int32(term)}); err != nil {
+	old, err := s.queries.GetTermReport(ctx, dbsqlc.GetTermReportParams{SchoolID: int32(schoolID), AcademicYearID: int32(yearID), Term: int32(term)})
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, newUserError(ErrInUse, "This term has no saved report yet; it is saved when the term closes.")
 		}
 		return nil, fmt.Errorf("failed to get term report: %w", err)
 	}
-	if err := saveTermReport(ctx, s.queries, actorID, schoolID, yearID, term, fmt.Sprintf("Term %d report regenerated after marks changed", term)); err != nil {
+	// The previous figures are replaced, so the note keeps them
+	note := fmt.Sprintf("Term %d report regenerated after marks changed (was %d learners, pass rate %s, average %s)",
+		term, old.LearnersAssessed, describeRate(old.PassRate, "%"), describeRate(old.AverageMark, ""))
+	if err := saveTermReport(ctx, s.queries, actorID, schoolID, yearID, term, note); err != nil {
 		return nil, err
 	}
 	return s.Get(ctx, schoolID, yearID, term)
@@ -464,4 +468,12 @@ func (s *termReportService) LearnerProgress(ctx context.Context, schoolID, stude
 		})
 	}
 	return progress, nil
+}
+
+// describeRate is "62.5%" (with unit) or "none" when there was no figure.
+func describeRate(v sql.NullFloat64, unit string) string {
+	if !v.Valid {
+		return "none"
+	}
+	return fmt.Sprintf("%.1f%s", v.Float64, unit)
 }

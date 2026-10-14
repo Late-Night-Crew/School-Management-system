@@ -6,7 +6,6 @@ import {
   listTermDates,
   updateAcademicYear,
 } from "../../api/academicYears";
-import TermDatesDialog from "./TermDatesDialog";
 import ConfirmModal from "../../components/ConfirmModal";
 import DataState from "../../components/DataState";
 import { formatDate } from "../../utils/format";
@@ -32,7 +31,6 @@ const ManageAcademicYears = () => {
   const [alert, setAlert] = useState({ type: "", message: "" });
   const [deleting, setDeleting] = useState(null);
   const [termDates, setTermDates] = useState([]);
-  const [datingYear, setDatingYear] = useState(null);
   const blankTerms = () => [1, 2, 3].map((term) => ({ term, start_date: "", end_date: "" }));
   const [formData, setFormData] = useState({
     year: "",
@@ -40,7 +38,7 @@ const ManageAcademicYears = () => {
     end_date: "",
     status: "Upcoming",
   });
-  // A new year must say when each term runs (edit an existing year's terms with the calendar icon)
+  // When each of the three terms runs, set together with the year's own dates
   const [terms, setTerms] = useState(blankTerms);
   const setTerm = (term, field) => (e) =>
     setTerms((list) => list.map((t) => (t.term === term ? { ...t, [field]: e.target.value } : t)));
@@ -77,6 +75,12 @@ const ManageAcademicYears = () => {
 
   const handleEdit = (item) => {
     setEditingItem(item);
+    setTerms(
+      blankTerms().map((t) => {
+        const saved = termDates.find((d) => d.academic_year_id === item.id && d.term === t.term);
+        return saved ? { ...t, start_date: saved.start_date, end_date: saved.end_date } : t;
+      })
+    );
     setFormData({
       year: item.year,
       start_date: item.start_date,
@@ -108,14 +112,17 @@ const ManageAcademicYears = () => {
       // Ensure 'year' is sent as an integer
       const payload = { ...formData, year: parseInt(formData.year, 10) };
   
+      const anyTerm = terms.some((t) => t.start_date || t.end_date);
+      const allTerms = terms.every((t) => t.start_date && t.end_date);
+      // A new year needs all three terms; an older year without term dates may stay so
+      if ((!editingItem || anyTerm) && !allTerms) {
+        showAlert("danger", "Give the start and end date of all three terms.");
+        return;
+      }
       if (editingItem) {
-        await updateAcademicYear(editingItem.id, payload);
+        await updateAcademicYear(editingItem.id, { ...payload, ...(allTerms ? { terms } : {}) });
         showAlert("success", `Academic Year ${payload.year} updated successfully.`);
       } else {
-        if (terms.some((t) => !t.start_date || !t.end_date)) {
-          showAlert("danger", "Give the start and end date of all three terms.");
-          return;
-        }
         await createAcademicYear({ ...payload, terms });
         showAlert("success", `Academic Year ${payload.year} created successfully.`);
       }
@@ -161,7 +168,7 @@ const ManageAcademicYears = () => {
           title={editingItem ? `Update Academic Year ${editingItem.year}` : "Create New Academic Year"}
           subtitle={
             editingItem
-              ? "Change the year's dates; its term dates are edited with the calendar icon in the list"
+              ? "Change the year's dates and its terms' dates together. Schools cannot move to the next term before it ends, and are reminded as it ends."
               : "Set when the year and each of its three terms start and end. Schools cannot move to the next term before it ends, and are reminded as it ends."
           }
           footer={
@@ -199,20 +206,18 @@ const ManageAcademicYears = () => {
               <Input value={statusFor(formData.start_date, formData.end_date)} readOnly />
             </Field>
           </div>
-          {!editingItem && (
-            <div className="ui-grid ui-cols-3 mt-3">
-              {terms.map((t) => (
-                <div key={t.term} className="ui-grid ui-cols-2">
-                  <Field label={`Term ${t.term} starts`} required>
-                    <Input type="date" min={formData.start_date} max={formData.end_date} value={t.start_date} onChange={setTerm(t.term, "start_date")} required />
-                  </Field>
-                  <Field label={`Term ${t.term} ends`} required>
-                    <Input type="date" min={t.start_date || formData.start_date} max={formData.end_date} value={t.end_date} onChange={setTerm(t.term, "end_date")} required />
-                  </Field>
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="ui-grid ui-cols-3 mt-3">
+            {terms.map((t) => (
+              <div key={t.term} className="ui-grid ui-cols-2">
+                <Field label={`Term ${t.term} starts`} required={!editingItem}>
+                  <Input type="date" min={formData.start_date} max={formData.end_date} value={t.start_date} onChange={setTerm(t.term, "start_date")} required={!editingItem} />
+                </Field>
+                <Field label={`Term ${t.term} ends`} required={!editingItem}>
+                  <Input type="date" min={t.start_date || formData.start_date} max={formData.end_date} value={t.end_date} onChange={setTerm(t.term, "end_date")} required={!editingItem} />
+                </Field>
+              </div>
+            ))}
+          </div>
         </Card>
       </form>
 
@@ -251,7 +256,6 @@ const ManageAcademicYears = () => {
                     {!termDates.some((t) => t.academic_year_id === item.id) && <span className="ui-hint">Not set</span>}
                   </td>
                   <td className="end">
-                    <IconButton kind="view" icon="bi-calendar3-range" title={`Set term dates for ${item.year}`} tip="Term dates" onClick={() => setDatingYear(item)} />
                     <IconButton kind="edit" title={`Edit ${item.year}`} onClick={() => handleEdit(item)} />
                     <IconButton kind="delete" title={`Delete ${item.year}`} onClick={() => setDeleting(item)} />
                   </td>
@@ -261,17 +265,6 @@ const ManageAcademicYears = () => {
           </Table>
         </DataState>
       </Card>
-
-      <TermDatesDialog
-        year={datingYear}
-        dates={termDates}
-        onHide={() => setDatingYear(null)}
-        onSaved={(message) => {
-          setDatingYear(null);
-          fetchTermDates();
-          showAlert("success", message);
-        }}
-      />
 
       <ConfirmModal
         show={!!deleting}

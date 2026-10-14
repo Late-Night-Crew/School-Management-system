@@ -100,7 +100,7 @@ func (api *API) adminRoutes() {
 	adminApi.Get("/academic_years/:id", admin.GetAcademicYearByID(api.AcademicYearService, api.logger))
 	// A new year comes with its term dates; an edit may not leave a term outside the year
 	adminApi.Post("/academic_years", superAdmin, promotion.CreateAcademicYear(api.Reminders, api.logger))
-	adminApi.Put("/academic_years/:id", superAdmin, promotion.CheckYearDates(api.Reminders, api.logger), admin.UpdateAcademicYear(api.AcademicYearService, api.logger))
+	adminApi.Put("/academic_years/:id", superAdmin, promotion.UpdateAcademicYear(api.Reminders, api.logger))
 	adminApi.Delete("/academic_years/:id", superAdmin, admin.DeleteAcademicYear(api.AcademicYearService, api.logger))
 
 	adminApi.Get("/subjects", admin.GetSubjectList(api.SubjectService, api.logger))
@@ -152,7 +152,6 @@ func (api *API) adminRoutes() {
 
 	// Term dates (read by every role) and the reminders sent from them
 	adminApi.Get("/term_dates", promotion.ListTermDates(api.Reminders, api.logger))
-	adminApi.Put("/academic_years/:id/terms", superAdmin, promotion.SetTermDates(api.Reminders, api.logger))
 	adminApi.Post("/reminders/run", superAdmin, promotion.SendRemindersNow(api.Reminders, api.logger))
 	adminApi.Get("/reminder_settings", superAdmin, promotion.GetReminderSettings(api.Reminders, api.logger))
 	adminApi.Put("/reminder_settings", superAdmin, promotion.UpdateReminderSettings(api.Reminders, api.logger))

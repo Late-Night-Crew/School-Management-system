@@ -54,7 +54,9 @@ func (api *API) middleware() {
 // the password are allowed.
 func RequireAuthentication(signingKey []byte, accounts services.AccountService) fiber.Handler {
 	return jwtware.New(jwtware.Config{
-		TokenLookup:  "header:Authorization,query:_auth,cookie:_qatarina_auth",
+		// Only the header: tokens in URLs leak into proxy logs, and a cookie would
+		// make cross-site requests carry the session
+		TokenLookup:  "header:Authorization",
 		SigningKey:   signingKey,
 		ErrorHandler: jwtError,
 		SuccessHandler: func(ctx *fiber.Ctx) error {
@@ -69,6 +71,8 @@ func RequireAuthentication(signingKey []byte, accounts services.AccountService) 
 			if !active {
 				return problemdetail.Unauthorized(ctx, "This account has been deactivated")
 			}
+			// Lets services record who made a change (see services.ActorKey)
+			ctx.Context().SetUserValue(services.ActorKey, userID)
 			if mustChangePassword && !allowedWithTemporaryPassword(ctx) {
 				return ctx.Status(fiber.StatusForbidden).JSON(problemdetail.ProblemDetail{
 					Type:   "problemdetail.example.com/http/types/PasswordChangeRequired",

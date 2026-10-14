@@ -38,10 +38,8 @@ func NewPasswordRequestService(queries *dbsqlc.Queries, accounts AccountService,
 }
 
 func (s *passwordRequestService) Request(ctx context.Context, req *schema.PasswordRequest, ip string) error {
-	phone, err := common.NormalizeMalawiPhone(strings.TrimSpace(req.ContactPhone))
-	if err != nil {
-		return err
-	}
+	// No call-back number is taken: anyone who knows the email can send a request, so
+	// the office calls the number registered on the account
 	params := dbsqlc.FindAccountForPasswordRequestParams{Email: strings.TrimSpace(req.Email), Role: req.Role}
 	if req.Role == schema.RoleRegionalAdmin {
 		params.RegionID = nullID(req.RegionID)
@@ -59,7 +57,6 @@ func (s *passwordRequestService) Request(ctx context.Context, req *schema.Passwo
 	err = s.queries.CreatePasswordRequest(ctx, dbsqlc.CreatePasswordRequestParams{
 		UserID:          account.ID,
 		HandlerRegionID: nullID(int64(account.HandlerRegionID)),
-		ContactPhone:    common.NullString(phone),
 		Note:            common.NullString(strings.TrimSpace(req.Note)),
 		RequesterIp:     common.NullString(ip),
 	})
@@ -124,7 +121,6 @@ func (s *passwordRequestService) List(ctx context.Context, actor schema.Actor) (
 			RegionName:   row.RegionName,
 			Phone:        row.Phone.String,
 			WhatsApp:     row.Whatsapp.String,
-			ContactPhone: row.ContactPhone.String,
 			Note:         row.Note.String,
 			CreatedAt:    row.CreatedAt.Format(transferTimeFormat),
 		})

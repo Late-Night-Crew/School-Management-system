@@ -7,7 +7,6 @@ type PasswordRequest struct {
 	Email        string `json:"email" validate:"required,email,max=150"`
 	RegionID     int64  `json:"region_id" validate:"required_if=Role REGIONAL_ADMIN"`
 	SchoolID     int64  `json:"school_id" validate:"required_if=Role SCHOOL_MANAGER"`
-	ContactPhone string `json:"contact_phone" validate:"max=30"`
 	Note         string `json:"note" validate:"max=500"`
 }
 
@@ -22,7 +21,6 @@ type PasswordRequestItem struct {
 	RegionName   string `json:"region_name,omitempty"`
 	Phone        string `json:"phone,omitempty"`
 	WhatsApp     string `json:"whatsapp,omitempty"`
-	ContactPhone string `json:"contact_phone,omitempty"`
 	Note         string `json:"note,omitempty"`
 	CreatedAt    string `json:"created_at"`
 }
