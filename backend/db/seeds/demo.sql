@@ -149,6 +149,18 @@ JOIN generate_series(1, 3) AS t(term)
 WHERE s.student_number LIKE 'DEMO-%'
 ON CONFLICT (student_id, subject_id, academic_year_id, term) DO NOTHING;
 
+-- 2025 has ended: record each learner's move up a form, as the year end would. Term
+-- reports for 2025 read a learner's form that year from here.
+INSERT INTO promotions (student_id, school_id, academic_year_id, from_form, to_form, subjects_passed, outcome, automatic)
+SELECT s.id, s.school_id, ay.id, s.form_level - 1, s.form_level,
+    (SELECT COUNT(*) FROM student_marks m
+     WHERE m.student_id = s.id AND m.academic_year_id = ay.id AND m.term = 3 AND m.mark >= 40),
+    'Promoted', TRUE
+FROM students s
+JOIN academic_years ay ON ay.year = 2025
+WHERE s.student_number LIKE 'DEMO-%' AND s.form_level >= 2
+ON CONFLICT (student_id, academic_year_id) DO NOTHING;
+
 INSERT INTO exam_results (school_id, academic_year_id, jce_pass_rate, msce_pass_rate)
 SELECT sc.id, ay.id, round((55 + random() * 35)::numeric, 2), round((40 + random() * 40)::numeric, 2)
 FROM schools sc

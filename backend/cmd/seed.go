@@ -10,8 +10,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"nsms/common"
+	"nsms/database/dbsqlc"
 	"nsms/db"
 	"nsms/schema"
+	"nsms/services"
 )
 
 const demoEmailDomain = "nsms.demo"
@@ -147,15 +149,52 @@ func seedDemoData(ctx context.Context, dbConn *sqlx.DB, password string) error {
 		}
 	}
 
+	reports, err := saveDemoTermReports(ctx, tx)
+	if err != nil {
+		return err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return err
 	}
 
-	fmt.Println("Demo data loaded.")
+	fmt.Printf("Demo data loaded, with %d term reports for the closed terms.\n", reports)
 	fmt.Printf("\nLogins created (password: %s):\n%s\n", password, strings.Join(created, "\n"))
 	if len(skipped) > 0 {
 		fmt.Printf("\nSkipped because the email or role slot is already taken (e.g. an existing division admin):\n%s\n",
 			strings.Join(skipped, "\n"))
 	}
 	return nil
+}
+
+// saveDemoTermReports saves a report for every closed term the demo marks cover
+// (every term with marks except the one each school is in now), as closing each term in
+// the app would. The dashboards' charts and the schools' Terms lists read these reports.
+func saveDemoTermReports(ctx context.Context, tx *sqlx.Tx) (int, error) {
+	var actorID int64
+	if err := tx.GetContext(ctx, &actorID, `SELECT id FROM users WHERE email = $1`, "admin@"+demoEmailDomain); err != nil {
+		return 0, fmt.Errorf("failed to find the demo super admin: %w", err)
+	}
+	var terms []struct {
+		SchoolID int64 `db:"school_id"`
+		YearID   int64 `db:"academic_year_id"`
+		Term     int   `db:"term"`
+	}
+	if err := tx.SelectContext(ctx, &terms, `
+		SELECT DISTINCT m.school_id, m.academic_year_id, m.term
+		FROM student_marks m
+			JOIN schools sc ON sc.id = m.school_id
+			LEFT JOIN school_stages st ON st.school_id = m.school_id
+		WHERE sc.school_number LIKE 'DEMO-%'
+			AND (st.school_id IS NULL OR (m.academic_year_id, m.term) <> (st.academic_year_id, st.term))
+		ORDER BY 1, 2, 3`); err != nil {
+		return 0, fmt.Errorf("failed to list the demo terms: %w", err)
+	}
+	queries := dbsqlc.New(tx)
+	for _, t := range terms {
+		if err := services.SaveTermReport(ctx, queries, actorID, t.SchoolID, t.YearID, t.Term, "Demo data"); err != nil {
+			return 0, fmt.Errorf("failed to save the term report for school %d, term %d: %w", t.SchoolID, t.Term, err)
+		}
+	}
+	return len(terms), nil
 }

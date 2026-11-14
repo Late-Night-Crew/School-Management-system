@@ -220,6 +220,12 @@ func saveTermReport(ctx context.Context, queries *dbsqlc.Queries, actorID, schoo
 	return saveTermReportWith(ctx, queries, rules, actorID, schoolID, yearID, term, note)
 }
 
+// SaveTermReport saves (or replaces) a school's report for a closed term, as closing
+// the term does. The demo seed uses it for the terms its marks cover.
+func SaveTermReport(ctx context.Context, queries *dbsqlc.Queries, actorID, schoolID, yearID int64, term int, note string) error {
+	return saveTermReport(ctx, queries, actorID, schoolID, yearID, term, note)
+}
+
 // saveTermReportWith is saveTermReport with the pass rules already loaded (when many
 // schools close a term at once).
 func saveTermReportWith(ctx context.Context, queries *dbsqlc.Queries, rules passRules, actorID, schoolID, yearID int64, term int, note string) error {
