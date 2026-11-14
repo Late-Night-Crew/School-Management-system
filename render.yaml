@@ -1,0 +1,41 @@
+# Render blueprint for the demo: the Go API plus a PostgreSQL database, seeded with
+# the demo data. The frontend is on Vercel (vercel.json). See docs/deploy-demo.md.
+# Never point this at real learners' data: the demo logins have a published password.
+
+databases:
+  - name: oss-demo-db
+    databaseName: nsms
+    user: nsms
+    plan: free
+    region: frankfurt
+
+services:
+  - type: web
+    name: oss-demo-api
+    runtime: docker
+    plan: free
+    region: frankfurt
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /public/places
+    autoDeploy: false
+    envVars:
+      - key: NSMS_DB_HOST
+        fromDatabase: { name: oss-demo-db, property: host }
+      - key: NSMS_DB_PORT
+        fromDatabase: { name: oss-demo-db, property: port }
+      - key: NSMS_DB_NAME
+        fromDatabase: { name: oss-demo-db, property: database }
+      - key: NSMS_DB_USER
+        fromDatabase: { name: oss-demo-db, property: user }
+      - key: NSMS_DATABASE_PASSWORD
+        fromDatabase: { name: oss-demo-db, property: password }
+      - key: NSMS_DB_SSLMODE
+        value: disable        # the internal hostname is on Render's private network
+      - key: NSMS_JWT_SECRET
+        generateValue: true
+      - key: NSMS_DEMO_SEED
+        value: "true"
+      - key: NSMS_DEMO_PASSWORD
+        value: Demo@2026

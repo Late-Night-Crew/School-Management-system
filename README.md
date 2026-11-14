@@ -20,3 +20,6 @@ cd .. && npm install && npm run dev                # frontend; set VITE_NSMS_URL
 
 See [docs/operations.md](docs/operations.md): settings, first admin, backups and
 password recovery.
+
+For the public demo (Render + Vercel, demo data only), see
+[docs/deploy-demo.md](docs/deploy-demo.md).
