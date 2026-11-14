@@ -102,9 +102,12 @@ export default function UnifiedAppShell() {
                 </button>
               )}
 
-              <div>
+              <div style={styles.titleText}>
                 <span style={styles.meta}>Open Secondary School</span>
-                <h1 style={styles.title}>{getTitle()}</h1>
+                {/* One line in the fixed-height bar: long titles end in "…" (full text on hover) */}
+                <h1 style={{ ...styles.title, ...(isMobile ? styles.titleMobile : {}) }} title={getTitle()}>
+                  {getTitle()}
+                </h1>
               </div>
             </div>
 
@@ -176,6 +179,7 @@ const styles = {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
+    gap: "12px",
     padding: "14px 18px",
     background: "#ffffff",
     borderBottom: "1px solid #e2e8f0",
@@ -184,8 +188,14 @@ const styles = {
     display: "flex",
     alignItems: "center",
     gap: "12px",
+    flex: 1,
+    minWidth: 0,
+  },
+  titleText: {
+    minWidth: 0,
   },
   menuButton: {
+    flexShrink: 0,
     width: "40px",
     height: "40px",
     borderRadius: "12px",
@@ -207,8 +217,15 @@ const styles = {
     fontSize: "20px",
     fontWeight: "600",
     color: "#0f172a",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  titleMobile: {
+    fontSize: "17px",
   },
   avatar: {
+    flexShrink: 0,
     width: "42px",
     height: "42px",
     borderRadius: "50%",

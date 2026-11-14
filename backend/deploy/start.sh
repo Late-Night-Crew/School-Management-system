@@ -42,7 +42,17 @@ logging:
 EOF
 
 echo "==> Migrating the database"
-./nsms migrate
+# The database may still be starting (first deploy, or after a restart): retry for a minute
+tries=0
+until ./nsms migrate; do
+  tries=$((tries + 1))
+  if [ "$tries" -ge 12 ]; then
+    echo "    Migration failed 12 times; giving up"
+    exit 1
+  fi
+  echo "    Database not ready; retrying in 5 seconds"
+  sleep 5
+done
 
 if [ "${NSMS_DEMO_SEED:-false}" = "true" ]; then
   # The seed refuses PRODUCTION, so it alone runs as DEVELOPMENT. It runs in one

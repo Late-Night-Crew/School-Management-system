@@ -290,7 +290,8 @@
 .ui-select { appearance: none; padding-right: 32px; cursor: pointer; }
 .ui-textarea { resize: vertical; min-height: 84px; }
 
-.ui-search { position: relative; flex: 1; min-width: 220px; }
+/* 220px wide where there is room, but never wider than its grid cell or container */
+.ui-search { position: relative; flex: 1; min-width: min(220px, 100%); }
 .ui-search i {
   position: absolute;
   left: 13px;
@@ -304,7 +305,7 @@
 .ui-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 /* Segmented choice (e.g. term 1/2/3) */
-.ui-segmented { display: inline-flex; gap: 4px; background: #f3f4f6; border-radius: 10px; padding: 4px; }
+.ui-segmented { display: inline-flex; flex-wrap: wrap; max-width: 100%; gap: 4px; background: #f3f4f6; border-radius: 10px; padding: 4px; }
 .ui-segmented button {
   border: none;
   background: transparent;
